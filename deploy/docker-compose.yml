@@ -1,0 +1,75 @@
+name: inspiration
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: inspiration
+      POSTGRES_PASSWORD: inspiration
+      POSTGRES_DB: inspiration
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inspiration"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio:/data"]   # 数据卷 inspiration_minio(历史已有数据)
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    env_file: ../backend/.env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://inspiration:inspiration@postgres:5432/inspiration
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+    command: ["./docker-entrypoint.sh"]
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+      minio: { condition: service_started }
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    env_file: ../backend/.env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://inspiration:inspiration@postgres:5432/inspiration
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "-l", "info"]
+    depends_on:
+      api: { condition: service_started }
+
+  web:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports: ["5173:80"]
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  pgdata:
+  minio:

@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ════════════════════════════════════════════════════════════════
+   设计令牌 v2 · 影院级控制台(Studio Cockpit)
+   深空蓝黑底 + 琥珀金主强调 + 青蓝次强调;深色为主、浅色可切
+   详见 docs/07-UI重构方案v2-影院级控制台.md
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── 深色(主)── */
+:root,
+.dark {
+  --bg: 218 38% 5%; /* 近黑微蓝 */
+  --bg-glow: 222 60% 12%; /* 顶部辉光 */
+  --surface: 220 32% 8%; /* 顶栏/侧栏 */
+  --card: 218 28% 13%; /* 卡片 */
+  --elevated: 217 26% 17%; /* 输入/悬浮 */
+  --border: 216 24% 19%; /* 描边 */
+  --border-strong: 214 22% 26%;
+  --fg: 213 30% 94%; /* 主文字 */
+  --muted: 215 16% 62%; /* 次要文字 */
+  --faint: 216 14% 44%; /* 三级文字 */
+
+  /* 主强调:琥珀金(影院灯光感)*/
+  --primary: 38 78% 64%;
+  --primary-strong: 34 72% 52%;
+  --primary-fg: 36 60% 8%;
+  --primary-glow: 38 90% 60%;
+  /* 次强调:青蓝(工作流/科技感)*/
+  --accent: 188 64% 56%;
+  --accent-fg: 195 80% 8%;
+
+  --success: 158 58% 56%;
+  --warning: 38 92% 60%;
+  --danger: 2 80% 66%;
+  --info: 210 90% 68%;
+  --ring: 38 78% 64%;
+}
+
+/* ── 浅色(次)── */
+.light {
+  --bg: 220 30% 96%;
+  --bg-glow: 40 60% 92%;
+  --surface: 0 0% 100%;
+  --card: 0 0% 100%;
+  --elevated: 220 24% 97%;
+  --border: 220 18% 88%;
+  --border-strong: 220 16% 80%;
+  --fg: 220 35% 14%;
+  --muted: 220 12% 40%;
+  --faint: 220 10% 56%;
+
+  --primary: 34 76% 44%;
+  --primary-strong: 32 80% 38%;
+  --primary-fg: 0 0% 100%;
+  --primary-glow: 36 80% 55%;
+  --accent: 190 70% 38%;
+  --accent-fg: 0 0% 100%;
+
+  --success: 158 64% 36%;
+  --warning: 34 90% 42%;
+  --danger: 2 72% 50%;
+  --info: 210 80% 46%;
+  --ring: 34 76% 44%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  /* 影院级辉光底:顶部冷光晕 + 底部暖金晕 + 基底 */
+  background:
+    radial-gradient(1200px 620px at 72% -12%, hsl(var(--bg-glow) / 0.55), transparent 60%),
+    radial-gradient(900px 520px at 8% 112%, hsl(var(--primary) / 0.06), transparent 55%),
+    hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 等宽编号/时间码/分辨率徽章字体(工业感) */
+.font-code,
+.font-mono-tnum {
+  font-family: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-feature-settings: "tnum";
+}
+
+/* 玻璃面板背景(半透明 + 模糊由组件加 backdrop-blur) */
+.glass {
+  background: linear-gradient(180deg, hsl(var(--card) / 0.6), hsl(var(--surface) / 0.6));
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--border-strong));
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

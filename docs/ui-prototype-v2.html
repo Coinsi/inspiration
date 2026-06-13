@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Inspiration · UI v2 原型 / Prototype</title>
+<style>
+/* ============================================================
+   Inspiration — UI v2 设计令牌原型（影院级控制台 / Studio Cockpit）
+   纯静态：演示 深色/浅色 + 中/英 切换、面板栅格、强调色体系
+   ============================================================ */
+
+/* ---------- 深色（主）---------- */
+:root, .dark {
+  --bg:            218 38% 5%;     /* 近黑微蓝 */
+  --bg-glow:       222 60% 12%;    /* 顶部辉光 */
+  --surface:       220 32% 8%;     /* 侧栏/顶栏 */
+  --panel:         219 30% 10%;    /* 面板底 */
+  --card:          218 28% 13%;    /* 卡片 */
+  --elevated:      217 26% 17%;    /* 悬浮/输入 */
+  --border:        216 24% 19%;    /* 描边 */
+  --border-strong: 214 22% 26%;
+  --fg:            213 30% 94%;    /* 主文字 */
+  --muted:         215 16% 62%;    /* 次要文字 */
+  --faint:         216 14% 44%;    /* 三级文字 */
+
+  /* 主强调：琥珀金（影院灯光感）*/
+  --primary:       38 78% 64%;
+  --primary-strong:34 72% 52%;
+  --primary-fg:    36 60% 8%;
+  --primary-glow:  38 90% 60%;
+  /* 次强调：青蓝（工作流/科技感）*/
+  --accent:        188 64% 56%;
+  --accent-fg:     195 80% 8%;
+
+  --success: 158 58% 56%;
+  --warning: 38 92% 60%;
+  --danger:  2 80% 66%;
+  --info:    210 90% 68%;
+
+  --ring: 38 78% 64%;
+  --shadow: 0 8px 30px -12px rgba(0,0,0,.7);
+  --glass: linear-gradient(180deg, hsl(218 30% 14% / .6), hsl(218 32% 9% / .6));
+}
+
+/* ---------- 浅色（次）---------- */
+.light {
+  --bg:            220 30% 96%;
+  --bg-glow:       40 60% 92%;
+  --surface:       0 0% 100%;
+  --panel:         220 30% 99%;
+  --card:          0 0% 100%;
+  --elevated:      220 24% 97%;
+  --border:        220 18% 88%;
+  --border-strong: 220 16% 80%;
+  --fg:            220 35% 14%;
+  --muted:         220 12% 40%;
+  --faint:         220 10% 56%;
+
+  --primary:       34 76% 44%;
+  --primary-strong:32 80% 38%;
+  --primary-fg:    0 0% 100%;
+  --primary-glow:  36 80% 55%;
+  --accent:        190 70% 38%;
+  --accent-fg:     0 0% 100%;
+
+  --success: 158 64% 36%;
+  --warning: 34 90% 42%;
+  --danger:  2 72% 50%;
+  --info:    210 80% 46%;
+
+  --ring: 34 76% 44%;
+  --shadow: 0 8px 24px -14px rgba(30,40,60,.35);
+  --glass: linear-gradient(180deg, hsl(0 0% 100% / .85), hsl(220 30% 99% / .85));
+}
+
+* { box-sizing: border-box; border-color: hsl(var(--border)); margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.mono { font-family: "JetBrains Mono","SF Mono",Consolas,monospace; font-feature-settings:"tnum"; }
+
+/* 全局辉光背景 */
+.app {
+  position: relative; height: 100vh; display: flex; overflow: hidden;
+  background:
+    radial-gradient(1200px 600px at 70% -10%, hsl(var(--bg-glow) / .55), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, hsl(var(--primary) / .06), transparent 55%),
+    hsl(var(--bg));
+}
+
+/* ---------- 左侧图标导航栏 ---------- */
+.rail {
+  width: 60px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+  padding: 12px 0; gap: 4px; background: hsl(var(--surface) / .7);
+  backdrop-filter: blur(8px); border-right: 1px solid hsl(var(--border));
+}
+.rail .logo {
+  width: 38px; height: 38px; border-radius: 11px; margin-bottom: 10px;
+  display: grid; place-items: center; font-size: 18px;
+  background: radial-gradient(circle at 30% 30%, hsl(var(--primary)), hsl(var(--primary-strong)));
+  box-shadow: 0 0 18px -2px hsl(var(--primary-glow) / .55);
+}
+.rail button {
+  width: 40px; height: 40px; border-radius: 10px; border: none; cursor: pointer;
+  background: transparent; color: hsl(var(--muted)); display: grid; place-items: center;
+  font-size: 16px; transition: all .15s; position: relative;
+}
+.rail button:hover { background: hsl(var(--elevated)); color: hsl(var(--fg)); }
+.rail button.active { color: hsl(var(--primary)); background: hsl(var(--primary) / .12); }
+.rail button.active::before {
+  content:""; position:absolute; left:-12px; top:9px; bottom:9px; width:3px; border-radius:3px;
+  background: hsl(var(--primary)); box-shadow: 0 0 10px hsl(var(--primary-glow));
+}
+.rail .spacer { flex: 1; }
+.rail .label { font-size: 8px; margin-top: 1px; letter-spacing: .02em; }
+.rail .navitem { display:flex; flex-direction:column; align-items:center; }
+
+/* ---------- 主区 ---------- */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* 顶栏 */
+.topbar {
+  height: 58px; flex-shrink: 0; display: flex; align-items: center; gap: 14px;
+  padding: 0 18px; border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--surface) / .55); backdrop-filter: blur(10px);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .title { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.brand .sub { font-size: 11px; color: hsl(var(--muted)); }
+.topbar .grow { flex: 1; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px;
+  border-radius: 8px; border: 1px solid hsl(var(--border)); background: hsl(var(--card));
+  color: hsl(var(--muted)); font-size: 12px; cursor: pointer; transition: all .15s;
+}
+.chip:hover { border-color: hsl(var(--border-strong)); color: hsl(var(--fg)); }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--success)); box-shadow:0 0 8px hsl(var(--success)); }
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 15px;
+  border-radius: 9px; border: none; cursor: pointer; font-weight: 600; font-size: 12.5px;
+  color: hsl(var(--primary-fg));
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-strong)));
+  box-shadow: 0 0 18px -4px hsl(var(--primary-glow) / .7);
+}
+.btn-primary:hover { filter: brightness(1.06); }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: hsl(var(--primary-fg));
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+}
+
+/* 工作台栅格 */
+.workbench {
+  flex: 1; overflow: auto; padding: 16px;
+  display: grid; gap: 14px;
+  grid-template-columns: 1.05fr 1fr 1fr;
+  grid-template-rows: auto auto auto;
+  grid-template-areas:
+    "script flow roster"
+    "timeline timeline scenes"
+    "preview preview info";
+}
+.panel {
+  background: var(--glass); border: 1px solid hsl(var(--border)); border-radius: 14px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden;
+}
+.panel > .head {
+  height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding: 0 13px; border-bottom: 1px solid hsl(var(--border));
+}
+.panel .head .h-title { font-weight: 600; font-size: 12.5px; }
+.panel .head .grow { flex: 1; }
+.panel .head .ico { color: hsl(var(--faint)); cursor: pointer; font-size: 13px; }
+.panel .body { padding: 13px; flex: 1; overflow: auto; }
+
+.a-script { grid-area: script; }
+.a-flow { grid-area: flow; }
+.a-roster { grid-area: roster; }
+.a-timeline { grid-area: timeline; }
+.a-scenes { grid-area: scenes; }
+.a-preview { grid-area: preview; }
+.a-info { grid-area: info; }
+
+/* 脚本编辑 */
+.script-toolbar { display:flex; gap:4px; margin-bottom:10px; }
+.script-toolbar span { width:24px; height:24px; border-radius:6px; display:grid; place-items:center; color:hsl(var(--muted)); background:hsl(var(--elevated)); font-size:11px; cursor:pointer; }
+.script-text { font-size: 12.5px; line-height: 1.7; }
+.script-text .scene-h { color: hsl(var(--primary)); font-weight: 600; }
+.script-text .cue { color: hsl(var(--accent)); }
+.script-text .muted { color: hsl(var(--muted)); }
+.script-text p { margin-bottom: 7px; }
+
+/* 工作流节点图 */
+.flow-canvas { position: relative; height: 100%; min-height: 220px; }
+.node {
+  position: absolute; padding: 7px 13px; border-radius: 9px; font-size: 11.5px; font-weight: 600;
+  border: 1px solid hsl(var(--accent) / .5); background: hsl(var(--accent) / .1); color: hsl(var(--fg));
+  white-space: nowrap;
+}
+.node.gold { border-color: hsl(var(--primary) / .6); background: hsl(var(--primary) / .12); }
+.node.active { box-shadow: 0 0 0 1px hsl(var(--primary)), 0 0 16px -2px hsl(var(--primary-glow)/.6); border-color: hsl(var(--primary)); }
+.flow-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.flow-foot { font-size: 10.5px; color: hsl(var(--faint)); margin-top: 8px; }
+
+/* 角色一览 */
+.roster { display: flex; flex-direction: column; gap: 9px; }
+.char-card { display: flex; gap: 10px; padding: 9px; border-radius: 11px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); transition: all .15s; cursor: pointer; }
+.char-card:hover { border-color: hsl(var(--primary)/.5); transform: translateY(-1px); }
+.char-portrait { width: 46px; height: 56px; border-radius: 8px; flex-shrink: 0; background: linear-gradient(160deg, hsl(var(--accent)/.5), hsl(var(--primary)/.4)); display:grid; place-items:center; font-size:18px; }
+.char-meta { min-width: 0; flex: 1; }
+.char-name { font-weight: 600; font-size: 13px; display:flex; align-items:center; gap:6px; }
+.char-tag { font-size: 9px; padding: 1px 6px; border-radius: 999px; font-weight: 600; }
+.tag-lead { background: hsl(var(--primary)/.18); color: hsl(var(--primary)); }
+.tag-supp { background: hsl(var(--accent)/.18); color: hsl(var(--accent)); }
+.char-desc { font-size: 11px; color: hsl(var(--muted)); margin-top: 3px; }
+
+/* 分镜时间轴 */
+.tl-ruler { display:flex; gap:0; font-size:10px; color:hsl(var(--faint)); margin-bottom:8px; }
+.tl-ruler span { flex:1; }
+.shots { display: flex; gap: 9px; overflow-x: auto; padding-bottom: 4px; }
+.shot { width: 116px; flex-shrink: 0; }
+.shot .thumb { height: 76px; border-radius: 9px; border:1px solid hsl(var(--border)); background: linear-gradient(150deg, hsl(220 40% 18%), hsl(200 40% 12%)); position:relative; overflow:hidden; }
+.shot .thumb::after { content:""; position:absolute; inset:0; background: radial-gradient(60px 60px at 50% 40%, hsl(var(--accent)/.25), transparent); }
+.shot.active .thumb { border-color: hsl(var(--primary)); box-shadow: 0 0 0 1px hsl(var(--primary)); }
+.shot .cap { font-size: 10.5px; color: hsl(var(--muted)); text-align: center; margin-top: 5px; }
+
+/* 场景管理 */
+.scenes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.scene-card { border-radius: 10px; overflow: hidden; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); cursor: pointer; transition: all .15s; }
+.scene-card:hover { border-color: hsl(var(--primary)/.5); }
+.scene-card .img { height: 58px; background: linear-gradient(150deg, hsl(210 45% 16%), hsl(190 50% 10%)); position:relative; }
+.scene-card .badge { position:absolute; top:5px; right:5px; width:16px; height:16px; border-radius:5px; background: hsl(var(--bg)/.7); color: hsl(var(--primary)); display:grid; place-items:center; font-size:9px; font-weight:700; }
+.scene-card .lbl { padding: 6px 8px; }
+.scene-card .lbl b { font-size: 11px; }
+.scene-card .lbl small { display:block; color: hsl(var(--muted)); font-size: 9.5px; }
+.scene-tag { display:inline-block; font-size:8.5px; padding:1px 5px; border-radius:999px; background:hsl(var(--success)/.18); color:hsl(var(--success)); margin-bottom:4px; }
+
+/* 成片预览 */
+.preview-wrap { display:flex; flex-direction:column; height:100%; }
+.player { flex:1; min-height: 200px; border-radius: 11px; position: relative; overflow: hidden; border:1px solid hsl(var(--border));
+  background:
+    radial-gradient(400px 240px at 50% 30%, hsl(210 60% 30% / .5), transparent),
+    linear-gradient(180deg, hsl(218 45% 12%), hsl(220 50% 6%)); }
+.player .silhouette { position:absolute; left:50%; top:38%; transform:translateX(-50%); width:60px; height:130px; border-radius:40px 40px 0 0; background: linear-gradient(180deg, hsl(220 30% 4% /.85), hsl(220 30% 2% /.95)); }
+.player .moon { position:absolute; right:22%; top:14%; width:70px; height:70px; border-radius:50%; background: radial-gradient(circle at 40% 40%, hsl(40 40% 88%), hsl(35 30% 60%)); opacity:.55; filter: blur(.5px); }
+.jelly { position:absolute; border-radius:50% 50% 45% 45%; background: radial-gradient(circle at 50% 30%, hsl(var(--accent)/.5), transparent 70%); }
+.player-bar { display:flex; align-items:center; gap:10px; padding:9px 11px; }
+.play-btn { width:30px; height:30px; border-radius:50%; background: hsl(var(--primary)); color:hsl(var(--primary-fg)); display:grid; place-items:center; cursor:pointer; }
+.scrub { flex:1; height:4px; border-radius:3px; background: hsl(var(--elevated)); position:relative; }
+.scrub::before { content:""; position:absolute; left:0; top:0; bottom:0; width:18%; border-radius:3px; background: hsl(var(--primary)); }
+.scrub::after { content:""; position:absolute; left:18%; top:50%; width:11px; height:11px; border-radius:50%; transform:translate(-50%,-50%); background:hsl(var(--primary)); box-shadow:0 0 8px hsl(var(--primary-glow)); }
+
+/* 成片信息 */
+.info-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed hsl(var(--border)); font-size:12px; }
+.info-row span:first-child { color: hsl(var(--muted)); }
+.info-row span:last-child { font-weight:600; }
+.usage { margin-top:12px; padding:11px; border-radius:11px; border:1px solid hsl(var(--border)); background: hsl(var(--card)); }
+.usage-bar { height:6px; border-radius:4px; background: hsl(var(--elevated)); margin:8px 0 6px; overflow:hidden; }
+.usage-bar i { display:block; height:100%; width:32%; background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent))); }
+
+.kbd { font-size:10px; color:hsl(var(--faint)); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 左侧图标栏 -->
+  <nav class="rail">
+    <div class="logo">🪼</div>
+    <div class="navitem"><button class="active" title="工作台">▦</button><span class="label" data-i="nav.work">工作台</span></div>
+    <div class="navitem"><button title="剧本">📜</button><span class="label" data-i="nav.script">剧本</span></div>
+    <div class="navitem"><button title="角色">🎭</button><span class="label" data-i="nav.role">角色</span></div>
+    <div class="navitem"><button title="场景">🏙️</button><span class="label" data-i="nav.scene">场景</span></div>
+    <div class="navitem"><button title="分镜">🎬</button><span class="label" data-i="nav.shot">分镜</span></div>
+    <div class="navitem"><button title="素材库">🗂️</button><span class="label" data-i="nav.lib">素材</span></div>
+    <div class="navitem"><button title="AI工具">✨</button><span class="label" data-i="nav.ai">AI</span></div>
+    <div class="spacer"></div>
+    <div class="navitem"><button title="设置">⚙️</button><span class="label" data-i="nav.set">设置</span></div>
+  </nav>
+
+  <div class="main">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <div>
+          <div class="title">Inspiration</div>
+          <div class="sub" data-i="app.tagline">影视 / 动漫 AIGC 生产工作台</div>
+        </div>
+      </div>
+      <div class="grow"></div>
+      <span class="chip"><span class="dot"></span><span data-i="bar.saved">云端已保存 · 10:24</span></span>
+      <button class="chip" id="langBtn">🌐 <span id="langTxt">EN</span></button>
+      <button class="chip" id="themeBtn">🌙 <span data-i="bar.theme">夜间</span></button>
+      <span class="chip">⬆ <span data-i="bar.export">导出成片</span></span>
+      <button class="btn-primary">✦ <span data-i="bar.generate">生成影片</span></button>
+      <div class="avatar">JF</div>
+    </header>
+
+    <!-- 工作台 -->
+    <div class="workbench">
+      <!-- 脚本编辑 -->
+      <section class="panel a-script">
+        <div class="head"><span class="h-title" data-i="p.script">脚本编辑</span><span class="grow"></span><span class="kbd mono">689/3010</span><span class="ico">⤢</span></div>
+        <div class="body">
+          <div class="script-toolbar"><span>B</span><span>I</span><span>≔</span><span>↺</span><span>↻</span></div>
+          <div class="script-text">
+            <p class="scene-h" data-i="sc.1">第1章 · 深海之城</p>
+            <p class="muted">INT. <span data-i="sc.2">深海研究站 · 夜</span></p>
+            <p data-i="sc.3">灯光闪烁，巨大的舷窗外，漂浮着发光的水母群。</p>
+            <p><b data-i="sc.4">林夏</b><span class="muted" data-i="sc.5">（女, 23岁）凝望窗外，神情复杂。</span></p>
+            <p class="muted" data-i="sc.6">（自语）这座城……到底隐藏着什么？</p>
+            <p class="cue">CUT TO:</p>
+            <p class="muted">EXT. <span data-i="sc.7">深海之城 · 全景</span></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 工作流 -->
+      <section class="panel a-flow">
+        <div class="head"><span class="h-title" data-i="p.flow">工作流</span><span class="grow"></span><span class="ico">⋯</span></div>
+        <div class="body">
+          <div class="flow-canvas">
+            <svg>
+              <path d="M 50% 22 C 50% 60, 28% 60, 28% 92" fill="none" stroke="hsl(188 64% 56% / .5)" stroke-width="1.5"/>
+              <path d="M 50% 22 C 50% 60, 72% 60, 72% 92" fill="none" stroke="hsl(188 64% 56% / .5)" stroke-width="1.5"/>
+              <path d="M 28% 124 C 28% 150, 50% 150, 50% 168" fill="none" stroke="hsl(38 78% 64% / .6)" stroke-width="1.5"/>
+              <path d="M 72% 124 C 72% 150, 50% 150, 50% 168" fill="none" stroke="hsl(38 78% 64% / .6)" stroke-width="1.5"/>
+              <path d="M 50% 200 L 50% 232" fill="none" stroke="hsl(38 78% 64% / .6)" stroke-width="1.5"/>
+            </svg>
+            <div class="node" style="left:50%; top:6px; transform:translateX(-50%)" data-i="fl.role">角色设定</div>
+            <div class="node" style="left:10%; top:96px" data-i="fl.shot">分镜生成</div>
+            <div class="node" style="right:6%; top:96px" data-i="fl.scene">场景生成</div>
+            <div class="node gold active" style="left:50%; top:172px; transform:translateX(-50%)" data-i="fl.comp">片段合成</div>
+            <div class="node gold" style="left:50%; top:234px; transform:translateX(-50%)" data-i="fl.out">成片输出</div>
+          </div>
+          <div class="flow-foot" data-i="fl.cur">当前节点：片段合成</div>
+        </div>
+      </section>
+
+      <!-- 角色一览 -->
+      <section class="panel a-roster">
+        <div class="head"><span class="h-title" data-i="p.roster">角色一览</span><span class="grow"></span><span class="ico" data-i="p.manage">管理角色</span></div>
+        <div class="body">
+          <div class="roster">
+            <div class="char-card"><div class="char-portrait">👩</div><div class="char-meta"><div class="char-name">林夏 <span class="char-tag tag-lead" data-i="r.lead">主角</span></div><div class="char-desc" data-i="r.linxia">23岁 / 科研员 · 冷静坚韧</div></div></div>
+            <div class="char-card"><div class="char-portrait">🧝</div><div class="char-meta"><div class="char-name">苏璃 <span class="char-tag tag-supp" data-i="r.supp">配角</span></div><div class="char-desc" data-i="r.suli">神秘少女 · 身世成谜</div></div></div>
+            <div class="char-card"><div class="char-portrait">🧑‍🚀</div><div class="char-meta"><div class="char-name">墨渊 <span class="char-tag tag-supp" data-i="r.supp">配角</span></div><div class="char-desc" data-i="r.moyuan">守护者 · 沉默寡言</div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 分镜时间轴 -->
+      <section class="panel a-timeline">
+        <div class="head"><span class="h-title" data-i="p.timeline">分镜时间轴</span><span class="grow"></span><span class="ico">▷</span><span class="ico">⋯</span></div>
+        <div class="body">
+          <div class="tl-ruler mono"><span>00:00</span><span>00:04</span><span>00:08</span><span>00:12</span><span>00:16</span><span>00:20</span></div>
+          <div class="shots">
+            <div class="shot"><div class="thumb"></div><div class="cap" data-i="sh1">镜头 01</div></div>
+            <div class="shot"><div class="thumb"></div><div class="cap" data-i="sh2">镜头 02</div></div>
+            <div class="shot active"><div class="thumb"></div><div class="cap" data-i="sh3">镜头 03</div></div>
+            <div class="shot"><div class="thumb"></div><div class="cap" data-i="sh4">镜头 04</div></div>
+            <div class="shot"><div class="thumb"></div><div class="cap" data-i="sh5">镜头 05</div></div>
+            <div class="shot"><div class="thumb"></div><div class="cap" data-i="sh6">镜头 06</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 场景管理 -->
+      <section class="panel a-scenes">
+        <div class="head"><span class="h-title" data-i="p.scenes">场景管理</span><span class="grow"></span><span class="ico" data-i="p.newscene">新建场景</span></div>
+        <div class="body">
+          <div class="scenes-grid">
+            <div class="scene-card"><div class="img"><span class="badge">A</span></div><div class="lbl"><span class="scene-tag" data-i="s.done">已生成</span><b data-i="s1">场景 01</b><small data-i="s1d">深海之城 · 全景</small></div></div>
+            <div class="scene-card"><div class="img"><span class="badge">B</span></div><div class="lbl"><b data-i="s2">场景 02</b><small data-i="s2d">水母深海</small></div></div>
+            <div class="scene-card"><div class="img"><span class="badge">C</span></div><div class="lbl"><b data-i="s3">场景 03</b><small data-i="s3d">废墟回廊</small></div></div>
+            <div class="scene-card"><div class="img"><span class="badge">D</span></div><div class="lbl"><b data-i="s4">场景 04</b><small data-i="s4d">研究核心</small></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 成片预览 -->
+      <section class="panel a-preview">
+        <div class="head"><span class="h-title" data-i="p.preview">成片预览</span><span class="grow"></span><span class="kbd mono">3840×2160 · 4K</span><span class="ico">⛶</span></div>
+        <div class="body" style="padding:11px">
+          <div class="preview-wrap">
+            <div class="player">
+              <div class="moon"></div>
+              <div class="jelly" style="left:18%; top:30%; width:40px; height:54px"></div>
+              <div class="jelly" style="left:70%; top:50%; width:34px; height:46px"></div>
+              <div class="jelly" style="left:40%; top:62%; width:28px; height:38px"></div>
+              <div class="silhouette"></div>
+            </div>
+            <div class="player-bar">
+              <div class="play-btn">▶</div>
+              <span class="mono kbd">00:12</span>
+              <div class="scrub"></div>
+              <span class="mono kbd">01:20</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 成片信息 -->
+      <section class="panel a-info">
+        <div class="head"><span class="h-title" data-i="p.info">成片信息</span></div>
+        <div class="body">
+          <div class="info-row"><span data-i="i.name">项目名称</span><span>深海之城 · 宽屏</span></div>
+          <div class="info-row"><span data-i="i.res">分辨率</span><span class="mono">3840 × 2160</span></div>
+          <div class="info-row"><span data-i="i.fps">帧率</span><span class="mono">24 fps</span></div>
+          <div class="info-row"><span data-i="i.dur">时长</span><span class="mono">01:20</span></div>
+          <div class="info-row"><span data-i="i.ratio">画面比例</span><span class="mono">16 : 9</span></div>
+          <div class="usage">
+            <div style="display:flex; justify-content:space-between; font-size:11px"><span data-i="u.month">本月用量</span><b style="color:hsl(var(--primary))">32%</b></div>
+            <div class="usage-bar"><i></i></div>
+            <button class="btn-primary" style="width:100%; justify-content:center; margin-top:4px" data-i="u.up">升级套餐</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- 主题切换 ----------
+const html = document.documentElement;
+document.getElementById('themeBtn').onclick = () => {
+  const dark = html.classList.contains('dark');
+  html.classList.toggle('dark', !dark);
+  html.classList.toggle('light', dark);
+  render();
+};
+
+// ---------- 中英词典 ----------
+const DICT = {
+  zh: {
+    'app.tagline':'影视 / 动漫 AIGC 生产工作台',
+    'nav.work':'工作台','nav.script':'剧本','nav.role':'角色','nav.scene':'场景','nav.shot':'分镜','nav.lib':'素材','nav.ai':'AI','nav.set':'设置',
+    'bar.saved':'云端已保存 · 10:24','bar.theme':'夜间','bar.export':'导出成片','bar.generate':'生成影片',
+    'p.script':'脚本编辑','p.flow':'工作流','p.roster':'角色一览','p.manage':'管理角色','p.timeline':'分镜时间轴','p.scenes':'场景管理','p.newscene':'新建场景','p.preview':'成片预览','p.info':'成片信息',
+    'sc.1':'第1章 · 深海之城','sc.2':'深海研究站 · 夜','sc.3':'灯光闪烁，巨大的舷窗外，漂浮着发光的水母群。','sc.4':'林夏','sc.5':'（女, 23岁）凝望窗外，神情复杂。','sc.6':'（自语）这座城……到底隐藏着什么？','sc.7':'深海之城 · 全景',
+    'fl.role':'角色设定','fl.shot':'分镜生成','fl.scene':'场景生成','fl.comp':'片段合成','fl.out':'成片输出','fl.cur':'当前节点：片段合成',
+    'r.lead':'主角','r.supp':'配角','r.linxia':'23岁 / 科研员 · 冷静坚韧','r.suli':'神秘少女 · 身世成谜','r.moyuan':'守护者 · 沉默寡言',
+    'sh1':'镜头 01','sh2':'镜头 02','sh3':'镜头 03','sh4':'镜头 04','sh5':'镜头 05','sh6':'镜头 06',
+    's.done':'已生成','s1':'场景 01','s1d':'深海之城 · 全景','s2':'场景 02','s2d':'水母深海','s3':'场景 03','s3d':'废墟回廊','s4':'场景 04','s4d':'研究核心',
+    'i.name':'项目名称','i.res':'分辨率','i.fps':'帧率','i.dur':'时长','i.ratio':'画面比例','u.month':'本月用量','u.up':'升级套餐'
+  },
+  en: {
+    'app.tagline':'AIGC studio for film / anime',
+    'nav.work':'Studio','nav.script':'Script','nav.role':'Cast','nav.scene':'Scenes','nav.shot':'Shots','nav.lib':'Assets','nav.ai':'AI','nav.set':'Settings',
+    'bar.saved':'Saved to cloud · 10:24','bar.theme':'Dark','bar.export':'Export film','bar.generate':'Generate film',
+    'p.script':'Script Editor','p.flow':'Workflow','p.roster':'Cast','p.manage':'Manage','p.timeline':'Storyboard Timeline','p.scenes':'Scenes','p.newscene':'New scene','p.preview':'Film Preview','p.info':'Film Info',
+    'sc.1':'Ch.1 · City of the Deep','sc.2':'Deep-sea station · Night','sc.3':'Lights flicker. Beyond the great window, glowing jellyfish drift.','sc.4':'Lin Xia','sc.5':'(F, 23) gazes out, conflicted.','sc.6':'(to herself) What does this city truly hide?','sc.7':'City of the Deep · Wide',
+    'fl.role':'Cast setup','fl.shot':'Shot gen','fl.scene':'Scene gen','fl.comp':'Compose','fl.out':'Render out','fl.cur':'Current node: Compose',
+    'r.lead':'Lead','r.supp':'Support','r.linxia':'23 / Researcher · calm, resilient','r.suli':'Mysterious girl · unknown origin','r.moyuan':'Guardian · silent',
+    'sh1':'Shot 01','sh2':'Shot 02','sh3':'Shot 03','sh4':'Shot 04','sh5':'Shot 05','sh6':'Shot 06',
+    's.done':'Rendered','s1':'Scene 01','s1d':'City of the Deep · Wide','s2':'Scene 02','s2d':'Jellyfish deep','s3':'Scene 03','s3d':'Ruined corridor','s4':'Scene 04','s4d':'Research core',
+    'i.name':'Project','i.res':'Resolution','i.fps':'Frame rate','i.dur':'Duration','i.ratio':'Aspect','u.month':'Usage this month','u.up':'Upgrade plan'
+  }
+};
+let lang = 'zh';
+document.getElementById('langBtn').onclick = () => { lang = lang === 'zh' ? 'en' : 'zh'; render(); };
+
+function render() {
+  const d = DICT[lang];
+  document.querySelectorAll('[data-i]').forEach(el => { const k = el.getAttribute('data-i'); if (d[k]) el.textContent = d[k]; });
+  document.getElementById('langTxt').textContent = lang === 'zh' ? 'EN' : '中';
+  html.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  const isDark = html.classList.contains('dark');
+  document.querySelector('#themeBtn').firstChild.textContent = isDark ? '🌙 ' : '☀ ';
+}
+render();
+</script>
+</body>
+</html>

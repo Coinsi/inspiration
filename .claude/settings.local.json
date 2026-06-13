@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Code/Python/inspiration/backend)",
+      "Bash(python -m py_compile app/main.py app/core/*.py app/models/*.py app/modules/identity/*.py app/storage/*.py app/platform/*.py app/registry/*.py app/adapters/*.py app/tasks/*.py app/seed.py alembic/env.py alembic/versions/0001_initial.py tests/*.py)",
+      "Bash(cd /c/Code/Python/inspiration 2>/dev/null && find backend frontend deploy -type f -not -path \"*/node_modules/*\" | sort && echo \"---TOTAL---\" && find backend frontend deploy -type f | wc -l)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(pip --version)",
+      "Bash(npm --version)",
+      "Bash(python -m venv .venv)",
+      "Bash(./.venv/Scripts/python.exe -m pip install -q --upgrade pip)",
+      "Bash(./.venv/Scripts/python.exe -m pip install -q fastapi \"uvicorn[standard]\" \"sqlalchemy>=2.0.29\" alembic \"psycopg[binary]\" pydantic pydantic-settings pyjwt \"passlib[bcrypt]\" python-multipart celery redis minio pgvector pytest httpx)",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m pytest tests/ -q)",
+      "Bash(./.venv/Scripts/python.exe -m pip install -q \"pydantic[email]\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(export DATABASE_URL=\"postgresql+psycopg://postgres:123456@127.0.0.1:5432/inspiration\")",
+      "Bash(export ENABLE_PGVECTOR=false)",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m alembic upgrade head)"
+    ]
+  }
+}

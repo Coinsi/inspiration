@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# 环境
+.env
+backend/.env
+
+# Node
+node_modules/
+frontend/dist/
+
+# 数据/构建
+*.log
+.DS_Store
+
+# 本地存储(blob 内容,依赖本地 DB,无意义且大)
+_storage/
+
+# 第三方 pgvector 源码克隆(本地编译扩展用,非本项目代码)
+pgvector/
+
+# 守护进程产物
+.daemon-stop
+backend.log*
+frontend.log*
+uvicorn.log*
+vite.log*
+
+# 前端构建缓存
+frontend/tsconfig.tsbuildinfo
