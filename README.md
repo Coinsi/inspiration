@@ -186,23 +186,87 @@ npm run dev -- --host 127.0.0.1
 
 ## 技术架构
 
-```text
-React + TypeScript + Vite
-          │
-          │ HTTP / JWT
-          ▼
-FastAPI 模块化单体
-  ├─ identity / narrative / setting / asset
-  ├─ prompt / shot / generation / review / timeline
-  ├─ versioning / graph / permissions / audit
-  └─ adapters: parser / LLM / generation / consistency
-          │
-          ├─ PostgreSQL + pgvector   结构化数据与向量预留
-          ├─ Redis + Celery          异步任务与生成编排
-          └─ MinIO / 本地文件系统    CAS 内容寻址存储
-```
+Inspiration 选择“模块化单体 + 异步 Worker”的形态：V1 可以用一套 Docker Compose 完整启动，避免过早引入微服务运维成本；后端内部仍按业务上下文、横切内核和外部适配器划分边界，后续需要独立扩容生成任务或拆分服务时，不必重写领域模型。
 
-项目采用模块化单体：保持单机部署简单，同时按业务上下文隔离模块，并通过策略与注册中心为未来接入新模型、供应商和存储后端保留扩展点。
+### 设计原则
+
+1. **稳定身份与内容版本分离**：资产、剧本、场次和镜头拥有稳定 ID；每次内容变化生成新的不可变版本快照，主记录只保存 `current_version_id`。
+2. **引用关系是一等数据**：改编、组成、复用、镜头引用等关系进入统一关系图，支持从上游变更反查受影响镜头和资产。
+3. **生成过程必须可复现**：任务入队时冻结最终 Prompt、模型、参数、随机种子和参考图版本；任务完成后保留供应商请求、响应、实际成本和产物哈希。
+4. **策略与供应商可插拔**：解析器、AI 拆解、AI 助手、一致性策略和生成供应商都通过统一契约及注册中心解析，业务服务不依赖具体厂商协议。
+5. **重数据与大对象分离**：PostgreSQL 保存身份、关系、版本和溯源元数据；图片、视频、参考图进入 MinIO 或本地文件系统的 CAS 内容寻址存储。
+6. **项目是安全边界**：JWT 负责身份认证，项目成员角色与动作矩阵负责授权；供应商密钥按项目加密保存，审计记录重要操作。
+
+### 总体系统与部署架构
+
+![Inspiration 总体系统与部署架构](docs/architecture/system-deployment.drawio.png)
+
+一次普通请求和一次生成请求走不同路径：
+
+- **同步业务路径**：浏览器通过 Nginx 提供的 React Web 访问 FastAPI；API 完成 DTO 校验、JWT 鉴权、项目 RBAC 和事务编排，再读写 PostgreSQL。
+- **异步生成路径**：API 先创建 `GenerationJob` 和冻结输入，再把任务投递到 Redis；Celery Worker 消费任务，通过策略注册中心选择供应商适配器，负责提交、轮询、重试和产物物化。
+- **对象存储路径**：Worker 将生成文件写入 CAS，以内容哈希去重；PostgreSQL 只保存 `blob_hash`、URI、媒体元数据以及版本/生成记录之间的指针。
+- **外部服务边界**：云 LLM、GPT Image 和即梦/火山引擎被供应商网关隔离。上层只看标准能力声明、标准输入和标准结果，不感知签名、流式响应或任务轮询差异。
+- **本地开发模式**：可设置 `CELERY_EAGER=true` 同步执行任务，减少本地依赖；正式环境仍建议独立运行 Worker，并根据生成任务量水平扩容。
+
+| 组件 | 主要职责 | 状态与扩容特征 |
+| --- | --- | --- |
+| React Web | 工作台、资产库、镜头、生成、审阅、时间线和项目设置 | 静态构建，可由 Nginx/CDN 承载 |
+| FastAPI API | 鉴权、业务用例、事务、版本/关系内核、媒体鉴权读取 | 尽量无状态，可横向扩容 |
+| Celery Worker | 长耗时 AI 调用、轮询、重试、产物下载与入库 | 与 API 解耦，可按队列扩容 |
+| PostgreSQL + pgvector | 领域数据、版本、关系、审计和向量能力预留 | 权威元数据源，需要备份与迁移 |
+| Redis | Celery Broker 与任务队列 | 短期任务状态，不作为业务事实源 |
+| MinIO / 文件系统 | 参考图、图像、视频等 CAS 大对象 | 可从本地目录切换到对象存储 |
+
+### 后端模块化单体与分层
+
+![Inspiration 后端模块化单体分层架构](docs/architecture/modular-monolith.drawio.png)
+
+后端不是按“控制器、模型、工具函数”简单堆叠，而是把业务变化和技术变化分开：
+
+| 层次 | 代码与职责 | 边界约束 |
+| --- | --- | --- |
+| 接口层 | FastAPI Router、Pydantic Schema、依赖注入、统一错误 | 只处理 HTTP 契约、身份上下文和输入输出，不承载核心业务规则 |
+| 应用层 | `identity`、`narrative`、`setting`、`asset`、`prompt`、`shot`、`generation`、`review`、`timeline`、`assist`、`media` | 模块服务实现用例；跨模块操作由应用服务在同一事务中编排 |
+| 横切内核 | `versioning`、`graph`、`security/permissions`、`registry`、`platform/storage` | 为多个业务模块提供稳定机制，不反向依赖具体 Router 或供应商实现 |
+| 策略适配层 | 小说解析、AI 拆解/助手、一致性策略、生成 Provider 与统一契约 | 把厂商差异限制在适配器内部，通过注册中心按配置和能力选择实现 |
+| 基础设施层 | SQLAlchemy/Alembic、PostgreSQL、Redis/Celery、Fernet、MinIO/FS、外部 API | 提供持久化、队列、密钥和外部 I/O，不定义领域语义 |
+
+这种结构保留了单体的一致事务与易部署优势，同时把最容易变化的模型供应商、解析方式和存储实现放到边缘。若未来拆分服务，优先拆出无共享事务的 Celery 生成 Worker；身份、版本和关系内核则继续作为一致性中心。
+
+### 版本、引用、生成溯源与基线
+
+![版本、引用、生成溯源与成片基线内核](docs/architecture/version-provenance.drawio.png)
+
+这是项目区别于普通“AI 生成界面”的核心：系统管理的不只是当前结果，还管理结果形成时的完整创作上下文。
+
+| 概念 | 语义 |
+| --- | --- |
+| 稳定实体 | `Asset`、`Script/Scene`、`Shot` 等记录表达“它是谁”，外部关系始终引用稳定实体 ID |
+| Version 快照 | `entity_type + entity_id + version_no` 标识一次不可变内容提交，可比较、锁定和回滚 |
+| Floating 引用 | 自动跟随上游 `current_version_id`，适合希望持续同步的工作中引用 |
+| Pinned 引用 | 固定 `pinned_version_id`，上游变化只产生升级候选，不自动改变已确认结果 |
+| Generation 溯源 | 保存冻结输入、Provider/模型、请求响应、实际成本和产物指针；已完成记录不被后续设置覆盖 |
+| Selected Variant | 从多个生成变体中钦定镜头代表版，作为时间线和交付方案的输入 |
+| Baseline | 定剪时冻结实体 ID、精确版本 ID 和定版产物，使不同剪辑方案能够复现、比较和并行推进 |
+
+关键调用链如下：
+
+1. 用户修改资产、剧本或镜头，应用服务创建新版本，并把主记录的 `current_version_id` 指向新快照。
+2. 关系内核根据 `floating` / `pinned` 模式判断哪些下游已经受影响、哪些仅可选择升级。
+3. 用户发起生成，服务端先解析一致性策略与供应商能力，再冻结 Prompt、参数、参考图版本和目标实体。
+4. Worker 执行供应商调用；成功后把文件写入 CAS，并创建不可变 `Generation` 溯源记录和若干产物变体。
+5. 用户钦定代表变体并进入时间线；定剪操作生成 `Baseline` 与 `BaselineItem`，锁定当时使用的精确版本和产物。
+
+### 扩展新能力
+
+- 新增小说格式：实现 `NovelParser` 并注册，不需要修改导入用例。
+- 新增 LLM 拆解或对话模型：实现统一 Assist/Decomposition 契约，在项目配置中声明能力。
+- 新增一致性方案：实现 `ConsistencyStrategy`，可组合提示词片段、参考图或 LoRA。
+- 新增生成厂商：实现 `GenerationProvider` 的提交/轮询/结果转换，并在注册中心登记；业务层继续使用同一套任务与溯源模型。
+- 新增对象存储：保持 CAS 的 `put/get/hash → uri` 语义即可替换本地文件系统或 MinIO。
+
+三张架构图均为 draw.io 可编辑图片：PNG 内嵌了原始图数据，可直接在 draw.io 中打开修改。
 
 ## 仓库结构
 
@@ -211,7 +275,8 @@ inspiration/
 ├─ backend/      FastAPI、SQLAlchemy、Alembic、Celery 与业务模块
 ├─ frontend/     React、TypeScript、Tailwind 与业务页面
 ├─ deploy/       Docker Compose 一体化部署
-├─ docs/         需求、概要设计、数据模型、接口契约与开发计划
+├─ docs/         需求、概要设计、数据模型、接口契约、架构图与开发计划
+│  └─ architecture/  可由 draw.io 继续编辑的架构图
 ├─ samples/      可用于体验导入流程的示例文本
 └─ README.md
 ```
