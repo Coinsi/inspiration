@@ -52,6 +52,8 @@ def set_items(
         validate_target(db, ctx.project.id, "shot", it.shot_id)
         if it.generation_id:
             g = source(db, ctx.project.id, it.generation_id)
+            if g.output_type not in ("image", "video"):
+                raise CapabilityUnsupported("画面片段仅支持图片或视频")
             if g.target_type != "shot" or g.target_id != it.shot_id:
                 raise CapabilityUnsupported("素材不属于该镜头")
         if it.out_point_ms and it.out_point_ms <= it.in_point_ms:

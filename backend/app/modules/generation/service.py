@@ -445,6 +445,8 @@ def select_variant(db: Session, ctx: ProjectContext, gen_id: uuid.UUID) -> Gener
     g = db.get(Generation, gen_id)
     if g is None or g.project_id != ctx.project.id:
         raise NotFound("生成记录不存在")
+    if g.output_type == "audio":
+        raise CapabilityUnsupported("音轨不能作为镜头画面或资产封面")
     # 同 target 下取消其他钦定
     for other in list_generations(db, ctx.project.id, g.target_type, g.target_id):
         other.is_selected = other.id == g.id

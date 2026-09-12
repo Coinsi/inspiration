@@ -206,6 +206,8 @@ def render_timeline(db, ctx, timeline_id, options):
         if not gen_id:
             raise CapabilityUnsupported(f"镜头 {shot.code} 尚未选择素材")
         g = source(db, ctx.project.id, gen_id)
+        if g.output_type not in ("image", "video"):
+            raise CapabilityUnsupported("画面片段仅支持图片或视频")
         if g.target_type != "shot" or g.target_id != shot.id:
             raise CapabilityUnsupported("素材不属于该镜头")
         duration = (item.out_point_ms - item.in_point_ms) if item.out_point_ms else item.duration_ms
@@ -375,9 +377,13 @@ def execute(db, job_id):
         event(
             job,
             "running",
-            {"refine": "正在处理图片", "render": "正在合成 MP4"}.get(
-                operation, "正在向供应商提交并等待结果"
-            ),
+            {
+                "refine": "正在处理图片",
+                "render": "正在合成 MP4",
+                "video_frames": "正在提取视频帧",
+                "video_audio": "正在提取音轨",
+                "video_trim": "正在导出视频片段",
+            }.get(operation, "正在向供应商提交并等待结果"),
         )
         db.commit()
         cost_raw = {}
@@ -394,6 +400,12 @@ def execute(db, job_id):
             outputs = [
                 (media_engine.render(snap["clips"], read_blob, snap["options"], canceled), "video")
             ]
+        elif operation in ("video_frames", "video_audio", "video_trim"):
+            from app.modules.generation.video_tools import process
+
+            processed = process(read_blob(snap["source_blob"]), snap["options"], canceled)
+            outputs = [(data, typ) for data, typ, _ in processed]
+            media_details = [details for _, _, details in processed]
         else:
             req = GenerationRequest(
                 request_type=snap["request_type"],
@@ -452,7 +464,14 @@ def execute(db, job_id):
             raise media_engine.Canceled()
         # Store bytes before the final row lock so cancel is still responsive during I/O.
         blobs = [
-            (cas.put_bytes(db, data, "video/mp4" if typ == "video" else "image/png"), typ)
+            (
+                cas.put_bytes(
+                    db,
+                    data,
+                    {"video": "video/mp4", "image": "image/png", "audio": "audio/mp4"}[typ],
+                ),
+                typ,
+            )
             for data, typ in outputs
         ]
         job = db.scalar(

@@ -147,6 +147,15 @@ class GenerationOut(BaseModel):
     created_at: datetime
 
 
+class VideoToolIn(BaseModel):
+    operation: Literal["frames", "audio", "trim"]
+    times_ms: list[Annotated[int, Field(ge=0, le=1_800_000)]] = Field(
+        default_factory=list, max_length=12
+    )
+    start_ms: int = Field(default=0, ge=0, le=1_800_000)
+    end_ms: int | None = Field(default=None, ge=1, le=1_800_000)
+
+
 class RatePatch(BaseModel):
     rating: int | None = None
     is_favorite: bool | None = None

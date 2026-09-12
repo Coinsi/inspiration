@@ -22,6 +22,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { MediaVideo } from "@/components/MediaVideo";
+import { MediaAudio } from "@/components/MediaAudio";
+import { VideoTools } from "@/components/VideoTools";
+import { ZoomableImage } from "@/components/ImageViewer";
 import { JobStatus } from "@/components/JobStatus";
 import { useToast } from "@/components/ui/toast";
 import { useI18n } from "@/lib/i18n";
@@ -162,6 +165,7 @@ function TimelineDraft({
     "",
   );
   const [preview, setPreview] = useState("");
+  const [videoTools, setVideoTools] = useState<Generation | null>(null);
   const gens = useQuery({
     queryKey: ["gens", "timeline", timelineId],
     queryFn: () =>
@@ -232,6 +236,53 @@ function TimelineDraft({
   const pending = save.isPending || render.isPending;
   return (
     <div className="space-y-5">
+      {videoTools && (
+        <VideoTools
+          projectId={projectId}
+          generation={videoTools}
+          onClose={() => setVideoTools(null)}
+          onJob={setLastJob}
+        />
+      )}
+      {(gens.data || []).some(
+        (g) => g.output_type !== "video" && g.output_blob_hash,
+      ) && (
+        <details className="rounded-lg border p-3">
+          <summary className="cursor-pointer text-sm">
+            {zh ? "从成片提取的素材" : "Media extracted from films"}
+          </summary>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+            {(gens.data || [])
+              .filter((g) => g.output_type !== "video" && g.output_blob_hash)
+              .map((g) => (
+                <div key={g.id} className="min-w-0 rounded-lg border p-2">
+                  {g.output_type === "audio" ? (
+                    <MediaAudio src={blobUrl(projectId, g.output_blob_hash!)} />
+                  ) : (
+                    <ZoomableImage
+                      filename={`frame-${g.id.slice(0, 8)}`}
+                      src={blobUrl(projectId, g.output_blob_hash!)}
+                      className="aspect-video w-full object-contain"
+                    />
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {g.id.slice(0, 8)}
+                    {g.input_refs?.actual_media?.source_time_ms != null
+                      ? ` · ${g.input_refs.actual_media.source_time_ms / 1000} s`
+                      : ""}
+                  </p>
+                  <a
+                    className="studio-link text-xs"
+                    href={`${blobUrl(projectId, g.output_blob_hash!)}&download=true`}
+                    download
+                  >
+                    {zh ? "下载素材" : "Download"}
+                  </a>
+                </div>
+              ))}
+          </div>
+        </details>
+      )}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
           <div className="aspect-video overflow-hidden rounded-lg border bg-elevated">
@@ -278,6 +329,13 @@ function TimelineDraft({
                   : zh
                     ? "下载 MP4"
                     : "Download MP4"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setVideoTools(result)}
+              >
+                {zh ? "视频工具" : "Video tools"}
               </Button>
             </div>
           )}
@@ -638,7 +696,10 @@ function ClipSource({
           {zh ? "使用镜头当前钦定素材" : "Use shot selection"}
         </option>
         {data
-          ?.filter((g) => g.output_blob_hash)
+          ?.filter(
+            (g) =>
+              g.output_blob_hash && ["image", "video"].includes(g.output_type),
+          )
           .map((g, i) => (
             <option key={g.id} value={g.id}>
               {g.output_type === "video"

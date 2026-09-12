@@ -164,6 +164,218 @@ def post_ok(client, path, data=None):
     return r.json()
 
 
+@pytest.fixture
+def changing_video(tmp_path):
+    path = tmp_path / "changing.mp4"
+    media_engine.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=320x180:r=25:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=320x180:r=25:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-filter_complex",
+            "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map",
+            "[v]",
+            "-map",
+            "2:a",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-threads",
+            "2",
+            str(path),
+        ]
+    )
+    return path.read_bytes()
+
+
+def test_video_tools_frames_audio_and_trim(changing_video, tmp_path):
+    import wave
+    from array import array
+
+    from app.modules.generation.video_tools import probe_file, process
+
+    frames = process(changing_video, {"operation": "frames", "times_ms": [200, 1200]})
+    for (data, typ, info), channel in zip(frames, [0, 2]):
+        im = Image.open(io.BytesIO(data))
+        pixel = im.getpixel((160, 90))
+        assert typ == "image" and im.size == (320, 180)
+        assert pixel[channel] > 240 and sum(pixel) < 270
+        assert info["source_time_ms"] in (200, 1200)
+    for operation, typ in [("audio", "audio"), ("trim", "video")]:
+        data, actual_type, info = process(
+            changing_video, {"operation": operation, "start_ms": 1100, "end_ms": 1800}
+        )[0]
+        assert actual_type == typ and info["has_audio"]
+        assert abs(info["duration_ms"] - 700) < 100
+        path = tmp_path / f"{operation}.mp4"
+        path.write_bytes(data)
+        assert probe_file(path)["has_video"] == (typ == "video")
+        wav = tmp_path / f"{operation}.wav"
+        media_engine.run(["-i", str(path), "-vn", "-c:a", "pcm_s16le", str(wav)])
+        with wave.open(str(wav)) as sound:
+            samples = array("h", sound.readframes(sound.getnframes()))
+            assert max(abs(s) for s in samples) > 2000  # audible signal, not invented silence
+        if typ == "video":
+            frame = process(data, {"operation": "frames", "times_ms": [0]})[0][0]
+            assert Image.open(io.BytesIO(frame)).getpixel((160, 90))[2] > 240
+    with pytest.raises(media_engine.Canceled):
+        process(changing_video, {"operation": "frames", "times_ms": [0]}, lambda: True)
+
+
+def test_video_tools_invalid_and_silent_inputs(changing_video, tmp_path):
+    from app.modules.generation.video_tools import process
+
+    for options in [
+        {"operation": "frames", "times_ms": []},
+        {"operation": "frames", "times_ms": [200, 200]},
+        {"operation": "frames", "times_ms": [2000]},
+        {"operation": "trim", "start_ms": 1500, "end_ms": 2200},
+        {"operation": "audio", "start_ms": 1000, "end_ms": 900},
+    ]:
+        with pytest.raises(ValueError):
+            process(changing_video, options)
+    with pytest.raises(ValueError):
+        process(b"not video", {"operation": "frames", "times_ms": [0]})
+    src, silent = tmp_path / "src.mp4", tmp_path / "silent.mp4"
+    src.write_bytes(changing_video)
+    media_engine.run(["-i", str(src), "-an", "-c:v", "copy", str(silent)])
+    with pytest.raises(ValueError, match="没有音轨"):
+        process(silent.read_bytes(), {"operation": "audio", "start_ms": 0, "end_ms": 1000})
+    trimmed = process(silent.read_bytes(), {"operation": "trim", "start_ms": 0, "end_ms": 1000})
+    assert trimmed[0][2]["has_audio"] is False
+
+
+def test_video_tools_api_provenance_download_and_guards(studio, changing_video):
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    response = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("source.mp4", changing_video, "video/mp4")},
+    )
+    assert response.status_code == 200, response.text
+    original = response.json()
+    url = f"{base}/generations/{original['id']}"
+    info = client.get(url + "/video-info")
+    assert info.status_code == 200 and info.json()["duration_ms"] == 2000
+    for operation, output_type in [("frames", "image"), ("audio", "audio"), ("trim", "video")]:
+        job = post_ok(
+            client,
+            url + "/video-tools",
+            {"operation": operation, "times_ms": [200, 1200], "start_ms": 100, "end_ms": 1600},
+        )
+        assert job["status"] == "succeeded", job
+        assert job["actual_cost"] == 0
+        gens = client.get(f"{base}/generations?target_type=shot&target_id={ids['shot']}").json()
+        outputs = [g for g in gens if g["job_id"] == job["id"]]
+        assert len(outputs) == (2 if operation == "frames" else 1)
+        assert all(
+            g["output_type"] == output_type
+            and g["input_refs"]["source_generation_id"] == original["id"]
+            for g in outputs
+        )
+        if operation == "audio":
+            audio = outputs[0]
+            blob_url = f"{base}/blobs/{audio['output_blob_hash']}"
+            download = client.get(blob_url + "?download=true")
+            assert download.headers["content-type"] == "audio/mp4"
+            assert ".m4a" in download.headers["content-disposition"]
+            assert (
+                client.get(blob_url, headers={"Range": "bytes=0-31"}).content
+                == download.content[:32]
+            )
+            assert client.post(f"{base}/generations/{audio['id']}/select").status_code == 422
+            timeline = post_ok(client, base + "/timelines", {"name": "No audio as visuals"})
+            assert (
+                client.put(
+                    f"{base}/timelines/{timeline['id']}/items",
+                    json={
+                        "items": [
+                            {
+                                "shot_id": ids["shot"],
+                                "generation_id": audio["id"],
+                                "duration_ms": 1000,
+                            }
+                        ]
+                    },
+                ).status_code
+                == 422
+            )
+    failed = post_ok(client, url + "/video-tools", {"operation": "frames", "times_ms": [2500]})
+    assert failed["status"] == "failed" and "结束时间" in failed["error"]
+    assert (
+        client.post(
+            url + "/video-tools", json={"operation": "frames", "times_ms": [-1]}
+        ).status_code
+        == 422
+    )
+    assert client.get(f"{base}/generations/{uuid.uuid4()}/video-info").status_code == 404
+    with sessions() as db:
+        db.get(Generation, uuid.UUID(original["id"])).project_id = ids["other"]
+        db.commit()
+    assert client.get(url + "/video-info").status_code == 404
+    assert (
+        client.post(url + "/video-tools", json={"operation": "frames", "times_ms": [0]}).status_code
+        == 404
+    )
+    with sessions() as db:
+        db.get(Generation, uuid.UUID(original["id"])).project_id = uuid.UUID(ids["project"])
+        member = db.scalar(
+            select(Membership).where(Membership.project_id == uuid.UUID(ids["project"]))
+        )
+        member.role = "viewer"
+        db.commit()
+    assert client.get(url + "/video-info").status_code == 200
+    assert (
+        client.post(url + "/video-tools", json={"operation": "frames", "times_ms": [0]}).status_code
+        == 403
+    )
+
+
+def test_video_tools_timeline_requires_director(studio, changing_video):
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    original = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("video.mp4", changing_video, "video/mp4")},
+    ).json()
+    timeline = post_ok(client, base + "/timelines", {"name": "Timeline permissions"})
+    with sessions() as db:
+        g = db.get(Generation, uuid.UUID(original["id"]))
+        g.target_type, g.target_id = "timeline", uuid.UUID(timeline["id"])
+        member = db.scalar(
+            select(Membership).where(Membership.project_id == uuid.UUID(ids["project"]))
+        )
+        member.role = "artist"
+        db.commit()
+    url = f"{base}/generations/{original['id']}"
+    assert client.get(url + "/video-info").status_code == 200
+    assert (
+        client.post(url + "/video-tools", json={"operation": "frames", "times_ms": [0]}).status_code
+        == 403
+    )
+    with sessions() as db:
+        member = db.scalar(
+            select(Membership).where(Membership.project_id == uuid.UUID(ids["project"]))
+        )
+        member.role = "director"
+        db.commit()
+    job = post_ok(client, url + "/video-tools", {"operation": "frames", "times_ms": [0]})
+    assert job["status"] == "succeeded" and job["target_type"] == "timeline"
+
+
 def test_inpaint_mask_provenance_and_project_guards(studio, monkeypatch):
     import base64
 

@@ -5,6 +5,8 @@ import { JobStatus } from "@/components/JobStatus";
 import { apiUpload } from "@/lib/api";
 import { Link } from "react-router-dom";
 import { MediaVideo } from "@/components/MediaVideo";
+import { MediaAudio } from "@/components/MediaAudio";
+import { VideoTools } from "@/components/VideoTools";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
@@ -83,6 +85,7 @@ function GenerationPanelContent({
   const [firstId, setFirstId] = useState("");
   const [lastId, setLastId] = useState("");
   const [editing, setEditing] = useState<Generation | null>(null);
+  const [videoTools, setVideoTools] = useState<Generation | null>(null);
   const [inpainting, setInpainting] = useState<Generation | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [lastJob, setLastJob] = usePersistentState<string>(
@@ -497,6 +500,14 @@ function GenerationPanelContent({
         />
       )}
 
+      {videoTools && (
+        <VideoTools
+          projectId={projectId}
+          generation={videoTools}
+          onClose={() => setVideoTools(null)}
+          onJob={setLastJob}
+        />
+      )}
       {gens && gens.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
           {gens.map((g) => (
@@ -522,6 +533,8 @@ function GenerationPanelContent({
                       label={`${tr("gen.video")} ${g.id.slice(0, 8)}`}
                     />
                   </div>
+                ) : g.output_type === "audio" ? (
+                  <MediaAudio src={blobUrl(projectId, g.output_blob_hash)} />
                 ) : (
                   <ZoomableImage
                     src={blobUrl(projectId, g.output_blob_hash)}
@@ -563,6 +576,30 @@ function GenerationPanelContent({
                   </button>
                 </div>
               )}
+              {g.output_type === "video" && g.output_blob_hash && (
+                <button
+                  className="studio-link px-2 pt-2 text-xs"
+                  onClick={() => setVideoTools(g)}
+                >
+                  {zh ? "视频工具" : "Video tools"}
+                </button>
+              )}
+              {g.output_blob_hash && (
+                <a
+                  className="studio-link inline-block px-2 pt-2 text-xs"
+                  href={`${blobUrl(projectId, g.output_blob_hash)}&download=true`}
+                  download
+                >
+                  {zh ? "下载素材" : "Download"}
+                </a>
+              )}
+              {g.input_refs?.actual_media?.source_time_ms != null && (
+                <p className="px-2 pt-1 text-[10px] text-muted-foreground">
+                  {zh ? "源视频" : "Source"}{" "}
+                  {(g.input_refs.actual_media.source_time_ms / 1000).toFixed(2)}{" "}
+                  s
+                </p>
+              )}
               <div className="flex items-center justify-between px-2 py-1.5">
                 <button
                   className={`transition ${g.is_favorite ? "text-primary" : "text-faint hover:text-foreground"}`}
@@ -579,6 +616,7 @@ function GenerationPanelContent({
                 <button
                   className={`text-xs font-medium transition ${g.is_selected ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
                   onClick={() => select.mutate(g.id)}
+                  hidden={g.output_type === "audio"}
                 >
                   {g.is_selected ? selectedLabel : selectLabel}
                 </button>

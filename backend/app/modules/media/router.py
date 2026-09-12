@@ -101,7 +101,13 @@ def get_blob(
         raise NotFound("资源数据不可读(可能存储后端已切换或对象缺失)") from exc
     headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=300"}
     if download:
-        ext = "mp4" if blob.mime.startswith("video/") else "png"
+        ext = {
+            "video/mp4": "mp4",
+            "audio/mp4": "m4a",
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "text/plain": "txt",
+        }.get(blob.mime, "bin")
         headers["Content-Disposition"] = (
             f'attachment; filename="inspiration-{blob_hash[:12]}.{ext}"'
         )

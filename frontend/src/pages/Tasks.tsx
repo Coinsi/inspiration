@@ -56,6 +56,9 @@ export default function Tasks() {
     return zh
       ? {
           refine: "图片精修",
+          video_frames: "视频抽帧",
+          video_audio: "提取音轨",
+          video_trim: "导出视频片段",
           inpaint: "局部重绘",
           render: "成片导出",
           upload: "素材上传",

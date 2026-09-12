@@ -405,6 +405,10 @@ export interface GenJob {
   } | null;
 }
 export interface Generation {
+  input_refs?: {
+    operation?: string;
+    actual_media?: { source_time_ms?: number; duration_ms?: number };
+  };
   id: string;
   target_type: "shot" | "asset" | "timeline";
   target_id: string;

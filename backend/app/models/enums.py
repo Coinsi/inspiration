@@ -48,6 +48,7 @@ class JobStatus(str, enum.Enum):
 
 
 class RequestType(str, enum.Enum):
+    audio = "audio"
     image = "image"
     video = "video"
 

@@ -18,6 +18,29 @@ PROVIDER_MANAGE = require_action("provider.manage")
 QUOTA_MANAGE = require_action("quota.manage")
 
 
+@router.get("/generations/{gen_id}/video-info")
+def video_info(
+    gen_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db),
+):
+    from app.modules.generation.video_tools import metadata
+
+    return metadata(db, ctx, gen_id)
+
+
+@router.post("/generations/{gen_id}/video-tools", response_model=schemas.JobOut)
+def video_tools(
+    gen_id: uuid.UUID,
+    data: schemas.VideoToolIn,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db),
+):
+    from app.modules.generation.video_tools import submit
+
+    return submit(db, ctx, gen_id, data)
+
+
 @router.post("/generations/{gen_id}/inpaint", response_model=schemas.JobOut)
 def inpaint(
     gen_id: uuid.UUID,
