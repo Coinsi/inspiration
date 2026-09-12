@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { MediaVideo } from "@/components/MediaVideo";
 import { MediaAudio } from "@/components/MediaAudio";
 import { VideoTools } from "@/components/VideoTools";
+import { CharacterTools } from "@/components/CharacterTools";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Star } from "lucide-react";
@@ -86,6 +87,7 @@ function GenerationPanelContent({
   const [lastId, setLastId] = useState("");
   const [editing, setEditing] = useState<Generation | null>(null);
   const [videoTools, setVideoTools] = useState<Generation | null>(null);
+  const [characterTools, setCharacterTools] = useState<Generation | null>(null);
   const [inpainting, setInpainting] = useState<Generation | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [lastJob, setLastJob] = usePersistentState<string>(
@@ -508,6 +510,15 @@ function GenerationPanelContent({
           onJob={setLastJob}
         />
       )}
+      {characterTools && (
+        <CharacterTools
+          projectId={projectId}
+          generation={characterTools}
+          provider={provider}
+          onClose={() => setCharacterTools(null)}
+          onJob={setLastJob}
+        />
+      )}
       {gens && gens.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
           {gens.map((g) => (
@@ -574,6 +585,18 @@ function GenerationPanelContent({
                   >
                     {zh ? "局部重绘" : "Masked edit"}
                   </button>
+                  <button
+                    className="studio-link px-2 pt-2 text-xs disabled:opacity-40"
+                    disabled={!caps?.features.includes("img2img")}
+                    title={
+                      zh
+                        ? "需要支持参考图编辑的图片供应商"
+                        : "Requires an image editing provider"
+                    }
+                    onClick={() => setCharacterTools(g)}
+                  >
+                    {zh ? "角色工具" : "Character tools"}
+                  </button>
                 </div>
               )}
               {g.output_type === "video" && g.output_blob_hash && (
@@ -598,6 +621,15 @@ function GenerationPanelContent({
                   {zh ? "源视频" : "Source"}{" "}
                   {(g.input_refs.actual_media.source_time_ms / 1000).toFixed(2)}{" "}
                   s
+                </p>
+              )}
+              {g.input_refs?.character_preset && (
+                <p className="px-2 pt-1 text-[10px] text-muted-foreground">
+                  {zh
+                    ? g.input_refs.character_preset.label
+                    : g.input_refs.character_preset.label_en}{" "}
+                  · {zh ? "来源" : "Source"}{" "}
+                  {g.input_refs.source_generation_id?.slice(0, 8)}
                 </p>
               )}
               <div className="flex items-center justify-between px-2 py-1.5">

@@ -406,6 +406,13 @@ export interface GenJob {
 }
 export interface Generation {
   input_refs?: {
+    character_preset?: {
+      mode: string;
+      preset: string;
+      label: string;
+      label_en: string;
+    };
+    source_generation_id?: string;
     operation?: string;
     actual_media?: { source_time_ms?: number; duration_ms?: number };
   };

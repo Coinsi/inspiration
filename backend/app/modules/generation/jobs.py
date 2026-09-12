@@ -383,6 +383,7 @@ def execute(db, job_id):
                 "video_frames": "正在提取视频帧",
                 "video_audio": "正在提取音轨",
                 "video_trim": "正在导出视频片段",
+                "character": "正在根据参考图生成角色素材",
             }.get(operation, "正在向供应商提交并等待结果"),
         )
         db.commit()
@@ -499,6 +500,7 @@ def execute(db, job_id):
                     input_refs={
                         "operation": operation,
                         "source_generation_id": snap.get("source_generation_id"),
+                        "character_preset": snap.get("character_preset"),
                         "clips": snap.get("clips", []),
                         "options": snap.get("options", {}),
                         "references": snap.get("references", []),

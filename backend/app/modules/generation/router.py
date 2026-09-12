@@ -18,6 +18,37 @@ PROVIDER_MANAGE = require_action("provider.manage")
 QUOTA_MANAGE = require_action("quota.manage")
 
 
+@router.get("/character-presets")
+def character_presets(ctx: ProjectContext = Depends(get_project_context)):
+    from app.modules.generation.character_tools import catalog
+
+    return catalog()
+
+
+@router.post("/generations/{gen_id}/character-preview")
+def character_preview(
+    gen_id: uuid.UUID,
+    data: schemas.CharacterToolIn,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db),
+):
+    from app.modules.generation.character_tools import preview
+
+    return preview(db, ctx, gen_id, data)
+
+
+@router.post("/generations/{gen_id}/character", response_model=schemas.JobOut)
+def character_generate(
+    gen_id: uuid.UUID,
+    data: schemas.CharacterToolIn,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db),
+):
+    from app.modules.generation.character_tools import submit
+
+    return submit(db, ctx, gen_id, data)
+
+
 @router.get("/generations/{gen_id}/video-info")
 def video_info(
     gen_id: uuid.UUID,

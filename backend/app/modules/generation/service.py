@@ -321,6 +321,7 @@ def submit(
     gen_in: schemas.GenerateIn,
     *,
     mask: ReferenceImage | None = None,
+    character_preset: dict | None = None,
 ) -> GenerationJob:
     provider = _provider_instance(db, ctx.project.id, gen_in.provider)
     caps = provider.capabilities()
@@ -368,6 +369,15 @@ def submit(
             "provider_params": gen_in.provider_params,
             "count": gen_in.count,
             "references": [{"blob_hash": r.blob_hash, "role": r.role} for r in refs],
+            **(
+                {
+                    "operation": "character",
+                    "character_preset": character_preset,
+                    "source_generation_id": str(gen_in.source_generation_id),
+                }
+                if character_preset
+                else {}
+            ),
             **(
                 {
                     "mask": {"blob_hash": mask.blob_hash, "role": "mask"},

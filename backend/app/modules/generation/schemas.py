@@ -128,6 +128,13 @@ class RenderIn(BaseModel):
     mute: bool = False
 
 
+class CharacterToolIn(BaseModel):
+    provider: str = Field(min_length=1, max_length=64)
+    mode: Literal["view", "expression", "sheet"]
+    preset: str = Field(min_length=1, max_length=64)
+    notes: str = Field(default="", max_length=2000)
+
+
 class GenerationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

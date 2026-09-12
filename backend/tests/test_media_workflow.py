@@ -376,6 +376,155 @@ def test_video_tools_timeline_requires_director(studio, changing_video):
     assert job["status"] == "succeeded" and job["target_type"] == "timeline"
 
 
+def test_character_presets_preview_is_free_and_validates_combinations(studio, monkeypatch):
+    from app.adapters.generation.gpt_image import GptImageProvider
+    from app.modules.generation import service
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    source = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("ref.png", media_engine.mock_image(), "image/png")},
+    ).json()
+    provider = GptImageProvider(token="test")
+    monkeypatch.setattr(service, "_provider_instance", lambda *args: provider)
+    monkeypatch.setattr(
+        provider, "submit", lambda *_: pytest.fail("Preview must not invoke generation")
+    )
+    catalog = client.get(base + "/character-presets").json()
+    assert sum(map(len, catalog["groups"].values())) == 12
+    url = f"{base}/generations/{source['id']}"
+    for mode, presets in catalog["groups"].items():
+        for preset in presets:
+            result = post_ok(
+                client,
+                url + "/character-preview",
+                {
+                    "provider": "gpt_image",
+                    "mode": mode,
+                    "preset": preset["id"],
+                    "notes": "保留金色耳环",
+                },
+            )
+            assert result["count"] == 1 and result["points"] == 30
+            assert (
+                result["source_generation_id"] == source["id"]
+                and "保留金色耳环" in result["prompt"]
+            )
+    invalid = {"provider": "gpt_image", "mode": "view", "preset": "happy"}
+    assert client.post(url + "/character-preview", json=invalid).status_code == 422
+    assert client.post(url + "/character", json=invalid).status_code == 422
+    assert (
+        client.post(url + "/character-preview", json={**invalid, "notes": "x" * 2001}).status_code
+        == 422
+    )
+    with sessions() as db:
+        assert len(list(db.scalars(select(GenerationJob)))) == 1  # upload only
+
+
+def test_character_generation_transmits_reference_and_retains_retry_provenance(studio, monkeypatch):
+    import base64
+
+    from app.adapters.generation.gpt_image import GptImageProvider
+    from app.modules.generation import service
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    reference = media_engine.mock_image()
+    source = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("ref.png", reference, "image/png")},
+    ).json()
+    provider = GptImageProvider(token="test")
+    requests = []
+
+    def reply(req):
+        requests.append(req)
+        return {"data": [{"b64_json": base64.b64encode(media_engine.mock_image(1)).decode()}]}
+
+    monkeypatch.setattr(provider, "_http", reply)
+    monkeypatch.setattr(service, "_provider_instance", lambda *args: provider)
+    url = f"{base}/generations/{source['id']}"
+    for mode, preset in [
+        ("view", "profile_left"),
+        ("expression", "happy"),
+        ("sheet", "three_view"),
+    ]:
+        body = {"provider": "gpt_image", "mode": mode, "preset": preset}
+        preview = post_ok(client, url + "/character-preview", body)
+        job = post_ok(client, url + "/character", body)
+        assert job["status"] == "succeeded", job
+        assert job["input_snapshot"]["prompt"] == preview["prompt"]
+        assert job["input_snapshot"]["references"] == [
+            {"blob_hash": source["output_blob_hash"], "role": "ref"}
+        ]
+        assert b'name="image[]"' in requests[-1].data and reference in requests[-1].data
+        assert preview["prompt"].encode() in requests[-1].data and requests[-1].full_url.endswith(
+            "/images/edits"
+        )
+        outputs = client.get(f"{base}/generations?target_type=shot&target_id={ids['shot']}").json()
+        result = next(g for g in outputs if g["job_id"] == job["id"])
+        assert result["input_refs"]["character_preset"]["preset"] == preset
+        assert result["input_refs"]["source_generation_id"] == source["id"]
+        assert not result["is_selected"] and result["cost_points"] == preview["points"]
+    monkeypatch.setattr(
+        provider, "submit", lambda *_: (_ for _ in ()).throw(ValueError("provider offline"))
+    )
+    failed = post_ok(client, url + "/character", body)
+    assert failed["status"] == "failed"
+    monkeypatch.delattr(provider, "submit")
+    retried = post_ok(client, base + f"/jobs/{failed['id']}/retry")
+    assert retried["status"] == "succeeded"
+    assert (
+        retried["input_snapshot"]["character_preset"]
+        == failed["input_snapshot"]["character_preset"]
+    )
+    assert retried["input_snapshot"]["prompt"] == failed["input_snapshot"]["prompt"]
+
+
+def test_character_guards_provider_source_scope_and_permissions(studio, monkeypatch):
+    from app.adapters.generation.gpt_image import GptImageProvider
+    from app.models.generation import Quota
+    from app.modules.generation import service
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    source = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("ref.png", media_engine.mock_image(), "image/png")},
+    ).json()
+    url = f"{base}/generations/{source['id']}"
+    body = {"provider": "mock", "mode": "expression", "preset": "happy"}
+    assert client.post(url + "/character", json=body).status_code == 422
+    monkeypatch.setattr(service, "_provider_instance", lambda *args: GptImageProvider(token="test"))
+    body["provider"] = "gpt_image"
+    with sessions() as db:
+        g = db.get(Generation, uuid.UUID(source["id"]))
+        g.output_type = "video"
+        db.commit()
+    assert client.post(url + "/character-preview", json=body).status_code == 422
+    with sessions() as db:
+        g = db.get(Generation, uuid.UUID(source["id"]))
+        g.output_type, g.project_id = "image", ids["other"]
+        db.commit()
+    assert client.post(url + "/character", json=body).status_code == 404
+    with sessions() as db:
+        db.get(Generation, uuid.UUID(source["id"])).project_id = uuid.UUID(ids["project"])
+        db.add(
+            Quota(project_id=uuid.UUID(ids["project"]), scope="project", limit_cost=1, used_cost=0)
+        )
+        db.commit()
+    assert client.post(url + "/character", json=body).status_code == 402
+    with sessions() as db:
+        member = db.scalar(
+            select(Membership).where(Membership.project_id == uuid.UUID(ids["project"]))
+        )
+        member.role = "viewer"
+        db.commit()
+    assert client.post(url + "/character-preview", json=body).status_code == 403
+    assert client.post(url + "/character", json=body).status_code == 403
+
+
 def test_inpaint_mask_provenance_and_project_guards(studio, monkeypatch):
     import base64
 
