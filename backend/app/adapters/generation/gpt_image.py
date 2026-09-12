@@ -51,7 +51,8 @@ class GptImageProvider(GenerationProvider):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             modalities={"image"},  # 仅图片,无视频
-            features={"reference", "img2img"},
+            features={"reference", "img2img"}
+            | ({"inpaint"} if self.config.get("mask_editing", True) else set()),
             max_reference_images=int(self.config.get("max_reference_images", 4)),
             param_schema=self.config.get("param_schema", {}),
         )
@@ -72,6 +73,10 @@ class GptImageProvider(GenerationProvider):
         if req.request_type != "image":
             raise ProviderError("GPT Image 仅支持图片生成")
         refs = [r for r in req.references if r.data_url]
+        if req.mask and (
+            not refs or not req.mask.data_url or "inpaint" not in self.capabilities().features
+        ):
+            raise ProviderError("局部重绘需要原图、蒙版和支持蒙版的模型")
         try:
             data = self._call_with_n_fallback(req, refs)
         except ProviderError:
@@ -259,6 +264,16 @@ class GptImageProvider(GenerationProvider):
                 (
                     f'--{boundary}\r\nContent-Disposition: form-data; name="image[]"; '
                     f'filename="ref{i}.{ext}"\r\nContent-Type: {mime}\r\n\r\n'
+                ).encode()
+                + blob
+                + b"\r\n"
+            )
+        if req.mask:
+            mime, blob = _parse_data_url(req.mask.data_url)
+            parts.append(
+                (
+                    f'--{boundary}\r\nContent-Disposition: form-data; name="mask"; '
+                    f'filename="mask.png"\r\nContent-Type: {mime}\r\n\r\n'
                 ).encode()
                 + blob
                 + b"\r\n"

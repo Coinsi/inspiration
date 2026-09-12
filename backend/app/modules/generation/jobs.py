@@ -351,12 +351,17 @@ def execute(db, job_id):
         db.commit()
         operation = snap.get("operation", "generate")
         materialized = []
+        materialized_mask = None
         provider = None
         if provider_name != "local":
             materialized = _materialize_references(
                 db, [ReferenceImage(**r) for r in snap.get("references", [])]
             )
             provider = _provider_instance(db, project_id, provider_name)
+            if snap.get("mask"):
+                materialized_mask = _materialize_references(db, [ReferenceImage(**snap["mask"])])[0]
+                if "inpaint" not in provider.capabilities().features:
+                    raise ValueError("供应商当前不支持局部重绘")
         db.commit()
         job = db.scalar(
             select(GenerationJob)
@@ -397,6 +402,7 @@ def execute(db, job_id):
                 provider_params=snap.get("provider_params", {}),
                 count=snap.get("count", 1),
                 references=materialized,
+                mask=materialized_mask,
             )
             handle = provider.submit(req)
             # Do not overwrite a concurrent cancellation while recording the remote handle.
@@ -477,6 +483,8 @@ def execute(db, job_id):
                         "clips": snap.get("clips", []),
                         "options": snap.get("options", {}),
                         "references": snap.get("references", []),
+                        "mask": snap.get("mask"),
+                        "edit_source_id": snap.get("edit_source_id"),
                         "provider_params": snap.get("provider_params", {}),
                         "actual_media": media_details[index] if index < len(media_details) else {},
                     },

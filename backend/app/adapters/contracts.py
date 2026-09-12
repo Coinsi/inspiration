@@ -2,6 +2,7 @@
 
 M0 仅定义契约与注册中心;具体实现(即梦/解析/拆解/一致性)在 M2-M4 落地。
 """
+
 from abc import ABC, abstractmethod
 from typing import BinaryIO, Literal
 
@@ -32,6 +33,7 @@ class GenerationRequest(BaseModel):
     prompt: str
     negative: str | None = None
     references: list[ReferenceImage] = Field(default_factory=list)
+    mask: ReferenceImage | None = None
     seed: int | None = None
     params: dict = Field(default_factory=dict)
     provider_params: dict = Field(default_factory=dict)
@@ -125,6 +127,7 @@ class ShotSuggestion(BaseModel):
 
 class StoryboardShotSuggestion(BaseModel):
     """AI 拆分镜:镜头 + 分镜规格建议(各 *_ 字段为前后端统一的稳定 key)。"""
+
     title: str = ""
     description: str = ""
     shot_size: str = ""
@@ -145,17 +148,30 @@ class EntityDraft(BaseModel):
 
 # 剧本正文块类型(typed blocks);AI 与编辑器共用的稳定集合
 SCRIPT_BLOCK_TYPES = (
-    "scene_heading", "action", "character", "dialogue", "parenthetical", "transition",
+    "scene_heading",
+    "action",
+    "character",
+    "dialogue",
+    "parenthetical",
+    "transition",
 )
 
 # 设定(故事圣经)预置分类;category 存自由字符串,此集合仅为预置引导,可扩展
 SETTING_CATEGORIES = (
-    "world", "power_system", "faction", "character", "location", "item", "glossary", "timeline",
+    "world",
+    "power_system",
+    "faction",
+    "character",
+    "location",
+    "item",
+    "glossary",
+    "timeline",
 )
 
 
 class SettingDraft(BaseModel):
     """单章提取出的一条设定。name 与已有设定同名表示「补充更新」(content 应为合并后的完整版)。"""
+
     category: str
     name: str
     content: str = ""
@@ -163,6 +179,7 @@ class SettingDraft(BaseModel):
 
 class ScriptBlock(BaseModel):
     """剧本正文的一个块(场景头/动作/角色/对白/括号提示/转场)。"""
+
     block_type: Literal[
         "scene_heading", "action", "character", "dialogue", "parenthetical", "transition"
     ]
@@ -208,7 +225,8 @@ class DecompositionStrategy(ABC):
         """
         return [
             SettingDraft(
-                category=c["category"], name=c["name"],
+                category=c["category"],
+                name=c["name"],
                 content=max((c.get("versions") or [""]), key=len),
             )
             for c in conflicts
@@ -264,6 +282,7 @@ class AssistProposal(BaseModel):
     ops 的具体形态由目标对象适配器定义并校验;引擎只负责产出候选,不直接碰 ORM。
     needs_clarification=True 表示指令不明确,助手在 reply 里反问,ops 应为空。
     """
+
     reply: str = ""
     summary: str = ""
     ops: list[dict] = Field(default_factory=list)

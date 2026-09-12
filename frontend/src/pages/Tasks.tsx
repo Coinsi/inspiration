@@ -56,6 +56,7 @@ export default function Tasks() {
     return zh
       ? {
           refine: "图片精修",
+          inpaint: "局部重绘",
           render: "成片导出",
           upload: "素材上传",
           generate: j.request_type === "video" ? "视频生成" : "图片生成",

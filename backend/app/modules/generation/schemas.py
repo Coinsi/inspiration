@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -89,6 +89,37 @@ class RefineIn(BaseModel):
     scale: float = Field(default=1, ge=0.25, le=4)
     brightness: float = Field(default=1, ge=0.1, le=2)
     contrast: float = Field(default=1, ge=0.1, le=2)
+
+
+Unit = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
+
+class MaskStroke(BaseModel):
+    points: list[tuple[Unit, Unit]] = Field(min_length=1, max_length=2000)
+    radius: float = Field(ge=0.001, le=0.25, allow_inf_nan=False)
+    erase: bool = False
+
+
+class InpaintIn(BaseModel):
+    provider: str = Field(min_length=1, max_length=64)
+    prompt: str = Field(min_length=1, max_length=8000)
+    strokes: list[MaskStroke] = Field(min_length=1, max_length=100)
+
+
+class OptimizePromptIn(BaseModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    mode: Literal["expand", "refine", "style"] = "refine"
+    media_type: Literal["image", "video"] = "image"
+    style: str = Field(default="", max_length=1000)
+
+
+class OptimizedPrompt(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    avoid: str = Field(default="", max_length=4000)
+    explanation: str = Field(default="", max_length=4000)
+    assumptions: list[Annotated[str, Field(max_length=1000)]] = Field(
+        default_factory=list, max_length=20
+    )
 
 
 class RenderIn(BaseModel):

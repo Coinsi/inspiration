@@ -164,6 +164,133 @@ def post_ok(client, path, data=None):
     return r.json()
 
 
+def test_inpaint_mask_provenance_and_project_guards(studio, monkeypatch):
+    import base64
+
+    from app.adapters.generation.gpt_image import GptImageProvider
+    from app.models.storage import Blob
+    from app.modules.generation import service
+    from app.storage import cas
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    original = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("source.png", media_engine.mock_image(), "image/png")},
+    ).json()
+    body = {
+        "provider": "gpt_image",
+        "prompt": "Change the selected area to blue",
+        "strokes": [{"points": [[0.5, 0.5]], "radius": 0.1}],
+    }
+    provider = GptImageProvider(token="test", config={"model": "gpt-image-2"})
+    captured = []
+    monkeypatch.setattr(
+        provider,
+        "_http",
+        lambda req: (
+            captured.append(req.data)
+            or {"data": [{"b64_json": base64.b64encode(media_engine.mock_image()).decode()}]}
+        ),
+    )
+    monkeypatch.setattr(service, "_provider_instance", lambda *args: provider)
+    job = post_ok(client, f"{base}/generations/{original['id']}/inpaint", body)
+    assert job["status"] == "succeeded", job
+    assert job["input_snapshot"]["operation"] == "inpaint"
+    assert len(captured) == 1 and b'name="mask"' in captured[0]
+    variants = client.get(f"{base}/generations?target_type=shot&target_id={ids['shot']}").json()
+    edited = next(g for g in variants if g["job_id"] == job["id"])
+    assert edited["id"] != original["id"]
+    assert edited["input_refs"]["edit_source_id"] == original["id"]
+    with sessions() as db:
+        blob = db.get(Blob, job["input_snapshot"]["mask"]["blob_hash"])
+        mask = Image.open(io.BytesIO(cas.read_bytes(blob)))
+        assert mask.size == (640, 360)
+        assert mask.getpixel((320, 180))[3] == 0
+        assert mask.getpixel((0, 0))[3] == 255
+        g = db.get(Generation, uuid.UUID(original["id"]))
+        g.project_id = ids["other"]
+        db.commit()
+    assert client.post(f"{base}/generations/{original['id']}/inpaint", json=body).status_code == 404
+
+
+def test_inpaint_rejects_unsupported_empty_and_invalid_selection(studio, monkeypatch):
+    from app.modules.generation import service
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    original = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("source.png", media_engine.mock_image(), "image/png")},
+    ).json()
+    monkeypatch.setattr(service, "_provider_instance", lambda *args: MockProvider())
+    path = f"{base}/generations/{original['id']}/inpaint"
+    body = {
+        "provider": "mock",
+        "prompt": "test",
+        "strokes": [{"points": [[0.5, 0.5]], "radius": 0.1}],
+    }
+    assert client.post(path, json=body).status_code == 422
+    assert client.post(path, json={**body, "strokes": []}).status_code == 422
+    assert client.post(path, json={**body, "prompt": " "}).status_code == 422
+    with sessions() as db:
+        membership = db.scalar(
+            select(Membership).where(Membership.project_id == uuid.UUID(ids["project"]))
+        )
+        membership.role = "viewer"
+        db.commit()
+    assert client.post(path, json=body).status_code == 403
+    assert client.post(f"{base}/prompts/optimize", json={"prompt": "test"}).status_code == 403
+
+
+def test_optimizer_requires_config_and_valid_json_without_changing_source(studio, monkeypatch):
+    import json
+
+    from app.core.crypto import encrypt
+    from app.models.generation import ProviderConfig
+    from app.modules.generation import editing
+
+    client, sessions, ids = studio
+    path = f"/api/v1/projects/{ids['project']}/prompts/optimize"
+    body = {"prompt": "红色茶壶", "mode": "refine"}
+    assert client.post(path, json=body).status_code == 422
+    with sessions() as db:
+        db.add(
+            ProviderConfig(
+                project_id=uuid.UUID(ids["project"]),
+                provider_name="cloud_llm",
+                kind="llm",
+                enabled=True,
+                endpoint="https://example.invalid/v1",
+                credentials_encrypted=encrypt("test"),
+                config={"model": "test"},
+            )
+        )
+        db.commit()
+    sent = []
+
+    def reply(system, user, *args):
+        sent.append(json.loads(user))
+        return json.dumps(
+            {
+                "prompt": "红色茶壶，灰色背景",
+                "avoid": "文字水印",
+                "explanation": "补充背景",
+                "assumptions": ["灰色背景"],
+            }
+        )
+
+    monkeypatch.setattr(editing, "_chat", reply)
+    result = post_ok(client, path, body)
+    assert result["prompt"] == "红色茶壶，灰色背景" and sent[0]["prompt"] == body["prompt"]
+    assert client.post(path, json={**body, "mode": "style"}).status_code == 422
+    monkeypatch.setattr(editing, "_chat", lambda *args: "not json")
+    assert client.post(path, json=body).status_code == 502
+    with sessions() as db:
+        assert db.get(Shot, uuid.UUID(ids["shot"])).title == "Test shot"
+        assert list(db.scalars(select(GenerationJob))) == []
+
+
 def test_end_to_end_refine_render_and_range(studio, tmp_path):
     client, sessions, ids = studio
     base = f"/api/v1/projects/{ids['project']}"

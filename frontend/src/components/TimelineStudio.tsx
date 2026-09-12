@@ -1,4 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  edit,
+  undo,
+  redo,
+  splitClip,
+  type Clip,
+  type History,
+} from "@/lib/timeline-edit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { ArrowDown, ArrowUp, Download, Film, Plus, Trash2 } from "lucide-react";
@@ -20,15 +28,6 @@ import { useI18n } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { useConfirm } from "@/components/ui/confirm";
 
-interface Clip {
-  shot_id: string;
-  generation_id: string | null;
-  in_point_ms: number;
-  out_point_ms: number;
-  duration_ms: number;
-  transition?: Record<string, unknown> | null;
-  note?: string | null;
-}
 export function TimelineStudio({
   projectId,
   timelines,
@@ -44,10 +43,12 @@ export function TimelineStudio({
   const [dirty, setDirty] = useState(false);
   const confirm = useConfirm();
   const requested = search.get("timeline");
-  const id = timelines.find((t) => t.id === requested)?.id || timelines[0]?.id || "";
+  const id =
+    timelines.find((t) => t.id === requested)?.id || timelines[0]?.id || "";
   const q = useQuery({
     queryKey: ["timeline-items", projectId, id],
-    queryFn: () => api.get<Clip[]>(`/projects/${projectId}/timelines/${id}/items`),
+    queryFn: () =>
+      api.get<Clip[]>(`/projects/${projectId}/timelines/${id}/items`),
     enabled: !!id,
   });
   return (
@@ -64,7 +65,9 @@ export function TimelineStudio({
               !dirty ||
               (await confirm({
                 title: zh ? "切换时间线" : "Switch timeline",
-                message: zh ? "当前未保存的调整将丢失。" : "Unsaved changes will be lost.",
+                message: zh
+                  ? "当前未保存的调整将丢失。"
+                  : "Unsaved changes will be lost.",
               }))
             ) {
               setDirty(false);
@@ -130,35 +133,57 @@ function TimelineDraft({
   const qc = useQueryClient();
   const toast = useToast();
   const base = `/projects/${projectId}`;
-  const [clips, setClips] = useState<Clip[]>(
-    initial.map((c) => ({
+  const [history, setHistory] = useState<History<Clip[]>>(() => ({
+    past: [],
+    future: [],
+    present: initial.map((c) => ({
       ...c,
-      duration_ms: c.out_point_ms ? c.out_point_ms - c.in_point_ms : c.duration_ms || 3000,
+      duration_ms: c.out_point_ms
+        ? c.out_point_ms - c.in_point_ms
+        : c.duration_ms || 3000,
       out_point_ms: 0,
     })),
+  }));
+  const clips = history.present;
+  const [savedSnapshot, setSavedSnapshot] = useState(() =>
+    JSON.stringify(clips),
   );
+  const saved = savedSnapshot === JSON.stringify(clips);
+  const [splitOffsets, setSplitOffsets] = useState<Record<number, number>>({});
+  useEffect(() => {
+    onDirty(!saved);
+  }, [saved, onDirty]);
   const [selectedShot, setSelectedShot] = useState("");
-  const [saved, setSaved] = useState(true);
   const [height, setHeight] = useState(720);
   const [aspect, setAspect] = useState("16:9");
   const [mute, setMute] = useState(false);
-  const [lastJob, setLastJob] = usePersistentState<string>(`render.job.${projectId}.${timelineId}`, "");
+  const [lastJob, setLastJob] = usePersistentState<string>(
+    `render.job.${projectId}.${timelineId}`,
+    "",
+  );
   const [preview, setPreview] = useState("");
   const gens = useQuery({
     queryKey: ["gens", "timeline", timelineId],
-    queryFn: () => api.get<Generation[]>(`${base}/generations?target_type=timeline&target_id=${timelineId}`),
+    queryFn: () =>
+      api.get<Generation[]>(
+        `${base}/generations?target_type=timeline&target_id=${timelineId}`,
+      ),
   });
-  const outputs = (gens.data || []).filter((g) => g.output_type === "video" && g.output_blob_hash);
+  const outputs = (gens.data || []).filter(
+    (g) => g.output_type === "video" && g.output_blob_hash,
+  );
   const result = outputs.find((g) => g.id === preview) || outputs[0];
   const download = useMutation({
     mutationFn: () =>
-      downloadBlob(projectId, result!.output_blob_hash!, `inspiration-${timelineId.slice(0, 8)}.mp4`),
+      downloadBlob(
+        projectId,
+        result!.output_blob_hash!,
+        `inspiration-${timelineId.slice(0, 8)}.mp4`,
+      ),
     onError: (e) => toast.push((e as Error).message, "error"),
   });
   const change = (next: Clip[]) => {
-    setClips(next);
-    setSaved(false);
-    onDirty(true);
+    setHistory((h) => edit(h, next));
   };
   const update = (index: number, patch: Partial<Clip>) =>
     change(clips.map((c, i) => (i === index ? { ...c, ...patch } : c)));
@@ -169,9 +194,10 @@ function TimelineDraft({
   };
   const persist = async () => {
     await api.put(`${base}/timelines/${timelineId}/items`, { items: clips });
-    setSaved(true);
-    onDirty(false);
-    void qc.invalidateQueries({ queryKey: ["timeline-items", projectId, timelineId] });
+    setSavedSnapshot(JSON.stringify(clips));
+    void qc.invalidateQueries({
+      queryKey: ["timeline-items", projectId, timelineId],
+    });
   };
   const save = useMutation({
     mutationFn: persist,
@@ -217,7 +243,9 @@ function TimelineDraft({
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 p-5 text-center text-sm text-muted-foreground">
                 <Film className="h-7 w-7" />
-                {zh ? "导出完成后在这里预览" : "Preview appears when export completes"}
+                {zh
+                  ? "导出完成后在这里预览"
+                  : "Preview appears when export completes"}
               </div>
             )}
           </div>
@@ -231,7 +259,8 @@ function TimelineDraft({
               >
                 {outputs.map((g) => (
                   <option key={g.id} value={g.id}>
-                    {new Date(g.created_at).toLocaleString()} · {g.id.slice(0, 8)}
+                    {new Date(g.created_at).toLocaleString()} ·{" "}
+                    {g.id.slice(0, 8)}
                   </option>
                 ))}
               </select>
@@ -242,14 +271,26 @@ function TimelineDraft({
                 onClick={() => download.mutate()}
               >
                 <Download className="h-3.5 w-3.5" />
-                {download.isPending ? (zh ? "下载中…" : "Downloading…") : zh ? "下载 MP4" : "Download MP4"}
+                {download.isPending
+                  ? zh
+                    ? "下载中…"
+                    : "Downloading…"
+                  : zh
+                    ? "下载 MP4"
+                    : "Download MP4"}
               </Button>
             </div>
           )}
-          {gens.error && <p className="mt-2 text-xs text-danger">{(gens.error as Error).message}</p>}
+          {gens.error && (
+            <p className="mt-2 text-xs text-danger">
+              {(gens.error as Error).message}
+            </p>
+          )}
         </div>
         <div className="space-y-3">
-          <h3 className="text-sm font-medium">{zh ? "导出设置" : "Export settings"}</h3>
+          <h3 className="text-sm font-medium">
+            {zh ? "导出设置" : "Export settings"}
+          </h3>
           <p className="text-xs text-muted-foreground">
             {clips.length} {zh ? "段" : "clips"} · {total.toFixed(1)} s
           </p>
@@ -277,7 +318,11 @@ function TimelineDraft({
             </select>
           </label>
           <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={mute} onChange={(e) => setMute(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={mute}
+              onChange={(e) => setMute(e.target.checked)}
+            />
             {zh ? "静音导出" : "Mute audio"}
           </label>
           <p className="text-xs leading-5 text-muted-foreground">
@@ -298,15 +343,46 @@ function TimelineDraft({
                 ? "保存并导出 MP4"
                 : "Save & export MP4"}
           </Button>
-          {lastJob && <JobStatus key={lastJob} projectId={projectId} jobId={lastJob} />}
+          {lastJob && (
+            <JobStatus key={lastJob} projectId={projectId} jobId={lastJob} />
+          )}
         </div>
       </div>
       <section className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!history.past.length || pending}
+            onClick={() => setHistory(undo)}
+          >
+            {zh ? "撤销剪辑" : "Undo edit"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!history.future.length || pending}
+            onClick={() => setHistory(redo)}
+          >
+            {zh ? "重做剪辑" : "Redo edit"}
+          </Button>
+          <span className="self-center text-xs text-muted-foreground">
+            {zh
+              ? "本次编辑保留最近 100 步，保存后仍可撤销。"
+              : "Up to 100 steps per editing session; saving keeps history."}
+          </span>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-medium">
             {zh ? "镜头顺序" : "Clip order"}
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {saved ? (zh ? "已保存" : "Saved") : zh ? "有未保存调整" : "Unsaved changes"}
+              {saved
+                ? zh
+                  ? "已保存"
+                  : "Saved"
+                : zh
+                  ? "有未保存调整"
+                  : "Unsaved changes"}
             </span>
           </h3>
           <Button
@@ -329,7 +405,11 @@ function TimelineDraft({
             {shots.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.code} · {s.title || ""}
-                {s.selected_generation_id ? "" : zh ? "（尚未钦定素材）" : " (no selected media)"}
+                {s.selected_generation_id
+                  ? ""
+                  : zh
+                    ? "（尚未钦定素材）"
+                    : " (no selected media)"}
               </option>
             ))}
           </select>
@@ -361,14 +441,34 @@ function TimelineDraft({
           </p>
         )}
         {clips.map((c, i) => (
-          <div key={`${i}-${c.shot_id}`} className="rounded-lg border border-border bg-bg p-3">
+          <div
+            key={`${i}-${c.shot_id}`}
+            className="rounded-lg border border-border bg-bg p-3"
+          >
             <div className="mb-3 flex items-center gap-2">
-              <span className="text-xs text-faint">{String(i + 1).padStart(2, "0")}</span>
+              <span className="text-xs text-faint">
+                {String(i + 1).padStart(2, "0")}
+              </span>
               <span className="min-w-0 flex-1 truncate text-sm">
                 {shots.find((s) => s.id === c.shot_id)?.title ||
                   shots.find((s) => s.id === c.shot_id)?.code ||
                   c.shot_id.slice(0, 8)}
               </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                title={zh ? "复制片段" : "Duplicate clip"}
+                disabled={pending || clips.length >= 100}
+                onClick={() =>
+                  change([
+                    ...clips.slice(0, i + 1),
+                    { ...c },
+                    ...clips.slice(i + 1),
+                  ])
+                }
+              >
+                {zh ? "复制" : "Duplicate"}
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"
@@ -414,7 +514,11 @@ function TimelineDraft({
                   step={0.1}
                   disabled={pending}
                   value={c.in_point_ms / 1000}
-                  onChange={(e) => update(i, { in_point_ms: Math.round(Number(e.target.value) * 1000) })}
+                  onChange={(e) =>
+                    update(i, {
+                      in_point_ms: Math.round(Number(e.target.value) * 1000),
+                    })
+                  }
                   className="mt-1 h-9 w-full rounded-md border bg-bg px-2 text-foreground"
                 />
               </label>
@@ -428,10 +532,64 @@ function TimelineDraft({
                   step={0.1}
                   disabled={pending}
                   value={c.duration_ms / 1000}
-                  onChange={(e) => update(i, { duration_ms: Math.round(Number(e.target.value) * 1000) })}
+                  onChange={(e) =>
+                    update(i, {
+                      duration_ms: Math.round(Number(e.target.value) * 1000),
+                    })
+                  }
                   className="mt-1 h-9 w-full rounded-md border bg-bg px-2 text-foreground"
                 />
               </label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                {zh ? "在片段内第" : "Split at"}
+                <input
+                  aria-label={`${zh ? "拆分位置" : "Split position"} ${i + 1}`}
+                  type="number"
+                  min={0.1}
+                  max={Math.max(0.1, (c.duration_ms - 100) / 1000)}
+                  step={0.1}
+                  disabled={pending}
+                  value={
+                    (splitOffsets[i] ?? Math.floor(c.duration_ms / 200) * 100) /
+                    1000
+                  }
+                  onChange={(e) =>
+                    setSplitOffsets({
+                      ...splitOffsets,
+                      [i]: Math.round(Number(e.target.value) * 1000),
+                    })
+                  }
+                  className="h-8 w-20 rounded-md border bg-bg px-2 text-foreground"
+                />
+                {zh ? "秒拆分" : "seconds"}
+              </label>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  pending ||
+                  clips.length >= 100 ||
+                  !Number.isFinite(splitOffsets[i] ?? c.duration_ms / 2) ||
+                  (splitOffsets[i] ?? Math.floor(c.duration_ms / 200) * 100) <
+                    100 ||
+                  (splitOffsets[i] ?? Math.floor(c.duration_ms / 200) * 100) >
+                    c.duration_ms - 100
+                }
+                onClick={() => {
+                  change(
+                    splitClip(
+                      clips,
+                      i,
+                      splitOffsets[i] ?? Math.floor(c.duration_ms / 200) * 100,
+                    ),
+                  );
+                  setSplitOffsets({});
+                }}
+              >
+                {zh ? "拆分片段" : "Split clip"}
+              </Button>
             </div>
           </div>
         ))}
@@ -463,7 +621,9 @@ function ClipSource({
   const { data, error } = useQuery({
     queryKey: ["gens", "shot", clip.shot_id],
     queryFn: () =>
-      api.get<Generation[]>(`/projects/${projectId}/generations?target_type=shot&target_id=${clip.shot_id}`),
+      api.get<Generation[]>(
+        `/projects/${projectId}/generations?target_type=shot&target_id=${clip.shot_id}`,
+      ),
   });
   return (
     <label className="min-w-0 text-xs text-muted-foreground">
@@ -474,13 +634,21 @@ function ClipSource({
         value={clip.generation_id || ""}
         onChange={(e) => onChange(e.target.value || null)}
       >
-        <option value="">{zh ? "使用镜头当前钦定素材" : "Use shot selection"}</option>
+        <option value="">
+          {zh ? "使用镜头当前钦定素材" : "Use shot selection"}
+        </option>
         {data
           ?.filter((g) => g.output_blob_hash)
           .map((g, i) => (
             <option key={g.id} value={g.id}>
-              {g.output_type === "video" ? (zh ? "视频" : "Video") : zh ? "图片" : "Image"} {i + 1} ·{" "}
-              {g.provider} · {g.id.slice(0, 8)}
+              {g.output_type === "video"
+                ? zh
+                  ? "视频"
+                  : "Video"
+                : zh
+                  ? "图片"
+                  : "Image"}{" "}
+              {i + 1} · {g.provider} · {g.id.slice(0, 8)}
             </option>
           ))}
       </select>

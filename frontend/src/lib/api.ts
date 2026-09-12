@@ -406,6 +406,8 @@ export interface GenJob {
 }
 export interface Generation {
   id: string;
+  target_type: "shot" | "asset" | "timeline";
+  target_id: string;
   job_id: string;
   provider: string;
   created_at: string;

@@ -319,9 +319,13 @@ def submit(
     target_type: str,
     target_id: uuid.UUID,
     gen_in: schemas.GenerateIn,
+    *,
+    mask: ReferenceImage | None = None,
 ) -> GenerationJob:
     provider = _provider_instance(db, ctx.project.id, gen_in.provider)
     caps = provider.capabilities()
+    if mask and ("inpaint" not in caps.features or not gen_in.source_generation_id):
+        raise CapabilityUnsupported("供应商未声明支持局部重绘，或未指定原图")
     if gen_in.request_type.value not in caps.modalities:
         raise CapabilityUnsupported(
             f"供应商 {gen_in.provider} 不支持 {gen_in.request_type.value}",
@@ -340,6 +344,7 @@ def submit(
         raise CapabilityUnsupported("参考图数量超过供应商限制")
     _validate_controls(gen_in, caps)
     req = _build_request(prompt, gen_in, refs)
+    req.mask = mask
     est = provider.estimate_cost(req)
 
     from app.modules.generation.jobs import reserve_check
@@ -363,6 +368,15 @@ def submit(
             "provider_params": gen_in.provider_params,
             "count": gen_in.count,
             "references": [{"blob_hash": r.blob_hash, "role": r.role} for r in refs],
+            **(
+                {
+                    "mask": {"blob_hash": mask.blob_hash, "role": "mask"},
+                    "operation": "inpaint",
+                    "edit_source_id": str(gen_in.source_generation_id),
+                }
+                if mask
+                else {}
+            ),
         },
     )
     db.add(job)

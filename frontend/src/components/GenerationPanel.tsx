@@ -1,4 +1,6 @@
 import { ImageRefiner } from "@/components/ImageRefiner";
+import { ImageInpainter } from "@/components/ImageInpainter";
+import { PromptOptimizer } from "@/components/PromptOptimizer";
 import { JobStatus } from "@/components/JobStatus";
 import { apiUpload } from "@/lib/api";
 import { Link } from "react-router-dom";
@@ -11,7 +13,14 @@ import { useToast } from "@/components/ui/toast";
 import { useI18n } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { ZoomableImage } from "@/components/ImageViewer";
-import { api, blobUrl, type GenJob, type Generation, type ProviderConfig, type Quota } from "@/lib/api";
+import {
+  api,
+  blobUrl,
+  type GenJob,
+  type Generation,
+  type ProviderConfig,
+  type Quota,
+} from "@/lib/api";
 
 // 各供应商支持的模态(gpt_image 仅图片)
 const PROVIDER_LABEL: Record<string, string> = {
@@ -39,7 +48,10 @@ function GenerationPanelContent({
   const [count, setCount] = useState(targetType === "asset" ? 4 : 3);
   const [useRefs, setUseRefs] = useState(true);
   const [est, setEst] = useState<number | null>(null);
-  const [provider, setProvider] = usePersistentState<string>(`gen.provider.${projectId}`, "mock");
+  const [provider, setProvider] = usePersistentState<string>(
+    `gen.provider.${projectId}`,
+    "mock",
+  );
 
   const { data: providerConfigs } = useQuery({
     queryKey: ["providers", projectId],
@@ -49,7 +61,10 @@ function GenerationPanelContent({
   const providerOptions = [
     "mock",
     ...(providerConfigs ?? [])
-      .filter((p) => p.kind === "generation" && p.enabled && p.provider_name !== "mock")
+      .filter(
+        (p) =>
+          p.kind === "generation" && p.enabled && p.provider_name !== "mock",
+      )
       .map((p) => p.provider_name),
   ];
   const { data: caps, error: capsError } = useQuery({
@@ -68,6 +83,8 @@ function GenerationPanelContent({
   const [firstId, setFirstId] = useState("");
   const [lastId, setLastId] = useState("");
   const [editing, setEditing] = useState<Generation | null>(null);
+  const [inpainting, setInpainting] = useState<Generation | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
   const [lastJob, setLastJob] = usePersistentState<string>(
     `gen.job.${projectId}.${targetType}.${targetId}`,
     "",
@@ -92,17 +109,25 @@ function GenerationPanelContent({
     prompt_override: prompt.trim() || undefined,
     provider_params: type === "video" ? controls : {},
     source_generation_id:
-      type === "image" && caps?.features.includes("img2img") ? sourceId || undefined : undefined,
+      type === "image" && caps?.features.includes("img2img")
+        ? sourceId || undefined
+        : undefined,
     first_frame_id:
-      type === "video" && caps?.features.includes("first_frame") ? firstId || undefined : undefined,
+      type === "video" && caps?.features.includes("first_frame")
+        ? firstId || undefined
+        : undefined,
     last_frame_id:
-      type === "video" && caps?.features.includes("last_frame") ? lastId || undefined : undefined,
+      type === "video" && caps?.features.includes("last_frame")
+        ? lastId || undefined
+        : undefined,
   };
 
   const { data: gens } = useQuery({
     queryKey: ["gens", targetType, targetId],
     queryFn: () =>
-      api.get<Generation[]>(`${base}/generations?target_type=${targetType}&target_id=${targetId}`),
+      api.get<Generation[]>(
+        `${base}/generations?target_type=${targetType}&target_id=${targetId}`,
+      ),
   });
   const { data: quota } = useQuery({
     queryKey: ["quota", projectId],
@@ -118,12 +143,17 @@ function GenerationPanelContent({
   };
 
   const estimate = useMutation({
-    mutationFn: () => api.post<{ points: number }>(`${base}/${t}/${targetId}/estimate`, payload),
+    mutationFn: () =>
+      api.post<{ points: number }>(
+        `${base}/${t}/${targetId}/estimate`,
+        payload,
+      ),
     onSuccess: (d) => setEst(d.points),
     onError: (e) => toast.push((e as Error).message, "error"),
   });
   const generate = useMutation({
-    mutationFn: () => api.post<GenJob>(`${base}/${t}/${targetId}/generate`, payload),
+    mutationFn: () =>
+      api.post<GenJob>(`${base}/${t}/${targetId}/generate`, payload),
     onSuccess: (j) => {
       setLastJob(j.id);
       refresh();
@@ -134,7 +164,10 @@ function GenerationPanelContent({
     mutationFn: (file: File) => {
       const form = new FormData();
       form.append("file", file);
-      return apiUpload<Generation>(`${base}/media/${targetType}/${targetId}/upload`, form);
+      return apiUpload<Generation>(
+        `${base}/media/${targetType}/${targetId}/upload`,
+        form,
+      );
     },
     onSuccess: () => {
       refresh();
@@ -154,11 +187,31 @@ function GenerationPanelContent({
     onError: (e) => toast.push((e as Error).message, "error"),
   });
 
-  const selectLabel = targetType === "asset" ? tr("gen.setAvatar") : tr("gen.pick");
-  const selectedLabel = targetType === "asset" ? tr("gen.curAvatar") : tr("gen.picked");
+  const selectLabel =
+    targetType === "asset" ? tr("gen.setAvatar") : tr("gen.pick");
+  const selectedLabel =
+    targetType === "asset" ? tr("gen.curAvatar") : tr("gen.picked");
 
   return (
     <div className="space-y-3">
+      {inpainting && (
+        <ImageInpainter
+          projectId={projectId}
+          generation={inpainting}
+          provider={provider}
+          onClose={() => setInpainting(null)}
+          onJob={setLastJob}
+        />
+      )}
+      {optimizing && (
+        <PromptOptimizer
+          projectId={projectId}
+          initial={prompt}
+          mediaType={type}
+          onClose={() => setOptimizing(false)}
+          onApply={setPrompt}
+        />
+      )}
       {capsError && (
         <p role="alert" className="text-xs text-danger">
           {(capsError as Error).message}
@@ -186,7 +239,9 @@ function GenerationPanelContent({
           onChange={(e) => setType(e.target.value)}
         >
           <option value="image">{tr("gen.image")}</option>
-          {targetType === "shot" && supportsVideo && <option value="video">{tr("gen.video")}</option>}
+          {targetType === "shot" && supportsVideo && (
+            <option value="video">{tr("gen.video")}</option>
+          )}
         </select>
         <select
           className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
@@ -221,18 +276,26 @@ function GenerationPanelContent({
         <Button
           size="sm"
           onClick={() => generate.mutate()}
-          disabled={generate.isPending || !caps || !providerOptions.includes(provider)}
+          disabled={
+            generate.isPending || !caps || !providerOptions.includes(provider)
+          }
         >
           {tr("gen.gen")}
         </Button>
         {quota && (
           <span className="ml-auto text-xs text-muted-foreground">
-            {tr("gen.quota")} {quota.used_cost}/{quota.limit_cost} {tr("gen.points")}
+            {tr("gen.quota")} {quota.used_cost}/{quota.limit_cost}{" "}
+            {tr("gen.points")}
           </span>
         )}
       </div>
 
       <div className="space-y-3 rounded-lg border border-border p-3">
+        <div className="flex justify-end">
+          <Button size="sm" variant="ghost" onClick={() => setOptimizing(true)}>
+            {zh ? "优化提示词" : "Optimize prompt"}
+          </Button>
+        </div>
         <label className="block text-xs text-muted-foreground">
           {zh
             ? "本次生成指令（留空使用镜头 / 资产提示词）"
@@ -271,12 +334,20 @@ function GenerationPanelContent({
                 return (
                   <label key={name} className="text-xs">
                     {zh
-                      ? { duration: "时长（秒）", aspect_ratio: "画面比例", resolution: "清晰度" }[name]
+                      ? {
+                          duration: "时长（秒）",
+                          aspect_ratio: "画面比例",
+                          resolution: "清晰度",
+                        }[name]
                       : name}
                     <select
                       aria-label={
                         zh
-                          ? { duration: "时长（秒）", aspect_ratio: "画面比例", resolution: "清晰度" }[name]
+                          ? {
+                              duration: "时长（秒）",
+                              aspect_ratio: "画面比例",
+                              resolution: "清晰度",
+                            }[name]
                           : name
                       }
                       className="mt-1 h-9 w-full rounded-md border bg-bg px-2 disabled:opacity-50"
@@ -286,7 +357,11 @@ function GenerationPanelContent({
                         setControls((c) => {
                           const n = { ...c };
                           if (!e.target.value) delete n[name];
-                          else n[name] = name === "duration" ? Number(e.target.value) : e.target.value;
+                          else
+                            n[name] =
+                              name === "duration"
+                                ? Number(e.target.value)
+                                : e.target.value;
                           return n;
                         })
                       }
@@ -316,15 +391,25 @@ function GenerationPanelContent({
                 ["last_frame", lastId, setLastId],
               ].map(([feature, value, setter]) => (
                 <label key={feature as string} className="text-xs">
-                  {zh ? (feature === "first_frame" ? "首帧图片" : "尾帧图片") : (feature as string)}
+                  {zh
+                    ? feature === "first_frame"
+                      ? "首帧图片"
+                      : "尾帧图片"
+                    : (feature as string)}
                   <select
                     aria-label={
-                      zh ? (feature === "first_frame" ? "首帧图片" : "尾帧图片") : (feature as string)
+                      zh
+                        ? feature === "first_frame"
+                          ? "首帧图片"
+                          : "尾帧图片"
+                        : (feature as string)
                     }
                     className="mt-1 h-9 w-full rounded-md border bg-bg px-2 disabled:opacity-50"
                     disabled={!caps?.features.includes(feature as string)}
                     value={value as string}
-                    onChange={(e) => (setter as (v: string) => void)(e.target.value)}
+                    onChange={(e) =>
+                      (setter as (v: string) => void)(e.target.value)
+                    }
                   >
                     <option value="">
                       {caps?.features.includes(feature as string)
@@ -336,7 +421,9 @@ function GenerationPanelContent({
                           : "Unavailable"}
                     </option>
                     {gens
-                      ?.filter((g) => g.output_type === "image" && g.output_blob_hash)
+                      ?.filter(
+                        (g) => g.output_type === "image" && g.output_blob_hash,
+                      )
                       .map((g, i) => (
                         <option key={g.id} value={g.id}>
                           {zh ? "图片" : "Image"} {i + 1} · {g.id.slice(0, 8)}
@@ -382,7 +469,10 @@ function GenerationPanelContent({
                 const file = e.target.files?.[0];
                 if (file) {
                   if (file.size > 100 * 1024 * 1024)
-                    toast.push(zh ? "文件不能超过 100 MB" : "File exceeds 100 MB", "error");
+                    toast.push(
+                      zh ? "文件不能超过 100 MB" : "File exceeds 100 MB",
+                      "error",
+                    );
                   else upload.mutate(file);
                 }
                 e.target.value = "";
@@ -394,7 +484,9 @@ function GenerationPanelContent({
           </Link>
         </div>
       </div>
-      {lastJob && <JobStatus key={lastJob} projectId={projectId} jobId={lastJob} />}
+      {lastJob && (
+        <JobStatus key={lastJob} projectId={projectId} jobId={lastJob} />
+      )}
       {editing && (
         <ImageRefiner
           key={editing.id}
@@ -438,21 +530,51 @@ function GenerationPanelContent({
                   />
                 ))}
               <div className="flex items-center justify-between gap-2 px-2 pt-2 text-[10px] text-muted-foreground">
-                <span>{g.provider === "mock" ? (zh ? "测试素材" : "Test media") : g.provider}</span>
+                <span>
+                  {g.provider === "mock"
+                    ? zh
+                      ? "测试素材"
+                      : "Test media"
+                    : g.provider}
+                </span>
                 <span>{g.id.slice(0, 8)}</span>
               </div>
               {g.output_type === "image" && g.output_blob_hash && (
-                <button className="studio-link px-2 pt-2 text-xs" onClick={() => setEditing(g)}>
-                  {zh ? "精修图片" : "Refine image"}
-                </button>
+                <div className="flex flex-wrap">
+                  <button
+                    className="studio-link px-2 pt-2 text-xs"
+                    onClick={() => setEditing(g)}
+                  >
+                    {zh ? "精修图片" : "Refine image"}
+                  </button>
+                  <button
+                    className="studio-link px-2 pt-2 text-xs disabled:opacity-40"
+                    disabled={!caps?.features.includes("inpaint")}
+                    title={
+                      caps?.features.includes("inpaint")
+                        ? undefined
+                        : zh
+                          ? "请先选择支持蒙版编辑的供应商"
+                          : "Select a mask-capable provider"
+                    }
+                    onClick={() => setInpainting(g)}
+                  >
+                    {zh ? "局部重绘" : "Masked edit"}
+                  </button>
+                </div>
               )}
               <div className="flex items-center justify-between px-2 py-1.5">
                 <button
                   className={`transition ${g.is_favorite ? "text-primary" : "text-faint hover:text-foreground"}`}
-                  onClick={() => favorite.mutate({ id: g.id, fav: !g.is_favorite })}
+                  onClick={() =>
+                    favorite.mutate({ id: g.id, fav: !g.is_favorite })
+                  }
                   title={tr("gen.favorite")}
                 >
-                  <Star className="h-3.5 w-3.5" fill={g.is_favorite ? "currentColor" : "none"} />
+                  <Star
+                    className="h-3.5 w-3.5"
+                    fill={g.is_favorite ? "currentColor" : "none"}
+                  />
                 </button>
                 <button
                   className={`text-xs font-medium transition ${g.is_selected ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
@@ -465,14 +587,21 @@ function GenerationPanelContent({
           ))}
         </div>
       ) : (
-        <p className="py-8 text-center text-sm text-muted-foreground">{tr("gen.emptyVariants")}</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          {tr("gen.emptyVariants")}
+        </p>
       )}
     </div>
   );
 }
 
-export default function GenerationPanel(props: Parameters<typeof GenerationPanelContent>[0]) {
+export default function GenerationPanel(
+  props: Parameters<typeof GenerationPanelContent>[0],
+) {
   return (
-    <GenerationPanelContent key={`${props.projectId}.${props.targetType}.${props.targetId}`} {...props} />
+    <GenerationPanelContent
+      key={`${props.projectId}.${props.targetType}.${props.targetId}`}
+      {...props}
+    />
   );
 }

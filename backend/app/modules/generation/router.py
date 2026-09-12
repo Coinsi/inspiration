@@ -18,6 +18,29 @@ PROVIDER_MANAGE = require_action("provider.manage")
 QUOTA_MANAGE = require_action("quota.manage")
 
 
+@router.post("/generations/{gen_id}/inpaint", response_model=schemas.JobOut)
+def inpaint(
+    gen_id: uuid.UUID,
+    data: schemas.InpaintIn,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db),
+):
+    from app.modules.generation.editing import inpaint as submit_inpaint
+
+    return submit_inpaint(db, ctx, gen_id, data)
+
+
+@router.post("/prompts/optimize", response_model=schemas.OptimizedPrompt)
+def optimize_prompt(
+    data: schemas.OptimizePromptIn,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db),
+):
+    from app.modules.generation.editing import optimize_prompt as optimize
+
+    return optimize(db, ctx, data)
+
+
 @router.get("/providers/{name}/capabilities")
 def capabilities(
     name: str, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)
