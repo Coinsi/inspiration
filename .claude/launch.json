@@ -7,6 +7,15 @@
       "runtimeArgs": ["run", "dev"],
       "cwd": "frontend",
       "port": 5173
+    },
+    {
+      "name": "lyricmotion",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d C:\\Code\\Python\\Dynamiclycrics && npm run dev -- --port 5173 --strictPort --host 127.0.0.1"
+      ],
+      "port": 5173
     }
   ]
 }

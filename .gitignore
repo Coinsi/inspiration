@@ -34,3 +34,7 @@ vite.log*
 
 # 前端构建缓存
 frontend/tsconfig.tsbuildinfo
+
+# 一键启动日志及启动锁（不提交本机运行状态）
+.runtime/
+.idea/

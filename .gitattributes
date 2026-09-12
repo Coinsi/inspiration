@@ -1,0 +1,2 @@
+# Windows 的双击入口需要 CRLF；Git 仓库中仍按文本规范化。
+*.bat text eol=crlf
