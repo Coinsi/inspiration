@@ -1,4 +1,5 @@
 """timeline DTO。"""
+
 import uuid
 from datetime import datetime
 
@@ -23,15 +24,15 @@ class TimelineOut(BaseModel):
 class TimelineItemIn(BaseModel):
     shot_id: uuid.UUID
     generation_id: uuid.UUID | None = None
-    in_point_ms: int = 0
-    out_point_ms: int = 0
-    duration_ms: int = 0
+    in_point_ms: int = Field(0, ge=0, le=1_800_000)
+    out_point_ms: int = Field(0, ge=0, le=1_800_000)
+    duration_ms: int = Field(0, ge=0, le=1_800_000)
     transition: dict | None = None
     note: str | None = None
 
 
 class SetItemsIn(BaseModel):
-    items: list[TimelineItemIn] = Field(default_factory=list)
+    items: list[TimelineItemIn] = Field(default_factory=list, max_length=100)
 
 
 class TimelineItemOut(BaseModel):

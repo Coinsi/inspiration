@@ -1,4 +1,5 @@
 """应用配置:从环境变量 / .env 读取。"""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
     celery_eager: bool = False  # true: 任务同步执行(无需 worker/broker,便于本地验收)
+    generation_executor: str = "celery"  # local: 单进程后台队列；celery: 持久化分布式队列
 
     # 对象存储:minio(生产)| fs(本地文件系统,轻量自托管/开发)
     storage_backend: str = "minio"

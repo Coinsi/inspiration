@@ -10,14 +10,7 @@ import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { useToast } from "@/components/ui/toast";
 
-const COVERS = [
-  "from-teal-600/50 to-cyan-700/40",
-  "from-violet-600/50 to-fuchsia-700/40",
-  "from-amber-600/50 to-orange-700/40",
-  "from-rose-600/50 to-pink-700/40",
-  "from-sky-600/50 to-blue-700/40",
-  "from-emerald-600/50 to-green-700/40",
-];
+
 
 export default function Projects() {
   const qc = useQueryClient();
@@ -47,9 +40,9 @@ export default function Projects() {
 
   return (
     <div className="min-h-screen bg-transparent">
-      <header className="h-14 border-b border-border bg-surface/60 backdrop-blur-xl flex items-center justify-between px-6">
+      <header className="min-h-14 flex-wrap gap-3 py-3 border-b border-border bg-surface  flex items-center justify-between px-6">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-gradient-primary text-primary-foreground shadow-glow-sm">
+          <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-primary text-primary-foreground ">
             <Clapperboard className="h-[18px] w-[18px]" />
           </span>
           <span className="font-semibold tracking-tight">Inspiration</span>
@@ -68,7 +61,7 @@ export default function Projects() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto p-8">
+      <div className="max-w-6xl mx-auto p-4 md:p-8">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold">{tr("proj.title")}</h1>
@@ -80,7 +73,7 @@ export default function Projects() {
         </div>
 
         {open && (
-          <div className="mb-6 flex gap-2 items-center rounded-lg border border-border bg-card p-3">
+          <div className="mb-6 flex flex-wrap gap-2 items-center rounded-lg border border-border bg-card p-3">
             <Input
               placeholder={tr("proj.code")}
               value={code}
@@ -97,14 +90,14 @@ export default function Projects() {
         {isLoading ? (
           <p className="text-muted-foreground text-sm">{tr("common.loading")}</p>
         ) : (
-          <div className="grid grid-cols-3 gap-4">
-            {projects?.map((p, i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projects?.map((p) => (
               <Link
                 key={p.id}
                 to={`/projects/${p.id}/workbench`}
-                className="group rounded-xl border border-border bg-card overflow-hidden hover:border-primary/60 transition-all hover:-translate-y-0.5 hover:shadow-glow-sm"
+                className="group rounded-xl border border-border bg-card overflow-hidden hover:border-primary/60 transition-all hover:-translate-y-0.5 "
               >
-                <div className={`h-28 bg-gradient-to-br ${COVERS[i % COVERS.length]} flex items-center justify-center`}>
+                <div className="h-32 bg-elevated flex items-center justify-center">
                   <span className="text-3xl font-bold text-foreground/70">{p.name.slice(0, 1)}</span>
                 </div>
                 <div className="p-4">

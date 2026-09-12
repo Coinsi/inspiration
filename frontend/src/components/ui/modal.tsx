@@ -1,5 +1,6 @@
+import { useDialogFocus } from "./useDialogFocus";
 import { Maximize2, Minimize2, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export function Modal({
@@ -16,13 +17,21 @@ export function Modal({
   width?: number;
 }) {
   const [big, setBig] = useState(false);
+  const titleId = useId();
+  const dialogRef = useDialogFocus(open, onClose);
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8">
       {/* 不透明底:完全遮住背景,随主题变色 */}
-      <div className="absolute inset-0 bg-bg" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div
-        className="relative z-10 flex flex-col rounded-xl border border-border bg-elevated shadow-2xl w-full"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : "Dialog"}
+        tabIndex={-1}
+        className="relative z-10 flex flex-col rounded-xl border border-border bg-card shadow-2xl w-full"
         style={{
           maxWidth: big ? "min(1180px, 95vw)" : width,
           height: big ? "90vh" : "auto",
@@ -30,7 +39,9 @@ export function Modal({
         }}
       >
         <div className="flex items-center justify-between px-5 h-14 border-b border-border shrink-0">
-          <div className="font-medium">{title}</div>
+          <div id={titleId} className="font-medium">
+            {title}
+          </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setBig((b) => !b)}

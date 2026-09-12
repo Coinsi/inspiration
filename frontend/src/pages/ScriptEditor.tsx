@@ -180,9 +180,9 @@ export default function ScriptEditor() {
   if (!script) return <p className="p-6 text-muted-foreground">{tr("common.loading")}</p>;
 
   return (
-    <div className="flex h-full flex-col p-6">
+    <div className="flex min-h-full flex-col p-4 md:p-6">
       {/* 头部 */}
-      <div className="mb-4 flex shrink-0 items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap shrink-0 items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <button
             onClick={() => navigate(`${base}/narrative`)}
@@ -193,7 +193,7 @@ export default function ScriptEditor() {
           <FileText className="h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold leading-tight">{script.title}</h1>
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <span className="font-code">{script.code}</span>
               <span>· {stats.scenes.length} {tr("scripts.sceneUnit")}</span>
               <span>· {stats.characters} {tr("se.statChars")}</span>
@@ -203,7 +203,7 @@ export default function ScriptEditor() {
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant={outlineOpen ? "default" : "outline"}
@@ -235,11 +235,11 @@ export default function ScriptEditor() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-12 gap-4">
         {/* 左:分块编辑器 */}
-        <div className={cn("flex min-h-0 flex-col rounded-lg border border-border bg-card", assistOpen ? "col-span-8" : "col-span-12")}>
+        <div className={cn("flex min-h-0 flex-col rounded-lg border border-border bg-card", assistOpen ? "lg:col-span-8" : "lg:col-span-12")}>
           {/* 块类型快捷工具栏 */}
-          <div className="flex shrink-0 items-center justify-center gap-1 border-b border-border px-3 py-1.5">
+          <div className="flex flex-wrap shrink-0 items-center justify-center gap-1 border-b border-border px-3 py-1.5">
             {(
               [
                 { bt: "scene_heading", icon: Clapperboard },
@@ -262,10 +262,10 @@ export default function ScriptEditor() {
             ))}
           </div>
 
-          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
             {/* 大纲:场景头列表,点击跳转 */}
             {outlineOpen && (
-              <div className="w-52 shrink-0 overflow-auto border-r border-border p-2">
+              <div className="max-h-40 sm:max-h-none w-full sm:w-52 shrink-0 overflow-auto border-r border-border p-2">
                 <div className="px-2 pb-1.5 text-[11px] uppercase tracking-wider text-faint">{tr("se.outline")}</div>
                 {stats.scenes.length === 0 ? (
                   <p className="px-2 text-xs text-muted-foreground">{tr("se.noScenesYet")}</p>
@@ -319,7 +319,7 @@ export default function ScriptEditor() {
 
         {/* 右:剧本数据 + AI 助手(可收起) */}
         {assistOpen && (
-          <div className="col-span-4 flex min-h-0 flex-col gap-4">
+          <div className="lg:col-span-4 min-h-80 flex min-h-0 flex-col gap-4">
             {/* 剧本数据(落库口径,对齐 Laper 右栏) */}
             <div className="shrink-0 rounded-lg border border-border bg-card p-3">
               <div className="mb-2 text-[11px] uppercase tracking-wider text-faint">{tr("se.dbStats")}</div>
@@ -426,9 +426,9 @@ function StatRow({ label, value }: { label: string; value: number }) {
 const BLOCK_STYLE: Record<string, string> = {
   scene_heading: "font-semibold uppercase tracking-wide",
   action: "",
-  character: "ml-[28%] font-medium uppercase",
-  dialogue: "ml-[14%] mr-[14%]",
-  parenthetical: "ml-[22%] italic text-muted-foreground",
+  character: "ml-[28%] w-[72%] font-medium uppercase",
+  dialogue: "ml-[14%] mr-[14%] w-[72%]",
+  parenthetical: "ml-[22%] w-[78%] italic text-muted-foreground",
   transition: "text-right uppercase text-muted-foreground",
 };
 
@@ -449,7 +449,7 @@ function BlockRow({
   return (
     <div id={`blk-${block.key}`} onFocusCapture={onFocus} className="group/blk relative rounded-md transition hover:bg-elevated/50">
       {/* 悬浮工具条 */}
-      <div className="absolute -left-1 top-1 z-10 flex -translate-x-full items-center gap-0.5 opacity-0 transition group-hover/blk:opacity-100">
+      <div className="relative z-10 mb-1 flex items-center gap-0.5 sm:absolute sm:-left-1 sm:top-1 sm:-translate-x-full sm:opacity-0 transition group-hover/blk:opacity-100 group-focus-within/blk:opacity-100">
         <select
           value={block.block_type}
           onChange={(e) => onChange({ block_type: e.target.value })}
@@ -471,7 +471,7 @@ function BlockRow({
         value={block.text}
         onChange={(v) => onChange({ text: v })}
         className={cn(
-          "w-full resize-none bg-transparent px-2 py-1 font-serif text-[15px] leading-7 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded",
+          "w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded",
           BLOCK_STYLE[block.block_type] ?? "",
         )}
         placeholder={tr(`se.bt.${block.block_type}`)}

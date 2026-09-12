@@ -4,6 +4,7 @@
 - minio:S3 兼容对象存储(生产)
 - fs:本地文件系统(轻量自托管 / 开发,无需 MinIO)
 """
+
 import hashlib
 import io
 from pathlib import Path
@@ -20,6 +21,7 @@ _client = None
 def _minio():
     global _client
     if _client is None:
+        import urllib3
         from minio import Minio
 
         _client = Minio(
@@ -27,6 +29,7 @@ def _minio():
             access_key=settings.minio_access_key,
             secret_key=settings.minio_secret_key,
             secure=settings.minio_secure,
+            http_client=urllib3.PoolManager(timeout=urllib3.Timeout(connect=3, read=20), retries=1),
         )
         if not _client.bucket_exists(settings.minio_bucket):
             _client.make_bucket(settings.minio_bucket)
@@ -56,6 +59,10 @@ def put_bytes(
     digest = hashlib.sha256(data).hexdigest()
     existing = db.get(Blob, digest)
     if existing is not None:
+        if settings.storage_backend == "fs" and not Path(existing.storage_uri).is_file():
+            # Re-uploading the same bytes can repair an unavailable legacy object.
+            existing.storage_uri = _store_fs(f"{digest[:2]}/{digest}", data)
+            db.flush()
         return existing
 
     object_name = f"{digest[:2]}/{digest}"
@@ -64,17 +71,38 @@ def put_bytes(
     else:
         uri = _store_minio(object_name, data, mime)
 
-    blob = Blob(
-        hash=digest, storage_uri=uri, mime=mime, size_bytes=len(data),
-        width=width, height=height, duration_ms=duration_ms,
+    from sqlalchemy.dialects.postgresql import insert
+
+    db.execute(
+        insert(Blob)
+        .values(
+            hash=digest,
+            storage_uri=uri,
+            mime=mime,
+            size_bytes=len(data),
+            width=width,
+            height=height,
+            duration_ms=duration_ms,
+        )
+        .on_conflict_do_nothing(index_elements=[Blob.hash])
     )
-    db.add(blob)
-    db.flush()
-    return blob
+    return db.get(Blob, digest)
 
 
 def read_bytes(blob: Blob) -> bytes:
-    if settings.storage_backend == "fs":
+    # A verified local CAS copy can survive an unavailable legacy MinIO object.
+    local_copy = Path(settings.fs_storage_dir) / blob.hash[:2] / blob.hash
+    if local_copy.is_file():
+        data = local_copy.read_bytes()
+        if hashlib.sha256(data).hexdigest() == blob.hash:
+            return data
+    # Keep existing objects readable when new writes switch storage backend.
+    if Path(blob.storage_uri).is_absolute() or Path(blob.storage_uri).is_file():
         return Path(blob.storage_uri).read_bytes()
-    object_name = blob.storage_uri.split("/", 1)[1]
-    return _minio().get_object(settings.minio_bucket, object_name).read()
+    bucket, object_name = blob.storage_uri.split("/", 1)
+    response = _minio().get_object(bucket, object_name)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()

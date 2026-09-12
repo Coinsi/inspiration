@@ -124,7 +124,7 @@ function TaskBadge({ task, onClose }: { task: Task | null; onClose: () => void }
 
   return (
     <div className="fixed bottom-5 left-5 z-[90] w-[320px] max-w-[calc(100vw-2.5rem)] animate-in">
-      <div className="glass flex items-start gap-3 rounded-xl border border-border p-3 shadow-panel backdrop-blur-md">
+      <div className="glass flex items-start gap-3 rounded-xl border border-border p-3 shadow-panel ">
         <span className="mt-0.5 shrink-0">
           {running ? <Loader2 className="h-5 w-5 animate-spin text-primary" />
             : done ? <CheckCircle2 className="h-5 w-5 text-success" />

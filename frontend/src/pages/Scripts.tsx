@@ -49,7 +49,7 @@ export default function Scripts() {
 
   return (
     <div className="mx-auto max-w-[1200px] p-6">
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex flex-wrap gap-3 items-center justify-between">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-primary" />
           <div>
@@ -73,7 +73,7 @@ export default function Scripts() {
             <button
               key={s.id}
               onClick={() => navigate(`${base}/scripts/${s.id}`)}
-              className="group flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-glow-sm"
+              className="group flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/60 "
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">

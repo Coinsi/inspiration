@@ -17,6 +17,7 @@ import StoryBible from "@/pages/StoryBible";
 import Storyboard from "@/pages/Storyboard";
 import Trash from "@/pages/Trash";
 import Workbench from "@/pages/Workbench";
+import Tasks from "@/pages/Tasks";
 
 function Protected() {
   const { me, loading } = useAuth();
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="storyboard" element={<Storyboard />} />
           <Route path="prompts" element={<Prompts />} />
           <Route path="cuts" element={<Cuts />} />
+          <Route path="tasks" element={<Tasks />} />
           <Route path="members" element={<ProjectMembers />} />
           <Route path="settings" element={<Settings />} />
         </Route>

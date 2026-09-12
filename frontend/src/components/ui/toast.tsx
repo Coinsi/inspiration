@@ -22,7 +22,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2">
+      <div role="status" aria-live="polite" className="fixed bottom-5 right-5 z-[130] flex max-w-[calc(100vw-2.5rem)] flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}

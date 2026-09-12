@@ -1,12 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useDialogFocus } from "./useDialogFocus";
+import { createContext, useCallback, useContext, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
@@ -47,16 +40,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Esc 取消 / Enter 确认
-  useEffect(() => {
-    if (!opts) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(false);
-      else if (e.key === "Enter") close(true);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [opts, close]);
+  const titleId = useId();
+  const dialogRef = useDialogFocus(!!opts, () => close(false));
 
   return (
     <ConfirmContext.Provider value={confirm}>
@@ -64,11 +49,14 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       {opts &&
         createPortal(
           <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-bg/70 backdrop-blur-sm animate-in" onClick={() => close(false)} />
+            <div className="absolute inset-0 bg-black/60  animate-in" onClick={() => close(false)} />
             <div
+              ref={dialogRef}
+              tabIndex={-1}
+              aria-labelledby={titleId}
               role="alertdialog"
               aria-modal="true"
-              className="relative z-10 w-full max-w-[420px] rounded-xl border border-border bg-elevated p-5 shadow-2xl animate-in"
+              className="relative z-10 w-full max-w-[420px] rounded-xl border border-border bg-card p-5 shadow-2xl animate-in"
             >
               <div className="flex items-start gap-3">
                 <span
@@ -80,27 +68,31 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                   <AlertTriangle className="h-5 w-5" />
                 </span>
                 <div className="min-w-0 flex-1 pt-0.5">
-                  <div className="text-[15px] font-semibold">{opts.title ?? t("common.confirmTitle")}</div>
+                  <div id={titleId} className="text-[15px] font-semibold">
+                    {opts.title ?? t("common.confirmTitle")}
+                  </div>
                   {opts.message != null && (
-                    <div className="mt-1.5 break-words text-sm leading-6 text-muted-foreground">{opts.message}</div>
+                    <div className="mt-1.5 break-words text-sm leading-6 text-muted-foreground">
+                      {opts.message}
+                    </div>
                   )}
                 </div>
               </div>
               <div className="mt-5 flex justify-end gap-2">
                 <button
                   onClick={() => close(false)}
+                  autoFocus
                   className="h-9 rounded-md border border-border bg-elevated px-4 text-sm font-medium text-muted-foreground transition hover:border-border-strong hover:text-foreground"
                 >
                   {opts.cancelText ?? t("common.cancel")}
                 </button>
                 <button
-                  autoFocus
                   onClick={() => close(true)}
                   className={cn(
                     "h-9 rounded-md px-4 text-sm font-semibold transition",
                     opts.danger
-                      ? "bg-danger text-white shadow-[0_0_14px_-4px_hsl(var(--danger))] hover:brightness-110"
-                      : "bg-gradient-primary text-primary-foreground shadow-glow-sm hover:brightness-110",
+                      ? "bg-danger text-white hover:bg-danger/90"
+                      : "bg-primary text-primary-foreground  hover:bg-primary-strong",
                   )}
                 >
                   {opts.confirmText ?? t("common.confirm")}

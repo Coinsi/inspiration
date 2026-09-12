@@ -27,17 +27,8 @@ export default {
         info: "hsl(var(--info))",
         ring: "hsl(var(--ring))",
       },
-      backgroundImage: {
-        // 琥珀金主操作渐变(CTA / 主按钮)
-        "gradient-primary": "linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-strong)))",
-        // 金→青进度/装饰渐变
-        "gradient-accent": "linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent)))",
-      },
       boxShadow: {
-        // 主强调外发光(聚光灯感)
-        glow: "0 0 18px -4px hsl(var(--primary-glow) / 0.7)",
-        "glow-sm": "0 0 12px -4px hsl(var(--primary-glow) / 0.6)",
-        panel: "0 8px 30px -12px rgba(0, 0, 0, 0.7)",
+        panel: "0 2px 8px rgb(0 0 0 / 0.08)",
       },
       borderRadius: {
         xl: "14px",

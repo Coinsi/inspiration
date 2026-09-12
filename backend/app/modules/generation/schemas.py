@@ -1,6 +1,8 @@
 """generation DTO。"""
+
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,6 +56,9 @@ class GenerateIn(BaseModel):
     count: int = Field(default=1, ge=1, le=8)
     prompt_override: str | None = None  # 不填则用 BOM 组合
     use_references: bool = True  # 资产生图时是否把资产参考图喂给供应商(图生图/参考图)
+    source_generation_id: uuid.UUID | None = None
+    first_frame_id: uuid.UUID | None = None
+    last_frame_id: uuid.UUID | None = None
 
 
 class EstimateOut(BaseModel):
@@ -73,6 +78,23 @@ class JobOut(BaseModel):
     actual_cost: float | None
     error: str | None
     created_at: datetime
+    updated_at: datetime
+    input_snapshot: dict = Field(default_factory=dict)
+    cost_raw: dict | None = None
+
+
+class RefineIn(BaseModel):
+    crop: tuple[float, float, float, float] = (0, 0, 1, 1)
+    rotate: Literal[0, 90, 180, 270] = 0
+    scale: float = Field(default=1, ge=0.25, le=4)
+    brightness: float = Field(default=1, ge=0.1, le=2)
+    contrast: float = Field(default=1, ge=0.1, le=2)
+
+
+class RenderIn(BaseModel):
+    height: Literal[720, 1080] = 720
+    aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
+    mute: bool = False
 
 
 class GenerationOut(BaseModel):

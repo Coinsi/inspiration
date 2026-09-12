@@ -34,23 +34,19 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-transparent relative overflow-hidden">
-      {/* 背景光晕(金 / 青双强调) */}
-      <div className="absolute -top-40 -left-40 h-96 w-96 rounded-full bg-primary/20 blur-[120px]" />
-      <div className="absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-accent/20 blur-[120px]" />
-
       {/* 语言 / 主题切换 */}
       <div className="absolute right-5 top-5 flex items-center gap-1.5">
-        <button onClick={() => setLang(lang === "zh" ? "en" : "zh")} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card/60 text-muted-foreground backdrop-blur hover:text-foreground" title={t("shell.language")}>
+        <button onClick={() => setLang(lang === "zh" ? "en" : "zh")} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground  hover:text-foreground" title={t("shell.language")}>
           <Languages className="h-4 w-4" />
         </button>
-        <button onClick={toggle} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card/60 text-muted-foreground backdrop-blur hover:text-foreground" title={t("shell.theme")}>
+        <button onClick={toggle} className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground  hover:text-foreground" title={t("shell.theme")}>
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
       </div>
 
-      <div className="relative w-[380px] rounded-2xl border border-border glass backdrop-blur-xl p-8 shadow-panel">
+      <div className="relative w-[380px] max-w-[calc(100%-2rem)] rounded-2xl border border-border glass  p-8 shadow-panel">
         <div className="flex items-center gap-2.5 mb-1">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-primary text-primary-foreground shadow-glow-sm">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground ">
             <Clapperboard className="h-5 w-5" />
           </span>
           <span className="text-lg font-semibold tracking-tight">Inspiration</span>

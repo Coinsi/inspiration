@@ -1,4 +1,5 @@
-import { type ReactNode } from "react";
+import { useDialogFocus } from "./useDialogFocus";
+import { useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function Sheet({
@@ -14,25 +15,37 @@ export function Sheet({
   children: ReactNode;
   width?: number;
 }) {
+  const titleId = useId();
+  const dialogRef = useDialogFocus(open, onClose);
+  if (!open) return null;
   return (
     <div className={cn("fixed inset-0 z-50", open ? "" : "pointer-events-none")}>
       <div
-        className={cn(
-          "absolute inset-0 bg-black/50 transition-opacity",
-          open ? "opacity-100" : "opacity-0",
-        )}
+        className={cn("absolute inset-0 bg-black/50 transition-opacity", open ? "opacity-100" : "opacity-0")}
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : "Details"}
+        tabIndex={-1}
         className={cn(
           "absolute right-0 top-0 h-full bg-surface border-l border-border shadow-2xl transition-transform overflow-y-auto",
           open ? "translate-x-0" : "translate-x-full",
         )}
-        style={{ width }}
+        style={{ width, maxWidth: "100vw" }}
       >
         <div className="flex items-center justify-between px-5 h-14 border-b border-border sticky top-0 bg-surface">
-          <div className="font-medium">{title}</div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none">
+          <div id={titleId} className="font-medium">
+            {title}
+          </div>
+          <button
+            aria-label="关闭 / Close"
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground text-xl leading-none"
+          >
             ×
           </button>
         </div>

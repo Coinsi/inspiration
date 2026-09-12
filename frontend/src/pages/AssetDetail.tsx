@@ -115,13 +115,7 @@ export default function AssetDetail() {
   return (
     <div>
       {/* Hero */}
-      <div className="relative h-44 overflow-hidden border-b border-border">
-        {cover ? (
-          <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover blur-2xl scale-110 opacity-40" />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-info/10" />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-bg to-transparent" />
+      <div className="relative h-44 overflow-hidden bg-surface border-b border-border">
         <button
           onClick={() => navigate(`${base}/assets`)}
           className="absolute top-4 left-6 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -129,7 +123,7 @@ export default function AssetDetail() {
           <ArrowLeft className="h-4 w-4" /> {tr("detail.back")}
         </button>
         <div className="absolute bottom-4 left-6 flex items-end gap-4">
-          <Avatar src={cover} name={asset.name} size={72} className="shadow-xl ring-2 ring-primary/40" />
+          <Avatar src={cover} name={asset.name} size={72} className="border border-border" />
           <div className="pb-1">
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-semibold">{asset.name}</h1>
@@ -143,7 +137,7 @@ export default function AssetDetail() {
         </div>
       </div>
 
-      <div className="max-w-[960px] mx-auto p-6">
+      <div className="max-w-[960px] mx-auto p-4 md:p-6">
         <Tabs
           value={tab}
           onChange={setTab}
@@ -189,7 +183,7 @@ export default function AssetDetail() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <Button onClick={() => save.mutate()} disabled={locked}>{tr("detail.save")}</Button>
                 <Button variant="outline" onClick={() => commit.mutate()} disabled={locked}>{tr("detail.commit")}</Button>
                 <Button

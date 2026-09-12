@@ -158,17 +158,17 @@ export default function StoryBible() {
   };
 
   return (
-    <div className="flex h-full flex-col p-6">
+    <div className="flex min-h-full flex-col p-4 md:p-7">
       {/* 头部 */}
-      <div className="mb-4 flex shrink-0 items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap shrink-0 items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <BookMarked className="h-5 w-5 text-primary" />
           <div>
             <h1 className="text-xl font-semibold leading-tight">{tr("bible.title")}</h1>
             <p className="text-sm text-muted-foreground">{tr("bible.subtitle")}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
             value={novelId ?? ""}
@@ -181,7 +181,7 @@ export default function StoryBible() {
           </select>
           {running ? (
             <>
-              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <span className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 {tr("bible.extracting").replace("{d}", String(job!.done_chapters)).replace("{t}", String(job!.total_chapters))}
               </span>
@@ -229,9 +229,9 @@ export default function StoryBible() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-12 gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-12 gap-4">
         {/* 左:分类导航 */}
-        <div className="col-span-2 flex min-h-0 flex-col overflow-auto rounded-lg border border-border bg-card p-2">
+        <div className="lg:col-span-2 max-h-52 lg:max-h-none flex min-h-0 flex-col overflow-auto rounded-lg border border-border bg-card p-2">
           <CatRow active={!category} label={tr("bible.all")} count={settings?.length ?? 0} onClick={() => setCategory("")} />
           {categories.map((c) => (
             <CatRow key={c} active={category === c} label={catLabel(c)} count={countOf(c)} onClick={() => setCategory(c)} />
@@ -239,9 +239,9 @@ export default function StoryBible() {
         </div>
 
         {/* 右:设定卡片 */}
-        <div className="col-span-10 flex min-h-0 flex-col overflow-auto">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
+        <div className="lg:col-span-10 min-w-0 flex min-h-0 flex-col overflow-auto">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap min-w-0 items-center gap-2">
               <span className="shrink-0 text-sm text-muted-foreground">
                 {category ? catLabel(category) : tr("bible.all")} · {shown.length}
               </span>
@@ -269,7 +269,7 @@ export default function StoryBible() {
               )}
             </div>
             {adding ? (
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <select className="h-8 rounded-md border border-border bg-bg px-2 text-xs" value={newCat} onChange={(e) => setNewCat(e.target.value)}>
                   {categories.map((c) => (
                     <option key={c} value={c}>{catLabel(c)}</option>
@@ -316,7 +316,7 @@ export default function StoryBible() {
                   ) : (
                     <>
                       <div className="flex items-start justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
+                        <div className="flex flex-wrap min-w-0 items-center gap-2">
                           <Badge variant="primary">{catLabel(s.category)}</Badge>
                           <span className="truncate font-medium">{s.name}</span>
                         </div>

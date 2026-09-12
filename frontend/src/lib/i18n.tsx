@@ -18,6 +18,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nav.prompts": "提示词",
     "nav.shots": "镜头看板",
     "nav.cuts": "成片 / 基线",
+    "nav.tasks": "任务中心",
     "nav.members": "成员",
     "nav.settings": "设置",
     "shell.currentProject": "当前项目",
@@ -98,6 +99,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "fl.current": "当前节点:片段合成",
     // 资产库
     "assets.title": "资产库",
+    "assets.noCover": "暂无代表图",
+    "common.loadFailed": "暂时无法加载，请稍后重试。",
     "assets.subtitle": "角色 · 道具 · 场景 · 风格 …",
     "assets.search": "搜索名称",
     "assets.filterTag": "按标签筛选",
@@ -468,6 +471,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nav.prompts": "Prompts",
     "nav.shots": "Shot Board",
     "nav.cuts": "Cut / Baseline",
+    "nav.tasks": "Task center",
     "nav.members": "Members",
     "nav.settings": "Settings",
     "shell.currentProject": "Current project",
@@ -546,6 +550,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "fl.current": "Current node: Compose",
     // Asset library
     "assets.title": "Asset Library",
+    "assets.noCover": "No cover image",
+    "common.loadFailed": "Unable to load. Please try again.",
     "assets.subtitle": "Characters · Props · Locations · Styles …",
     "assets.search": "Search name",
     "assets.filterTag": "Filter by tag",

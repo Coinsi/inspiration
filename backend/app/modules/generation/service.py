@@ -1,29 +1,28 @@
 """generation 业务:供应商/配额配置、提交生成、任务编排(溯源)、变体钦定。"""
-import time
-import urllib.request
+
+import base64
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-import base64
 
 import app.adapters.generation  # noqa: F401  触发供应商注册
 from app.adapters.contracts import GenerationRequest, ReferenceImage, generation_registry
 from app.core import audit
 from app.core.crypto import decrypt, encrypt
 from app.core.deps import ProjectContext
-from app.core.errors import CapabilityUnsupported, NotFound, QuotaExceeded
-from app.models.enums import JobStatus, QuotaScope, RequestType
+from app.core.errors import CapabilityUnsupported, NotFound
+from app.models.enums import JobStatus, QuotaScope
 from app.models.generation import Generation, GenerationJob, ProviderConfig, Quota
-from app.models.identity import Project
 from app.modules.generation import schemas
 from app.modules.shot import service as shot_service
 from app.storage import cas
 
 
 # ── 供应商配置 ──
-def configure_provider(db: Session, ctx: ProjectContext, data: schemas.ProviderConfigIn) -> ProviderConfig:
+def configure_provider(
+    db: Session, ctx: ProjectContext, data: schemas.ProviderConfigIn
+) -> ProviderConfig:
     pc = db.scalar(
         select(ProviderConfig).where(
             ProviderConfig.project_id == ctx.project.id,
@@ -67,8 +66,13 @@ def set_quota(db: Session, ctx: ProjectContext, data: schemas.QuotaIn) -> Quota:
 
 
 def test_provider(
-    db: Session, project_id: uuid.UUID, name: str, kind: str,
-    endpoint: str | None, token: str | None, config: dict | None,
+    db: Session,
+    project_id: uuid.UUID,
+    name: str,
+    kind: str,
+    endpoint: str | None,
+    token: str | None,
+    config: dict | None,
 ) -> tuple[bool, str]:
     """测试供应商连接:LLM 调 /models 探活鉴权;即梦探端点可达;mock 直接通过。"""
     import urllib.error
@@ -94,7 +98,9 @@ def test_provider(
         if not key:
             return False, "未配置 API Key"
         try:
-            req = urllib.request.Request(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+            req = urllib.request.Request(
+                f"{base}/models", headers={"Authorization": f"Bearer {key}"}
+            )
             with urllib.request.urlopen(req, timeout=15) as r:  # noqa: S310
                 if 200 <= r.status < 300:
                     return True, f"连接成功 · 鉴权通过(模型 {model or _s.llm_model})"
@@ -113,7 +119,9 @@ def test_provider(
         if not key:
             return False, "未配置 API Key"
         try:
-            req = urllib.request.Request(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+            req = urllib.request.Request(
+                f"{base}/models", headers={"Authorization": f"Bearer {key}"}
+            )
             with urllib.request.urlopen(req, timeout=15) as r:  # noqa: S310
                 if 200 <= r.status < 300:
                     return True, f"连接成功 · 鉴权通过(模型 {model or 'gpt-image-1'})"
@@ -144,7 +152,9 @@ def test_provider(
 def get_project_quota(db: Session, project_id: uuid.UUID) -> Quota | None:
     return db.scalar(
         select(Quota).where(
-            Quota.project_id == project_id, Quota.scope == QuotaScope.project, Quota.user_id.is_(None)
+            Quota.project_id == project_id,
+            Quota.scope == QuotaScope.project,
+            Quota.user_id.is_(None),
         )
     )
 
@@ -158,11 +168,25 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str):
     )
     kwargs = {}
     if pc is not None:
-        kwargs = {"endpoint": pc.endpoint, "token": decrypt(pc.credentials_encrypted), "config": pc.config}
-    return generation_registry.create(name, **kwargs)
+        if not pc.enabled or pc.kind != "generation":
+            raise CapabilityUnsupported("该生成供应商已停用")
+        kwargs = {
+            "endpoint": pc.endpoint,
+            "token": decrypt(pc.credentials_encrypted),
+            "config": pc.config,
+        }
+    try:
+        return generation_registry.create(name, **kwargs)
+    except KeyError as exc:
+        raise CapabilityUnsupported("该生成供应商尚未接入") from exc
 
 
-def _final_prompt(db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID, override: str | None) -> str:
+def _final_prompt(
+    db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID, override: str | None
+) -> str:
+    from app.modules.generation.jobs import validate_target
+
+    validate_target(db, project_id, target_type, target_id)
     if override:
         return override
     if target_type == "shot":
@@ -216,11 +240,13 @@ def _materialize_references(db: Session, refs: list[ReferenceImage]) -> list[Ref
     for r in refs:
         blob = db.get(Blob, r.blob_hash)
         if blob is None:
-            continue
+            raise NotFound("参考图源文件不存在")
         b64 = base64.b64encode(cas.read_bytes(blob)).decode()
-        out.append(ReferenceImage(
-            blob_hash=r.blob_hash, role=r.role, data_url=f"data:{blob.mime};base64,{b64}"
-        ))
+        out.append(
+            ReferenceImage(
+                blob_hash=r.blob_hash, role=r.role, data_url=f"data:{blob.mime};base64,{b64}"
+            )
+        )
     return out
 
 
@@ -238,15 +264,62 @@ def _build_request(
 
 
 # ── 成本预估 ──
-def estimate(db: Session, ctx: ProjectContext, target_type: str, target_id: uuid.UUID, gen_in: schemas.GenerateIn) -> schemas.EstimateOut:
+def _validate_controls(data, caps):
+    if data.request_type.value not in caps.modalities:
+        raise CapabilityUnsupported("供应商不支持该媒体类型")
+    if data.request_type.value == "video":
+        for name in ("duration", "aspect_ratio", "resolution"):
+            if name not in data.provider_params:
+                continue
+            allowed = caps.param_schema.get(name, {}).get("enum", [])
+            if data.provider_params[name] not in allowed:
+                raise CapabilityUnsupported(f"供应商不支持该参数：{name}")
+
+
+def _explicit_references(db, project_id, data, caps):
+    from app.modules.generation.jobs import source
+
+    refs = []
+    for gen_id, role, feature in (
+        (data.source_generation_id, "ref", "img2img"),
+        (data.first_frame_id, "first_frame", "first_frame"),
+        (data.last_frame_id, "last_frame", "last_frame"),
+    ):
+        if gen_id is None:
+            continue
+        if feature not in caps.features:
+            raise CapabilityUnsupported(f"供应商未声明支持 {feature}")
+        if role != "ref" and data.request_type.value != "video":
+            raise CapabilityUnsupported("首尾帧仅用于视频生成")
+        g = source(db, project_id, gen_id, True)
+        refs.append(ReferenceImage(blob_hash=g.output_blob_hash, role=role))
+    return refs
+
+
+def estimate(
+    db: Session,
+    ctx: ProjectContext,
+    target_type: str,
+    target_id: uuid.UUID,
+    gen_in: schemas.GenerateIn,
+) -> schemas.EstimateOut:
     provider = _provider_instance(db, ctx.project.id, gen_in.provider)
     prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
-    est = provider.estimate_cost(_build_request(prompt, gen_in))
+    caps = provider.capabilities()
+    _validate_controls(gen_in, caps)
+    refs = _explicit_references(db, ctx.project.id, gen_in, caps)
+    est = provider.estimate_cost(_build_request(prompt, gen_in, refs))
     return schemas.EstimateOut(points=est.points, detail=est.detail)
 
 
 # ── 提交生成 ──
-def submit(db: Session, ctx: ProjectContext, target_type: str, target_id: uuid.UUID, gen_in: schemas.GenerateIn) -> GenerationJob:
+def submit(
+    db: Session,
+    ctx: ProjectContext,
+    target_type: str,
+    target_id: uuid.UUID,
+    gen_in: schemas.GenerateIn,
+) -> GenerationJob:
     provider = _provider_instance(db, ctx.project.id, gen_in.provider)
     caps = provider.capabilities()
     if gen_in.request_type.value not in caps.modalities:
@@ -262,125 +335,73 @@ def submit(db: Session, ctx: ProjectContext, target_type: str, target_id: uuid.U
         refs = _collect_references(db, ctx.project.id, target_type, target_id)
         if caps.max_reference_images:
             refs = refs[: caps.max_reference_images]
+    refs.extend(_explicit_references(db, ctx.project.id, gen_in, caps))
+    if caps.max_reference_images and len(refs) > caps.max_reference_images:
+        raise CapabilityUnsupported("参考图数量超过供应商限制")
+    _validate_controls(gen_in, caps)
     req = _build_request(prompt, gen_in, refs)
     est = provider.estimate_cost(req)
 
-    # 配额校验
-    quota = get_project_quota(db, ctx.project.id)
-    if quota is not None and quota.limit_cost and float(quota.used_cost) + est.points > float(quota.limit_cost):
-        raise QuotaExceeded(
-            "项目点数不足",
-            {"limit": float(quota.limit_cost), "used": float(quota.used_cost), "need": est.points},
-        )
+    from app.modules.generation.jobs import reserve_check
+
+    reserve_check(db, ctx.project.id, est.points)
 
     job = GenerationJob(
-        project_id=ctx.project.id, target_type=target_type, target_id=target_id,
-        provider=gen_in.provider, request_type=gen_in.request_type, status=JobStatus.pending,
-        params=gen_in.params, estimated_cost=est.points, created_by=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type=target_type,
+        target_id=target_id,
+        provider=gen_in.provider,
+        request_type=gen_in.request_type,
+        status=JobStatus.pending,
+        params=gen_in.params,
+        estimated_cost=est.points,
+        created_by=ctx.user.id,
         input_snapshot={
-            "prompt": prompt, "request_type": gen_in.request_type.value,
-            "params": gen_in.params, "provider_params": gen_in.provider_params, "count": gen_in.count,
+            "prompt": prompt,
+            "request_type": gen_in.request_type.value,
+            "params": gen_in.params,
+            "provider_params": gen_in.provider_params,
+            "count": gen_in.count,
             "references": [{"blob_hash": r.blob_hash, "role": r.role} for r in refs],
         },
     )
     db.add(job)
     db.flush()
-    audit.record(db, action="generation.submit", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type=target_type, target_id=target_id, detail={"job": str(job.id), "est": est.points})
+    audit.record(
+        db,
+        action="generation.submit",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type=target_type,
+        target_id=target_id,
+        detail={"job": str(job.id), "est": est.points},
+    )
 
-    from app.core.config import settings
-    if settings.celery_eager:
-        run_job(db, job.id)  # 同步执行(同会话)
-    else:
-        db.commit()
-        from app.tasks.generation_tasks import run_generation_job
-        run_generation_job.delay(str(job.id))
-    return job
+    from app.modules.generation.jobs import dispatch
+
+    return dispatch(db, job)
 
 
 # ── 任务执行(溯源核心) ──
 def run_job(db: Session, job_id: uuid.UUID) -> None:
-    job = db.get(GenerationJob, job_id)
-    if job is None:
-        return
-    job.status = JobStatus.submitted
-    db.flush()
-    snap = job.input_snapshot
-    # 从轻量快照重建参考图引用,并在提交前物化为 base64(避免把大图存进快照)
-    snap_refs = [ReferenceImage(blob_hash=r["blob_hash"], role=r.get("role", "ref"))
-                 for r in snap.get("references", [])]
-    materialized = _materialize_references(db, snap_refs)
-    req = GenerationRequest(
-        request_type=snap["request_type"], prompt=snap["prompt"],
-        params=snap.get("params", {}), provider_params=snap.get("provider_params", {}),
-        count=snap.get("count", 1), references=materialized,
-    )
-    provider = _provider_instance(db, job.project_id, job.provider)
-    try:
-        handle = provider.submit(req)
-        job.external_job_id = handle.external_job_id
-        job.status = JobStatus.running
-        db.flush()
-        result = provider.poll(handle)
-        for _ in range(30):  # 轮询直到完成(mock 立即完成)
-            if result.status != "running":
-                break
-            time.sleep(1)
-            result = provider.poll(handle)
-    except Exception as exc:  # noqa: BLE001
-        job.status = JobStatus.failed
-        job.error = str(exc)
-        db.flush()
-        return
+    from app.modules.generation.jobs import execute
 
-    if result.status != "succeeded":
-        job.status = JobStatus.failed
-        job.error = result.error or "生成失败"
-        db.flush()
-        return
-
-    points = float(job.estimated_cost or 0)
-    per = points / max(len(result.outputs), 1)
-    for out in result.outputs:
-        data = out.data
-        if data is None and out.url:
-            with urllib.request.urlopen(out.url, timeout=120) as r:  # noqa: S310
-                data = r.read()
-        if data is None:
-            continue
-        mime = "video/mp4" if out.type == "video" else "image/png"
-        blob = cas.put_bytes(db, data, mime)
-        db.add(Generation(
-            project_id=job.project_id, job_id=job.id, target_type=job.target_type,
-            target_id=job.target_id, provider=job.provider, output_type=RequestType(out.type),
-            output_blob_hash=blob.hash, prompt_snapshot=snap["prompt"], params=snap.get("params", {}),
-            input_refs={
-                "provider_params": snap.get("provider_params", {}),
-                "references": [
-                    {"blob_hash": r.blob_hash, "role": r.role, "materialized": bool(r.data_url)}
-                    for r in materialized
-                ],
-            },
-            cost_points=per, cost_raw=result.cost_raw,
-        ))
-    job.status = JobStatus.succeeded
-    job.actual_cost = points
-
-    quota = get_project_quota(db, job.project_id)
-    if quota is not None:
-        quota.used_cost = float(quota.used_cost) + points
-    db.flush()
+    execute(db, job_id)
 
 
 # ── 变体 ──
-def list_generations(db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID) -> list[Generation]:
+def list_generations(
+    db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID
+) -> list[Generation]:
     return list(
         db.scalars(
-            select(Generation).where(
+            select(Generation)
+            .where(
                 Generation.project_id == project_id,
                 Generation.target_type == target_type,
                 Generation.target_id == target_id,
-            ).order_by(Generation.created_at.desc())
+            )
+            .order_by(Generation.created_at.desc())
         )
     )
 
@@ -392,7 +413,9 @@ def get_job(db: Session, project_id: uuid.UUID, job_id: uuid.UUID) -> Generation
     return j
 
 
-def patch_generation(db: Session, project_id: uuid.UUID, gen_id: uuid.UUID, data: schemas.RatePatch) -> Generation:
+def patch_generation(
+    db: Session, project_id: uuid.UUID, gen_id: uuid.UUID, data: schemas.RatePatch
+) -> Generation:
     g = db.get(Generation, gen_id)
     if g is None or g.project_id != project_id:
         raise NotFound("生成记录不存在")
@@ -424,7 +447,14 @@ def select_variant(db: Session, ctx: ProjectContext, gen_id: uuid.UUID) -> Gener
         asset = db.get(Asset, g.target_id)
         if asset is not None and g.output_blob_hash:
             asset.representative_blob_hash = g.output_blob_hash
-    audit.record(db, action="generation.select", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type=g.target_type, target_id=g.target_id, detail={"generation": str(g.id)})
+    audit.record(
+        db,
+        action="generation.select",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type=g.target_type,
+        target_id=g.target_id,
+        detail={"generation": str(g.id)},
+    )
     db.flush()
     return g

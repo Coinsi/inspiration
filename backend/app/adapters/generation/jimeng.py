@@ -4,6 +4,7 @@
 具体请求体/签名/轮询字段需按所用即梦/火山引擎 API 文档对接(标注 TODO 处)。
 凭据与端点来自 provider_config(加密存储),由生成服务注入构造参数。
 """
+
 import json
 import urllib.request
 
@@ -24,7 +25,9 @@ from app.core.errors import ProviderError
 class JimengProvider(GenerationProvider):
     name = "jimeng"
 
-    def __init__(self, endpoint: str | None = None, token: str | None = None, config: dict | None = None, **_):
+    def __init__(
+        self, endpoint: str | None = None, token: str | None = None, config: dict | None = None, **_
+    ):
         self.endpoint = endpoint
         self.token = token
         self.config = config or {}
@@ -36,7 +39,8 @@ class JimengProvider(GenerationProvider):
     def capabilities(self) -> Capabilities:
         return Capabilities(
             modalities={"image", "video"},
-            features={"reference", "img2img"},
+            features={"reference", "img2img"}
+            | (set(self.config.get("features", [])) & {"first_frame", "last_frame"}),
             max_reference_images=int(self.config.get("max_reference_images", 4)),
             max_video_seconds=float(self.config.get("max_video_seconds", 10)),
             param_schema=self.config.get("param_schema", {}),
@@ -58,7 +62,14 @@ class JimengProvider(GenerationProvider):
             **req.provider_params,
         }
         # 参考图(图生图/参考图):服务层已物化为 base64 data URI
-        ref_urls = [r.data_url for r in req.references if r.data_url]
+        ref_urls = [
+            r.data_url
+            for r in req.references
+            if r.data_url and r.role not in ("first_frame", "last_frame")
+        ]
+        for ref in req.references:
+            if ref.role in ("first_frame", "last_frame") and ref.data_url:
+                body[ref.role] = ref.data_url
         if ref_urls:
             body["reference_images"] = ref_urls
         request = urllib.request.Request(

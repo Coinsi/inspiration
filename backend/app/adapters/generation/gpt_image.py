@@ -5,6 +5,7 @@
 - 同步 API:submit 即完成,结果暂存内存句柄,poll 直接返回 succeeded。
 - endpoint 默认 https://api.openai.com/v1(可指向任意 OpenAI 兼容代理);model 走 config(默认 gpt-image-1)。
 """
+
 import base64
 import json
 import urllib.request
@@ -36,7 +37,9 @@ def _parse_data_url(data_url: str) -> tuple[str, bytes]:
 class GptImageProvider(GenerationProvider):
     name = "gpt_image"
 
-    def __init__(self, endpoint: str | None = None, token: str | None = None, config: dict | None = None, **_):
+    def __init__(
+        self, endpoint: str | None = None, token: str | None = None, config: dict | None = None, **_
+    ):
         self.endpoint = (endpoint or _DEFAULT_ENDPOINT).rstrip("/")
         self.token = token
         self.config = config or {}
@@ -80,7 +83,14 @@ class GptImageProvider(GenerationProvider):
         urls = [item.get("url") for item in data.get("data", []) if item.get("url")]
         if not b64s and not urls:
             raise ProviderError(f"GPT Image 未返回图片:{str(data)[:300]}")
-        return JobHandle(external_job_id=f"gpt-image-{uuid.uuid4().hex[:8]}", raw={"b64s": b64s, "urls": urls})
+        if len(b64s) + len(urls) != req.count:
+            raise ProviderError(
+                f"请求 {req.count} 张图片，供应商仅返回 {len(b64s) + len(urls)} 张，未按完整结果保存"
+            )
+        return JobHandle(
+            external_job_id=f"gpt-image-{uuid.uuid4().hex[:8]}",
+            raw={"b64s": b64s, "urls": urls, "usage": data.get("usage")},
+        )
 
     def _call_with_n_fallback(self, req: GenerationRequest, refs) -> dict:
         """文生图默认走**流式单张循环**(SSE 持续有数据流动,规避代理网关 504 空闲超时,
@@ -89,9 +99,13 @@ class GptImageProvider(GenerationProvider):
         """
         if not refs:
             merged: list = []
+            usage = []
             for _ in range(max(1, req.count)):
-                merged.extend(self._generate_one(req).get("data", []))
-            return {"data": merged}
+                result = self._generate_one(req)
+                merged.extend(result.get("data", []))
+                if result.get("usage"):
+                    usage.append(result["usage"])
+            return {"data": merged, "usage": usage}
 
         call = lambda n: self._edits(req, refs, n)  # noqa: E731
         if req.count <= 1:
@@ -99,8 +113,7 @@ class GptImageProvider(GenerationProvider):
         try:
             return call(req.count)
         except ProviderError as e:
-            msg = str(e)
-            if "unknown_parameter" not in msg or "n" not in msg:
+            if not self._unsupported(e, {"n"}):
                 raise
             merged = []
             for _ in range(req.count):
@@ -109,19 +122,39 @@ class GptImageProvider(GenerationProvider):
 
     def _generate_one(self, req: GenerationRequest) -> dict:
         """单张文生图:优先流式;服务不支持 stream 参数时退回非流式。"""
-        if self.config.get("stream", True):
+        if self.config.get("stream", not self._model().startswith("gpt-image-2")):
             try:
                 return self._generations_stream(req)
             except ProviderError as e:
-                msg = str(e)
                 # 服务不认识 stream/partial_images 参数 → 退回非流式
-                if "unknown_parameter" in msg and ("stream" in msg or "partial_images" in msg):
+                if self._unsupported(e, {"stream", "partial_images"}):
                     return self._generations(req, None)
                 raise
         return self._generations(req, None)
 
+    @staticmethod
+    def _unsupported(error: ProviderError, names: set[str]) -> bool:
+        return (
+            error.detail.get("code") in {"unknown_parameter", "unsupported_parameter"}
+            and error.detail.get("param") in names
+        )
+
+    @staticmethod
+    def _http_error(error):
+        detail = {}
+        try:
+            payload = json.loads(error.read())
+            if isinstance(payload.get("error"), dict):
+                detail = {k: payload["error"].get(k) for k in ("code", "param")}
+                message = str(payload["error"].get("message", ""))[:500]
+            else:
+                message = str(error.reason)
+        except Exception:
+            message = str(error.reason)
+        return ProviderError(f"GPT Image HTTP {error.code}: {message}", detail)
+
     def _generations_stream(self, req: GenerationRequest) -> dict:
-        """流式文生图:解析 SSE 事件,取 completed 的 b64(无 completed 时退用最后一个 partial)。"""
+        """只接收 completed 事件；partial 不能替代成功结果。"""
         body = {
             "model": self._model(),
             "prompt": req.prompt,
@@ -142,7 +175,7 @@ class GptImageProvider(GenerationProvider):
             },
         )
         completed_b64: str | None = None
-        partial_b64: str | None = None
+        usage = None
         try:
             with urllib.request.urlopen(request, timeout=600) as resp:  # noqa: S310
                 ctype = resp.headers.get("Content-Type", "")
@@ -164,33 +197,23 @@ class GptImageProvider(GenerationProvider):
                     if not b64 and isinstance(evt.get("data"), list) and evt["data"]:
                         b64 = evt["data"][0].get("b64_json")
                     etype = str(evt.get("type", ""))
-                    if b64 and ("completed" in etype or "result" in etype):
+                    if etype == "error" or evt.get("error"):
+                        raise ProviderError("GPT Image 流式请求失败，未保存预览图")
+                    if b64 and etype in {"image_generation.completed", "image_edit.completed"}:
                         completed_b64 = b64
-                    elif b64:
-                        partial_b64 = b64
+                        usage = evt.get("usage")
         except urllib.error.HTTPError as e:
-            detail = ""
-            try:
-                detail = e.read().decode("utf-8", errors="replace")[:500]
-            except Exception:  # noqa: BLE001
-                pass
-            raise ProviderError(f"GPT Image HTTP {e.code}:{detail or e.reason}") from e
-        final = completed_b64 or partial_b64
-        if not final:
-            raise ProviderError("GPT Image 流式响应未包含图片数据")
-        return {"data": [{"b64_json": final}]}
+            raise self._http_error(e) from e
+        if not completed_b64:
+            raise ProviderError("GPT Image 流已结束但未收到完成事件，未保存预览图")
+        return {"data": [{"b64_json": completed_b64}], "usage": usage}
 
     def _http(self, request: urllib.request.Request) -> dict:
         try:
             with urllib.request.urlopen(request, timeout=300) as resp:  # noqa: S310
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
-            detail = ""
-            try:
-                detail = e.read().decode("utf-8", errors="replace")[:500]
-            except Exception:  # noqa: BLE001
-                pass
-            raise ProviderError(f"GPT Image HTTP {e.code}:{detail or e.reason}") from e
+            raise self._http_error(e) from e
 
     def _generations(self, req: GenerationRequest, n: int | None) -> dict:
         body = {
@@ -218,7 +241,7 @@ class GptImageProvider(GenerationProvider):
 
         def field(name: str, value: str):
             parts.append(
-                f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
             )
 
         field("model", self._model())
@@ -234,8 +257,8 @@ class GptImageProvider(GenerationProvider):
             ext = mime.split("/")[-1] or "png"
             parts.append(
                 (
-                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"image[]\"; "
-                    f"filename=\"ref{i}.{ext}\"\r\nContent-Type: {mime}\r\n\r\n"
+                    f'--{boundary}\r\nContent-Disposition: form-data; name="image[]"; '
+                    f'filename="ref{i}.{ext}"\r\nContent-Type: {mime}\r\n\r\n'
                 ).encode()
                 + blob
                 + b"\r\n"
@@ -255,11 +278,15 @@ class GptImageProvider(GenerationProvider):
         outputs: list[Output] = []
         for b64 in handle.raw.get("b64s", []):
             try:
-                outputs.append(Output(data=base64.b64decode(b64), type="image"))
+                outputs.append(Output(data=base64.b64decode(b64, validate=True), type="image"))
             except Exception:  # noqa: BLE001
-                continue
+                return GenerationResult(status="failed", error="供应商返回了损坏的图片编码")
         for url in handle.raw.get("urls", []):
             outputs.append(Output(url=url, type="image"))
         if not outputs:
             return GenerationResult(status="failed", error="未取得图片数据")
-        return GenerationResult(status="succeeded", outputs=outputs, cost_raw={"provider": "gpt_image"})
+        return GenerationResult(
+            status="succeeded",
+            outputs=outputs,
+            cost_raw={"provider": "gpt_image", "usage": handle.raw.get("usage")},
+        )

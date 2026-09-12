@@ -19,8 +19,14 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -51,7 +57,11 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`/api/v1${path}`, { method: "POST", headers, body: form });
+  const res = await fetch(`/api/v1${path}`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
   if (!res.ok) {
     let code = "ERROR";
     let message = res.statusText;
@@ -75,6 +85,30 @@ export const api = {
   del: <T>(p: string) => request<T>("DELETE", p),
 };
 
+export async function downloadBlob(
+  projectId: string,
+  hash: string,
+  filename: string,
+) {
+  const response = await fetch(`/api/v1/projects/${projectId}/blobs/${hash}`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(
+      error?.error?.message || `Download failed (${response.status})`,
+    );
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
 // ── 类型 ──
 export interface Project {
   id: string;
@@ -91,7 +125,13 @@ export interface Member {
   role: string;
 }
 export interface Me {
-  user: { id: string; username: string; email: string; display_name: string; is_active: boolean };
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    display_name: string;
+    is_active: boolean;
+  };
   memberships: Member[];
 }
 
@@ -347,9 +387,28 @@ export interface GenJob {
   estimated_cost: number | null;
   actual_cost: number | null;
   error: string | null;
+  target_type: string;
+  target_id: string;
+  provider: string;
+  request_type: string;
+  created_at: string;
+  updated_at: string;
+  input_snapshot: {
+    operation?: string;
+    prompt?: string;
+    retry_of?: string;
+    [key: string]: unknown;
+  };
+  cost_raw: {
+    events?: { at: string; status: string; message: string }[];
+    warnings?: string[];
+  } | null;
 }
 export interface Generation {
   id: string;
+  job_id: string;
+  provider: string;
+  created_at: string;
   output_type: string;
   output_blob_hash: string | null;
   prompt_snapshot: string;

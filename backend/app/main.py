@@ -1,22 +1,36 @@
 """FastAPI 应用入口。"""
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.errors import AppError, app_error_handler
 from app.modules.asset.router import router as asset_router
-from app.modules.identity.router import router as identity_router
-from app.modules.narrative.router import router as narrative_router
+from app.modules.assist.router import router as assist_router
 from app.modules.generation.router import router as generation_router
+from app.modules.identity.router import router as identity_router
 from app.modules.media.router import router as media_router
+from app.modules.narrative.router import router as narrative_router
 from app.modules.prompt.router import router as prompt_router
 from app.modules.review.router import router as review_router
+from app.modules.setting.router import router as setting_router
 from app.modules.shot.router import router as shot_router
 from app.modules.timeline.router import router as timeline_router
-from app.modules.assist.router import router as assist_router
-from app.modules.setting.router import router as setting_router
+
+
+@asynccontextmanager
+async def lifespan(app):
+    if settings.generation_executor == "local" and not settings.celery_eager:
+        from app.modules.generation.jobs import recover_local
+
+        recover_local()
+    yield
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title=f"{settings.app_name} API",
     version="0.1.0",
     description="影视/动漫 AIGC 资产管理与生产平台 —— 后端 API",

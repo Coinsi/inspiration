@@ -1,4 +1,5 @@
 """Celery 应用:异步生成 / 解析 / 拆解任务编排(M4 起填充任务)。"""
+
 from celery import Celery
 
 from app.core.config import settings
@@ -7,6 +8,7 @@ celery_app = Celery(
     "inspiration",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    include=["app.tasks.generation_tasks"],
 )
 
 celery_app.conf.update(

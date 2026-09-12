@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import GenerationPanel from "@/components/GenerationPanel";
 import ReviewPanel from "@/components/ReviewPanel";
 import ShotAssetRefs from "@/components/ShotAssetRefs";
@@ -27,6 +27,7 @@ export default function Shots() {
   const { projectId } = useParams();
   const base = `/projects/${projectId}`;
   const qc = useQueryClient();
+  const [search, setSearch] = useSearchParams();
   const { t: tr, lang } = useI18n();
   const [open, setOpen] = useState<Shot | null>(null);
   const [mtab, setMtab] = useState("overview");
@@ -85,6 +86,17 @@ export default function Shots() {
     onSuccess: setCompose,
   });
 
+  const requestedShot = search.get("shot");
+  useEffect(() => {
+    if (requestedShot) { setNovelId(""); setChapterId(""); }
+  }, [requestedShot, setNovelId, setChapterId]);
+  useEffect(() => {
+    const found = shots?.find(s => s.id === requestedShot);
+    if (found) { openShot(found); setSearch({}, { replace: true }); }
+    // Resolve a direct link after the shot list has loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shots, requestedShot]);
+
   const byStatus = (st: string) => (shots ?? []).filter((s) => s.production_status === st);
 
   return (
@@ -124,9 +136,9 @@ export default function Shots() {
       </div>
 
       {/* KPI 指标条 */}
-      <div className="grid grid-cols-7 gap-2 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2 mb-6">
         {ORDER.map((st) => (
-          <div key={st} className="glass rounded-xl border border-border p-3 shadow-panel backdrop-blur-md transition hover:border-primary/40">
+          <div key={st} className="glass rounded-xl border border-border p-3 shadow-panel  transition hover:border-primary/40">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className={`h-2 w-2 rounded-full ${DOT[st]}`} /> {tr(`status.${st}`)}
             </div>
@@ -136,8 +148,8 @@ export default function Shots() {
       </div>
 
       {/* 看板(左) + 详情(右) */}
-      <div className="flex gap-4 items-start">
-        <div className="flex-1 min-w-0 overflow-x-auto pb-4">
+      <div className="flex flex-col xl:flex-row gap-4 items-start">
+        <div className="w-full flex-1 min-w-0 overflow-x-auto pb-4">
           <div className="flex gap-3">
             {ORDER.map((st) => {
               const items = byStatus(st);
@@ -154,7 +166,7 @@ export default function Shots() {
                         key={s.id}
                         onClick={() => openShot(s)}
                         className={`block w-full text-left rounded-lg border bg-card p-3 transition-all hover:-translate-y-px ${
-                          open?.id === s.id ? "border-primary ring-1 ring-primary shadow-glow-sm" : "border-border hover:border-primary/60"
+                          open?.id === s.id ? "border-primary ring-1 ring-primary " : "border-border hover:border-primary/60"
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -188,7 +200,7 @@ export default function Shots() {
 
         {/* 右侧详情面板 */}
         {open && (
-          <aside className="glass w-[420px] shrink-0 rounded-xl border border-border shadow-panel backdrop-blur-md sticky top-0 max-h-[calc(100vh-7rem)] flex flex-col overflow-hidden">
+          <aside className="glass w-full xl:w-[420px] shrink-0 rounded-xl border border-border shadow-panel  sticky top-0 max-h-[calc(100vh-7rem)] flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
               <span className="flex items-center gap-2">
                 <span className="font-code text-sm">{open.code}</span>

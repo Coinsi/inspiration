@@ -179,7 +179,7 @@ function Message({ m, onApply, applying }: { m: AssistMessage; onApply: (id: str
     <div className="flex flex-col items-start gap-1">
       {/* 发送者:AI 助手 */}
       <div className="flex items-center gap-1.5 text-[11px] text-faint">
-        <span className="grid h-5 w-5 place-items-center rounded-full bg-gradient-primary text-primary-foreground">
+        <span className="grid h-5 w-5 place-items-center rounded-full bg-primary text-primary-foreground">
           <Bot className="h-3 w-3" />
         </span>
         <span className="font-medium text-muted-foreground">{tr("assist.title")}</span>

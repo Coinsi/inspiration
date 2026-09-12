@@ -1,28 +1,16 @@
+import { MediaImage } from "@/components/MediaImage";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ClipboardList,
-  Clapperboard,
-  Film,
-  Images,
-  LayoutGrid,
-  Play,
-  Plus,
-  ScrollText,
-  Settings2,
-  Sparkles,
-  Workflow,
-} from "lucide-react";
+import { ArrowRight, Clapperboard, Film, Images, ScrollText } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ShotMedia } from "@/components/ShotMedia";
 import { usePersistentState } from "@/lib/usePersistentState";
 import {
   api,
   blobUrl,
-  PRODUCTION_STATUS_LABEL,
   type Asset,
-  type Board,
   type NovelDetail,
   type Novel,
   type Project,
@@ -30,91 +18,116 @@ import {
   type Shot,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
-
-const STATUS_VARIANT: Record<string, "default" | "primary" | "success" | "warning" | "info" | "danger"> = {
-  to_design: "default",
-  concept: "info",
-  generating: "warning",
-  pending_review: "warning",
-  revising: "danger",
-  approved: "success",
-  in_cut: "primary",
-};
 
 export default function Workbench() {
   const { projectId } = useParams();
   const { t, lang } = useI18n();
+  const zh = lang === "zh";
   const base = `/projects/${projectId}`;
-
-  const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: () => api.get<Project[]>("/projects") });
+  const { data: projects } = useQuery({
+    queryKey: ["projects"],
+    queryFn: () => api.get<Project[]>("/projects"),
+  });
   const project = projects?.find((p) => p.id === projectId);
-
-  const { data: novels } = useQuery({ queryKey: ["novels", projectId], queryFn: () => api.get<Novel[]>(`${base}/novels`) });
-  // 小说 + 章节筛选(章节空 = 全部);选中章节后各面板只展示该章相关内容
+  const { data: novels } = useQuery({
+    queryKey: ["novels", projectId],
+    queryFn: () => api.get<Novel[]>(`${base}/novels`),
+  });
   const [novelId, setNovelId] = usePersistentState<string | null>(`wb.novel.${projectId}`, null);
-  const [chapterId, setChapterId] = usePersistentState<string>(`wb.chapter.${projectId}`, "");
-  const effNovelId = novelId ?? novels?.[0]?.id ?? null;
-  const { data: novelDetail } = useQuery({
+  const [chapterId, setChapterId] = usePersistentState(`wb.chapter.${projectId}`, "");
+  const effNovelId = novels?.find((n) => n.id === novelId)?.id ?? novels?.[0]?.id;
+  const { data: detail } = useQuery({
     queryKey: ["novel", projectId, effNovelId],
     queryFn: () => api.get<NovelDetail>(`${base}/novels/${effNovelId}`),
     enabled: !!effNovelId,
   });
-  const chParam = chapterId ? `&chapter_id=${chapterId}` : "";
-
-  const { data: characters, isLoading: chLoading } = useQuery({
-    queryKey: ["assets", projectId, "character", chapterId],
-    queryFn: () => api.get<Asset[]>(`${base}/assets?type=character${chParam}`),
+  const chapters = detail?.chapters ?? [];
+  const chapter = chapters.find((c) => c.id === chapterId) ?? chapters[0];
+  const {
+    data: assets,
+    isLoading: assetsLoading,
+    isError: assetsError,
+  } = useQuery({
+    queryKey: ["assets", projectId, "workbench", chapterId],
+    queryFn: () => api.get<Asset[]>(`${base}/assets${chapterId ? `?chapter_id=${chapterId}` : ""}`),
   });
-  const { data: locations, isLoading: locLoading } = useQuery({
-    queryKey: ["assets", projectId, "location", chapterId],
-    queryFn: () => api.get<Asset[]>(`${base}/assets?type=location${chParam}`),
-  });
-  const { data: shots, isLoading: shotsLoading } = useQuery({
-    queryKey: ["shots", projectId, chapterId],
+  const {
+    data: shots,
+    isLoading: shotsLoading,
+    isError: shotsError,
+  } = useQuery({
+    queryKey: ["all-shots", projectId, "workbench", chapterId],
     queryFn: () => api.get<Shot[]>(`${base}/shots${chapterId ? `?chapter_id=${chapterId}` : ""}`),
   });
-  const { data: board } = useQuery({ queryKey: ["board", projectId], queryFn: () => api.get<Board>(`${base}/shots/board`) });
-  const { data: quota } = useQuery({ queryKey: ["quota", projectId], queryFn: () => api.get<Quota | null>(`${base}/quota`) });
-
-  const approved = (board?.by_status?.approved ?? 0) + (board?.by_status?.in_cut ?? 0);
-  const usedPct = quota && quota.limit_cost > 0 ? Math.min(100, Math.round((quota.used_cost / quota.limit_cost) * 100)) : 0;
-  // 脚本面板:选中章节则显示该章,否则第一章
-  const chapters = novelDetail?.chapters ?? [];
-  const firstChapter = (chapterId ? chapters.find((c) => c.id === chapterId) : chapters[0]) ?? null;
+  const { data: quota, isLoading: quotaLoading, isError: quotaError } = useQuery({
+    queryKey: ["quota", projectId],
+    queryFn: () => api.get<Quota | null>(`${base}/quota`),
+  });
+  const approved = shots?.filter((s) => ["approved", "in_cut"].includes(s.production_status)).length ?? 0;
+  const progress = shots?.length ? Math.round((approved / shots.length) * 100) : 0;
+  const usedPct =
+    quota && quota.limit_cost > 0
+      ? Math.min(100, Math.round((quota.used_cost / quota.limit_cost) * 100))
+      : null;
+  const characters = assets?.filter((a) => a.type === "character") ?? [];
+  const locations = assets?.filter((a) => a.type === "location") ?? [];
+  const next = !chapters.length ? "narrative" : !assets?.length ? "assets" : "storyboard";
+  const nextLabel =
+    next === "narrative"
+      ? zh
+        ? "从一个故事开始"
+        : "Start with a story"
+      : next === "assets"
+        ? zh
+          ? "让故事中的角色与场景成形"
+          : "Develop your characters and locations"
+        : zh
+          ? "继续打磨下一个镜头"
+          : "Shape your next shot";
+  const viewAll = (to: string) => (
+    <Link
+      to={`${base}/${to}`}
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+    >
+      {zh ? "查看全部" : "View all"}
+      <ArrowRight className="h-3.5 w-3.5" />
+    </Link>
+  );
 
   return (
-    <div className="flex h-full flex-col">
-      {/* 顶部条:标题 + 主操作 */}
-      <header className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-border bg-surface/40 px-5 py-3 backdrop-blur-md">
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <Clapperboard className="h-5 w-5 text-primary" />
-            {project?.name ?? t("wb.title")}
-          </h1>
-          <p className="truncate text-xs text-muted-foreground">{t("wb.subtitle")}</p>
+    <div className="studio-page">
+      <header className="page-heading">
+        <div>
+          <p className="!mt-0 !mb-1 text-xs text-faint">INSPIRATION / {zh ? "创作工作台" : "WORKSPACE"}</p>
+          <h1>{project?.name ?? t("wb.title")}</h1>
+          <p>
+            {zh ? "从故事到画面，专注每一步创作。" : "From story to screen, one thoughtful step at a time."}
+          </p>
         </div>
-        <span className="flex-1" />
-        {/* 小说 + 章节筛选 */}
-        {novels && novels.length > 0 && (
-          <div className="flex items-center gap-2">
-            {novels.length > 1 && (
-              <select
-                className="h-8 rounded-md border border-border bg-card px-2 text-xs"
-                value={effNovelId ?? ""}
-                onChange={(e) => { setNovelId(e.target.value); setChapterId(""); }}
-                title={t("wb.novel")}
-              >
-                {novels.map((n) => (
-                  <option key={n.id} value={n.id}>{n.title}</option>
-                ))}
-              </select>
-            )}
+        <div className="flex flex-wrap items-center gap-2">
+          {novels && novels.length > 1 && (
             <select
-              className="h-8 rounded-md border border-border bg-card px-2 text-xs"
+              aria-label={t("wb.novel")}
+              className="h-9 rounded-md border bg-card px-3 text-sm"
+              value={effNovelId ?? ""}
+              onChange={(e) => {
+                setNovelId(e.target.value);
+                setChapterId("");
+              }}
+            >
+              {novels.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                </option>
+              ))}
+            </select>
+          )}
+          {!!chapters.length && (
+            <select
+              aria-label={t("wb.chapterFilter")}
+              className="h-9 rounded-md border bg-card px-3 text-sm"
               value={chapterId}
               onChange={(e) => setChapterId(e.target.value)}
-              title={t("wb.chapterFilter")}
             >
               <option value="">{t("wb.allChapters")}</option>
               {chapters.map((c) => (
@@ -123,291 +136,193 @@ export default function Workbench() {
                 </option>
               ))}
             </select>
-            {chapterId && (
-              <button
-                onClick={() => setChapterId("")}
-                title={t("wb.clearFilter")}
-                className="grid h-8 w-8 place-items-center rounded-md border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
-              >
-                ×
-              </button>
-            )}
-          </div>
-        )}
-        <span className="hidden items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground sm:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-success shadow-glow-sm" />
-          {t("wb.saved")}
-        </span>
-        <Link
-          to={`${base}/cuts`}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-elevated/60 px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
-        >
-          <Film className="h-3.5 w-3.5" /> {t("wb.export")}
-        </Link>
-        <Link
-          to={`${base}/shots`}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-gradient-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-glow-sm transition hover:brightness-110"
-        >
-          <Sparkles className="h-3.5 w-3.5" /> {t("wb.generateFilm")}
-        </Link>
+          )}
+          <Link className="studio-link" to={`${base}/cuts`}>
+            <Film className="h-4 w-4" />
+            {t("nav.cuts")}
+          </Link>
+        </div>
       </header>
 
-      {/* 工作台栅格 */}
-      <div className="grid flex-1 grid-cols-1 gap-3.5 overflow-auto p-3.5 lg:grid-cols-6 lg:grid-rows-[minmax(260px,auto)_minmax(180px,auto)_minmax(240px,auto)]">
-        {/* 脚本编辑 */}
-        <Panel
-          className="lg:col-span-2"
-          title={t("wb.script")}
-          icon={<ScrollText className="h-3.5 w-3.5" />}
-          meta={firstChapter ? `${(firstChapter.content ?? "").length}` : undefined}
-          action={
-            <Link to={`${base}/narrative`} className="text-[11px] text-muted-foreground hover:text-primary">
-              {t("wb.openNarrative")}
-            </Link>
-          }
-        >
-          {firstChapter ? (
-            <div className="space-y-1.5 text-[12.5px] leading-relaxed">
-              <p className="font-semibold text-primary">{firstChapter.title ?? t("wb.chapter")}</p>
-              <p className="whitespace-pre-wrap text-muted-foreground">{(firstChapter.content ?? "").slice(0, 320)}…</p>
+      <section className="grid overflow-hidden rounded-lg border bg-card lg:grid-cols-[1fr_320px]">
+        <div className="flex flex-col items-start p-6 lg:p-8">
+          <span className="mb-3 text-xs text-muted-foreground">{zh ? "继续创作" : "CONTINUE CREATING"}</span>
+          <h2 className="text-2xl font-semibold tracking-tight">{nextLabel}</h2>
+          <p className="mt-3 max-w-xl text-sm leading-7 text-muted-foreground">
+            {chapter
+              ? `${chapter.title ?? t("wb.chapter")} · ${(chapter.content ?? "").slice(0, 90)}${(chapter.content?.length ?? 0) > 90 ? "…" : ""}`
+              : zh
+                ? "导入小说、整理设定，再把故事拆解成可制作的分镜。"
+                : "Import a narrative, develop your story bible, then turn scenes into shots."}
+          </p>
+          <Link to={`${base}/${next}`} className="studio-primary mt-6">
+            {zh ? "继续处理" : "Continue"}
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+        <div className="border-t bg-surface p-6 lg:border-l lg:border-t-0">
+          <p className="mb-3 text-xs text-muted-foreground">
+            {zh ? "镜头制作进度 · 当前范围" : "SHOT PROGRESS · CURRENT SCOPE"}
+          </p>
+          <div className="flex items-baseline justify-between">
+            <span className="text-3xl font-medium tabular-nums">
+              {shots ? approved : "—"}
+              <span className="text-base text-muted-foreground"> / {shots?.length ?? "—"}</span>
+            </span>
+            <span className="text-xs text-muted-foreground">{shots ? `${progress}%` : "—"}</span>
+          </div>
+          <div className="my-4 h-1.5 overflow-hidden rounded-full bg-elevated">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">{t("wb.roster")}</p>
+              <p className="mt-1">{assets ? characters.length : "—"}</p>
             </div>
-          ) : (
-            <EmptyHint icon={<ScrollText className="h-5 w-5" />} text={t("wb.empty.script")} to={`${base}/narrative`} cta={t("wb.openNarrative")} />
-          )}
-        </Panel>
+            <div>
+              <p className="text-xs text-muted-foreground">{t("wb.scenes")}</p>
+              <p className="mt-1">{assets ? locations.length : "—"}</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-        {/* 工作流 */}
-        <Panel className="lg:col-span-2" title={t("wb.flow")} icon={<Workflow className="h-3.5 w-3.5" />}>
-          <WorkflowGraph t={t} />
-        </Panel>
+      <nav
+        aria-label={zh ? "创作流程" : "Creative workflow"}
+        className="grid grid-cols-2 gap-2 lg:grid-cols-4"
+      >
+        {[
+          { to: "narrative", label: t("nav.narrative"), icon: ScrollText },
+          { to: "assets", label: t("nav.assetLibrary"), icon: Images },
+          { to: "storyboard", label: t("nav.storyboard"), icon: Clapperboard },
+          { to: "shots", label: t("nav.shots"), icon: Film },
+        ].map((step, i) => (
+          <Link
+            key={step.to}
+            to={`${base}/${step.to}`}
+            className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-surface p-3 text-sm transition-colors hover:bg-elevated"
+          >
+            <span className="font-code text-xs text-faint">0{i + 1}</span>
+            <step.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{step.label}</span>
+            <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 text-faint" />
+          </Link>
+        ))}
+      </nav>
 
-        {/* 角色一览 */}
-        <Panel
-          className="lg:col-span-2"
-          title={t("wb.roster")}
-          icon={<Images className="h-3.5 w-3.5" />}
-          action={
-            <Link to={`${base}/assets`} className="text-[11px] text-muted-foreground hover:text-primary">
-              {t("wb.manageRoster")}
+      <Panel
+        title={zh ? "分镜预览" : "Shot previews"}
+        icon={<Clapperboard className="h-4 w-4" />}
+        action={viewAll("storyboard")}
+      >
+        {shotsLoading ? (
+          <Skeleton className="h-40" />
+        ) : shotsError ? (
+          <div role="alert" className="studio-empty">
+            {zh ? "镜头暂时无法加载，请稍后重试。" : "Unable to load shots. Please try again."}
+          </div>
+        ) : shots?.length ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {shots.slice(0, 4).map((shot, i) => (
+              <article key={shot.id} className="min-w-0">
+                <div className="aspect-video overflow-hidden rounded-md border">
+                  <ShotMedia projectId={projectId!} shot={shot} />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <Link
+                    to={`${base}/shots?shot=${shot.id}`}
+                    className="truncate text-sm font-medium hover:text-primary"
+                  >
+                    {String(i + 1).padStart(2, "0")} · {shot.title ?? shot.code}
+                  </Link>
+                  <Badge variant={shot.production_status === "approved" ? "success" : "outline"}>
+                    {t(`status.${shot.production_status}`)}
+                  </Badge>
+                </div>
+                <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                  {shot.description || shot.code}
+                </p>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="studio-empty">
+            <Clapperboard className="h-6 w-6" />
+            <p>{t("wb.empty.shots")}</p>
+            <Link to={`${base}/storyboard`} className="text-primary">
+              {t("nav.storyboard")} →
             </Link>
-          }
-        >
-          {chLoading ? (
-            <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}</div>
-          ) : characters && characters.length > 0 ? (
-            <div className="space-y-2">
-              {characters.slice(0, 5).map((c, i) => (
-                <Link
-                  key={c.id}
-                  to={`${base}/assets/${c.id}`}
-                  className="flex items-start gap-3 rounded-lg border border-border bg-card p-2 transition hover:-translate-y-px hover:border-primary/50"
-                >
-                  <Thumb projectId={projectId!} hash={c.representative_blob_hash} fallback={c.name} ratio="portrait" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-[13px] font-semibold">{c.name}</span>
-                      <Badge variant={i === 0 ? "primary" : "info"} className="px-1.5 py-0 text-[9px]">
-                        {i === 0 ? t("r.lead") : t("r.supp")}
-                      </Badge>
+          </div>
+        )}
+      </Panel>
+
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+        <Panel title={t("nav.assetLibrary")} icon={<Images className="h-4 w-4" />} action={viewAll("assets")}>
+          {assetsLoading ? (
+            <Skeleton className="h-44" />
+          ) : assetsError ? (
+            <div role="alert" className="studio-empty">
+              {zh ? "资产暂时无法加载。" : "Unable to load assets."}
+            </div>
+          ) : assets?.length ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {[
+                ...characters,
+                ...locations,
+                ...assets.filter((a) => !["character", "location"].includes(a.type)),
+              ]
+                .slice(0, 4)
+                .map((a) => (
+                  <Link key={a.id} to={`${base}/assets/${a.id}`} className="group min-w-0">
+                    <div className="aspect-[4/3] overflow-hidden rounded-md border bg-elevated">
+                      <MediaImage
+                        src={
+                          a.representative_blob_hash ? blobUrl(projectId!, a.representative_blob_hash) : null
+                        }
+                        alt={a.name}
+                      />
                     </div>
-                    <div className="line-clamp-2 break-words text-[11px] leading-snug text-muted-foreground">{c.summary ?? c.code}</div>
-                  </div>
-                </Link>
-              ))}
+                    <p className="mt-2 truncate text-sm font-medium group-hover:text-primary">{a.name}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{t(`asset.${a.type}`)}</p>
+                  </Link>
+                ))}
             </div>
           ) : (
-            <EmptyHint icon={<Images className="h-5 w-5" />} text={t("wb.empty.roster")} to={`${base}/assets`} cta={t("common.new")} />
+            <div className="studio-empty">
+              <Images className="h-6 w-6" />
+              <p>{t("assets.empty")}</p>
+              <Link className="text-primary" to={`${base}/assets`}>
+                {t("common.new")} →
+              </Link>
+            </div>
           )}
         </Panel>
-
-        {/* 分镜时间轴 */}
-        <Panel
-          className="lg:col-span-4"
-          title={t("wb.timeline")}
-          icon={<LayoutGrid className="h-3.5 w-3.5" />}
-          meta={board ? `${approved}/${board.total}` : undefined}
-          action={
-            <Link to={`${base}/shots`} className="text-[11px] text-muted-foreground hover:text-primary">
-              {t("wb.openShots")}
-            </Link>
-          }
-        >
-          {shotsLoading ? (
-            <div className="flex gap-3">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 w-28 rounded-lg" />)}</div>
-          ) : shots && shots.length > 0 ? (
-            <div className="flex gap-3 overflow-x-auto pb-1">
-              {shots.slice(0, 12).map((s, i) => (
-                <Link key={s.id} to={`${base}/shots`} className={cn("w-28 flex-shrink-0", i === 0 && "")}>
-                  <div className="relative h-[76px] overflow-hidden rounded-lg border border-border bg-gradient-to-br from-elevated to-card">
-                    <div className="absolute inset-0 bg-[radial-gradient(60px_60px_at_50%_40%,hsl(var(--accent)/0.22),transparent)]" />
-                    <span className="absolute left-1.5 top-1.5 font-code text-[9px] text-faint">{s.code}</span>
-                    <Badge variant={STATUS_VARIANT[s.production_status] ?? "default"} className="absolute bottom-1.5 left-1.5 px-1.5 py-0 text-[8.5px]">
-                      {lang === "zh" ? PRODUCTION_STATUS_LABEL[s.production_status] : t(`status.${s.production_status}`)}
-                    </Badge>
-                  </div>
-                  <div className="mt-1.5 truncate text-center text-[10.5px] text-muted-foreground">{s.title ?? s.code}</div>
-                </Link>
-              ))}
+        <Panel title={zh ? "项目信息" : "Project information"}>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between gap-3">
+              <span className="text-muted-foreground">{zh ? "章节" : "Chapters"}</span>
+              <span>{detail ? chapters.length : "—"}</span>
             </div>
-          ) : (
-            <EmptyHint icon={<LayoutGrid className="h-5 w-5" />} text={t("wb.empty.shots")} to={`${base}/shots`} cta={t("wb.openShots")} />
-          )}
-        </Panel>
-
-        {/* 场景管理 */}
-        <Panel
-          className="lg:col-span-2"
-          title={t("wb.scenes")}
-          icon={<ClipboardList className="h-3.5 w-3.5" />}
-          action={
-            <Link to={`${base}/assets`} className="text-[11px] text-muted-foreground hover:text-primary">
-              <Plus className="h-3.5 w-3.5" />
-            </Link>
-          }
-        >
-          {locLoading ? (
-            <div className="grid grid-cols-2 gap-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>
-          ) : locations && locations.length > 0 ? (
-            <div className="grid grid-cols-2 gap-2">
-              {locations.slice(0, 4).map((l, i) => (
-                <Link key={l.id} to={`${base}/assets/${l.id}`} className="overflow-hidden rounded-lg border border-border bg-card transition hover:border-primary/50">
-                  <div className="relative h-14">
-                    <Thumb projectId={projectId!} hash={l.representative_blob_hash} fallback={l.name} ratio="wide" />
-                    <span className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded bg-bg/70 font-code text-[9px] font-bold text-primary">
-                      {String.fromCharCode(65 + i)}
-                    </span>
-                  </div>
-                  <div className="px-2 py-1.5">
-                    <b className="block truncate text-[11px]">{l.name}</b>
-                    <small className="block truncate text-[9.5px] text-muted-foreground">{l.code}</small>
-                  </div>
-                </Link>
-              ))}
+            <div className="flex justify-between gap-3">
+              <span className="text-muted-foreground">{zh ? "项目用量" : "Project usage"}</span>
+              <span>{quotaLoading ? "…" : quotaError ? (zh ? "暂不可用" : "Unavailable") : usedPct === null ? (zh ? "未设置限额" : "No limit set") : `${usedPct}%`}</span>
             </div>
-          ) : (
-            <EmptyHint icon={<ClipboardList className="h-5 w-5" />} text={t("wb.empty.scenes")} to={`${base}/assets`} cta={t("common.new")} />
-          )}
-        </Panel>
-
-        {/* 成片预览 */}
-        <Panel className="lg:col-span-4" title={t("wb.preview")} icon={<Film className="h-3.5 w-3.5" />} meta="3840×2160 · 4K" bodyClassName="flex flex-col">
-          <div className="relative flex-1 overflow-hidden rounded-lg border border-border" style={{ minHeight: 180 }}>
-            <div className="absolute inset-0 bg-[radial-gradient(420px_240px_at_50%_30%,hsl(210_60%_30%/0.5),transparent),linear-gradient(180deg,hsl(218_45%_12%),hsl(220_50%_6%))]" />
-            <div className="absolute right-[22%] top-[14%] h-16 w-16 rounded-full bg-[radial-gradient(circle_at_40%_40%,hsl(40_40%_88%),hsl(35_30%_60%))] opacity-50 blur-[1px]" />
-            <div className="absolute left-1/2 top-[40%] h-28 w-12 -translate-x-1/2 rounded-t-[40px] bg-gradient-to-b from-black/80 to-black/95" />
-            <button className="absolute left-1/2 top-1/2 grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-primary text-primary-foreground shadow-glow">
-              <Play className="h-4 w-4 fill-current" />
-            </button>
-          </div>
-          <div className="flex items-center gap-2.5 pt-2.5">
-            <span className="font-code text-[11px] text-faint">00:00</span>
-            <div className="relative h-1 flex-1 rounded bg-elevated">
-              <span className="absolute inset-y-0 left-0 w-[18%] rounded bg-gradient-accent" />
+            <div className="flex flex-wrap gap-3 border-t pt-3">
+              <Link className="text-xs text-muted-foreground hover:text-foreground" to={`${base}/settings`}>
+                {t("nav.settings")} →
+              </Link>
+              <Link className="text-xs text-muted-foreground hover:text-foreground" to={`${base}/cuts`}>
+                {zh ? "时间线与定剪基线" : "Timelines & baselines"} →
+              </Link>
             </div>
-            <span className="font-code text-[11px] text-faint">01:20</span>
-          </div>
-        </Panel>
-
-        {/* 成片信息 + 用量 */}
-        <Panel className="lg:col-span-2" title={t("wb.info")} icon={<Settings2 className="h-3.5 w-3.5" />}>
-          <div className="space-y-0.5">
-            <InfoRow label={t("wb.info.project")} value={project?.name ?? "—"} />
-            <InfoRow label={t("wb.info.shots")} value={String(board?.total ?? 0)} mono />
-            <InfoRow label={t("wb.info.approved")} value={String(approved)} mono />
-            <InfoRow label={t("wb.info.fps")} value="24 fps" mono />
-            <InfoRow label={t("wb.info.ratio")} value="16 : 9" mono />
-          </div>
-          <div className="mt-3 rounded-lg border border-border bg-card p-2.5">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-muted-foreground">{t("wb.usage.month")}</span>
-              <b className="text-primary">{usedPct}%</b>
-            </div>
-            <div className="my-2 h-1.5 overflow-hidden rounded bg-elevated">
-              <i className="block h-full rounded bg-gradient-accent" style={{ width: `${usedPct}%` }} />
-            </div>
-            <Link
-              to={`${base}/settings`}
-              className="block rounded-md bg-gradient-primary py-1.5 text-center text-[11px] font-semibold text-primary-foreground shadow-glow-sm transition hover:brightness-110"
-            >
-              {t("wb.usage.upgrade")}
-            </Link>
+            <p className="text-xs leading-6 text-faint">
+              {zh
+                ? "成片播放暂不可用；可继续管理时间线、冻结与比较定剪基线。"
+                : "Film playback is not available yet. You can manage timelines, freeze cuts and compare baselines."}
+            </p>
           </div>
         </Panel>
       </div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between border-b border-dashed border-border py-1.5 text-[12px] last:border-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={cn("font-semibold", mono && "font-code")}>{value}</span>
-    </div>
-  );
-}
-
-function Thumb({ projectId, hash, fallback, ratio }: { projectId: string; hash: string | null; fallback: string; ratio: "portrait" | "wide" }) {
-  const size = ratio === "portrait" ? "h-[54px] w-11" : "h-full w-full";
-  if (hash) {
-    return <img src={blobUrl(projectId, hash)} alt={fallback} className={cn("flex-shrink-0 rounded-md object-cover", ratio === "portrait" ? size : "absolute inset-0")} />;
-  }
-  return (
-    <div
-      className={cn(
-        "grid flex-shrink-0 place-items-center rounded-md bg-gradient-to-br from-accent/40 to-primary/40 text-sm font-semibold text-primary-foreground",
-        ratio === "portrait" ? size : "absolute inset-0 rounded-none",
-      )}
-    >
-      {fallback.slice(0, 1)}
-    </div>
-  );
-}
-
-function EmptyHint({ icon, text, to, cta }: { icon: React.ReactNode; text: string; to: string; cta: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 py-6 text-center text-muted-foreground">
-      <span className="text-faint">{icon}</span>
-      <p className="text-xs">{text}</p>
-      <Link to={to} className="text-[11px] font-medium text-primary hover:underline">
-        {cta} →
-      </Link>
-    </div>
-  );
-}
-
-const FLOW_NODES = [
-  { key: "fl.role", x: "50%", y: 4, gold: false, active: false },
-  { key: "fl.shot", x: "12%", y: 88, gold: false, active: false },
-  { key: "fl.scene", x: "60%", y: 88, gold: false, active: false },
-  { key: "fl.comp", x: "50%", y: 158, gold: true, active: true },
-  { key: "fl.out", x: "50%", y: 214, gold: true, active: false },
-];
-
-function WorkflowGraph({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="relative h-full min-h-[210px]">
-      <svg className="pointer-events-none absolute inset-0 h-full w-full">
-        <path d="M 50% 26 C 50% 64, 26% 64, 26% 90" fill="none" stroke="hsl(var(--accent) / 0.5)" strokeWidth="1.5" />
-        <path d="M 50% 26 C 50% 64, 70% 64, 70% 90" fill="none" stroke="hsl(var(--accent) / 0.5)" strokeWidth="1.5" />
-        <path d="M 26% 116 C 26% 142, 50% 142, 50% 158" fill="none" stroke="hsl(var(--primary) / 0.6)" strokeWidth="1.5" />
-        <path d="M 70% 116 C 70% 142, 50% 142, 50% 158" fill="none" stroke="hsl(var(--primary) / 0.6)" strokeWidth="1.5" />
-        <path d="M 50% 186 L 50% 214" fill="none" stroke="hsl(var(--primary) / 0.6)" strokeWidth="1.5" />
-      </svg>
-      {FLOW_NODES.map((n) => (
-        <div
-          key={n.key}
-          className={cn(
-            "absolute whitespace-nowrap rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold",
-            n.gold ? "border-primary/60 bg-primary/12 text-foreground" : "border-accent/50 bg-accent/10 text-foreground",
-            n.active && "shadow-glow ring-1 ring-primary",
-          )}
-          style={{ left: n.x, top: n.y, transform: n.x === "50%" ? "translateX(-50%)" : undefined }}
-        >
-          {t(n.key)}
-        </div>
-      ))}
-      <div className="absolute bottom-0 left-0 text-[10.5px] text-faint">{t("fl.current")}</div>
     </div>
   );
 }
