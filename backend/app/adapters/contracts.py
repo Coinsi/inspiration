@@ -14,6 +14,7 @@ from app.registry.base import Registry
 
 
 class Capabilities(BaseModel):
+    strict_parameters: bool = False
     modalities: set[Literal["image", "video"]] = Field(default_factory=set)
     features: set[str] = Field(default_factory=set)  # img2img/inpaint/controlnet/reference/lora
     max_reference_images: int = 0

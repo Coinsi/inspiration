@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+assert.equal(process.env.TEST_ISOLATED_PREVIEW,'1');
+const base=process.env.APP_URL,out=process.env.ARTIFACT_DIR;assert.ok(base&&out);await mkdir(out,{recursive:true});
+const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
+const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1560,height:1080}}),page=await context.newPage();
+const errors=[];page.on('pageerror',e=>errors.push(e.message));const report={checks:[]};
+try{
+ const a=await context.request.post(`${base}/api/v1/auth/login`,{data:{username:'demo',password:'demo1234'}});assert.ok(a.ok());const token=(await a.json()).access_token,headers={Authorization:`Bearer ${token}`};
+ const call=async(method,path,data)=>{const r=await context.request[method](`${base}/api/v1${path}`,{headers,data});assert.ok(r.ok(),await r.text());return r.json()};
+ const p=await call('post','/projects',{code:'SKILL-'+Date.now(),name:'技能与MCP验收 · 版本和来源'}),root=`/projects/${p.id}`;report.project=p.id;
+ const script=await call('post',root+'/scripts',{title:'外部工具审阅'});await call('post',root+`/scripts/${script.id}/apply-scenes`,{scenes:[{title:'测试场景',shots:[{title:'外部参考镜头'}]}]});report.shot=(await call('get',root+'/shots'))[0].id;
+ await context.addInitScript(token=>{localStorage.setItem('inspiration_token',token);localStorage.setItem('inspiration_lang','zh')},token);
+ await page.goto(`${base}${root}/skills`);await page.getByRole('tab',{name:'方法模板',exact:true}).click();await page.getByRole('button',{name:'查看技能 镜头连续性检查',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'使用模板',exact:true}).click();await page.getByLabel('技能名称',{exact:true}).fill('海岸连续性检查');const original=await page.getByLabel('方法与步骤',{exact:true}).inputValue();
+ await page.getByRole('button',{name:'保存技能',exact:true}).click();await page.getByText('已保存版本 1',{exact:true}).waitFor();let skill=(await call('get',root+'/skills'))[0];report.skill=skill.id;
+ await page.getByLabel('方法与步骤',{exact:true}).fill(original+'\n补充：保持海风方向。');await page.getByRole('button',{name:'保存技能',exact:true}).click();await page.getByText('已保存版本 2',{exact:true}).waitFor();
+ await page.getByRole('tab',{name:'版本历史',exact:true}).click();await page.getByRole('button',{name:'恢复',exact:true}).last().click();await page.getByRole('alertdialog').getByRole('button',{name:'确定',exact:true}).click();await page.getByText('编辑技能 · 版本 3',{exact:true}).waitFor();assert.equal(await page.getByLabel('方法与步骤',{exact:true}).inputValue(),original);report.checks.push('Create from template, update immutable revision, restore creates revision 3');
+ await page.reload();await page.getByRole('button',{name:'编辑技能 海岸连续性检查',exact:true}).click();assert.equal(await page.getByLabel('方法与步骤',{exact:true}).inputValue(),original);
+ await page.screenshot({path:`${out}/skills-dark.png`,animations:'disabled'});await page.evaluate(()=>{document.documentElement.classList.remove('dark');document.documentElement.classList.add('light')});await page.waitForTimeout(250);await page.screenshot({path:`${out}/skills-light.png`,animations:'disabled'});
+ await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('link',{name:'导入外部目录 ↗',exact:true}).click();const catalogue={source:'只读素材目录验收',items:[{name:'海边木屋',type:'location',summary:'朝向大海的木屋',source_id:'house-001',source_url:'https://example.com/house-001',tags:['海边']}]};await page.getByLabel('选择外部目录文件',{exact:true}).setInputFiles({name:'catalogue.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(catalogue))});await page.getByRole('button',{name:'导入 1 项资产信息',exact:true}).click();await page.getByText(/已导入 1 项资产/).waitFor();const assets=await call('get',root+'/assets');assert.equal(assets.length,1);assert.equal(assets[0].metadata.external_source.source_id,'house-001');report.checks.push('JSON source catalogue preview/import retains source identifiers and creates asset versions');
+ await page.setViewportSize({width:390,height:844});assert.ok(await page.locator('main').evaluate(el=>el.scrollWidth<=el.clientWidth));await page.screenshot({path:`${out}/sources-mobile.png`,fullPage:true,animations:'disabled'});
+ await page.goto(`${base}${root}/agent`);await page.getByTestId('skill-picker').getByRole('button',{name:/创作技能/}).click();await page.getByTestId('skill-picker').getByRole('checkbox',{name:/海岸连续性检查/}).waitFor();report.checks.push('Current skill revision available when creating Agent tasks');assert.deepEqual(errors,[]);report.errors=errors;report.passed=true;await writeFile(`${out}/fixture.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+}catch(e){await page.screenshot({path:`${out}/skills-failure.png`,fullPage:true});throw e}finally{await browser.close()}

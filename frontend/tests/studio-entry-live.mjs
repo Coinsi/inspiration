@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+assert.equal(process.env.TEST_ISOLATED_PREVIEW, '1', 'Explicit isolated preview required');
+assert.ok(process.env.TEST_PROJECT_ID && process.env.APP_URL && process.env.ARTIFACT_DIR && process.env.PLAYWRIGHT_MODULE);
+const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
+const out=process.env.ARTIFACT_DIR;
+await mkdir(out,{recursive:true});
+const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+const base=process.env.APP_URL,project=process.env.TEST_PROJECT_ID;
+let runsStarted=0;page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/agent/runs'))runsStarted++});
+const shot=async name=>page.screenshot({path:`${out}/${name}.png`,animations:'disabled'});
+const noOverflow=async()=>assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'body overflows');
+try{
+ await page.goto(base+'/login');await page.getByLabel('用户名',{exact:true}).waitFor();await shot('login-dark');
+ await page.getByRole('button',{name:'显示密码',exact:true}).click();assert.equal(await page.getByLabel('密码',{exact:true}).getAttribute('type'),'text');await page.getByRole('button',{name:'隐藏密码',exact:true}).click();
+ await page.getByLabel('密码',{exact:true}).fill('wrong-password-ui-check');await page.getByRole('button',{name:'进入工作台',exact:true}).click();await page.getByRole('alert').waitFor();assert.ok(page.url().endsWith('/login'));
+ await page.getByLabel('密码',{exact:true}).fill('demo1234');await page.getByRole('button',{name:'进入工作台',exact:true}).click();await page.waitForURL('**/projects');await page.getByLabel('创作所在项目').selectOption(project);await noOverflow();await shot('home-dark');
+ await page.getByLabel('创作想法').fill('先检查这个项目有哪些素材，再规划一个雨夜开场。');await page.getByRole('button',{name:'带入创作助理'}).click();await page.getByLabel('创作目标',{exact:true}).waitFor();assert.equal(await page.getByLabel('创作目标',{exact:true}).inputValue(),'先检查这个项目有哪些素材，再规划一个雨夜开场。');assert.ok(page.url().endsWith('/projects'));assert.equal(runsStarted,0);await page.reload();await page.getByLabel('创作想法').waitFor();assert.equal(await page.getByLabel('创作想法').inputValue(),'先检查这个项目有哪些素材，再规划一个雨夜开场。');await page.getByRole('button',{name:'带入创作助理'}).click();await page.getByLabel('创作目标',{exact:true}).waitFor();assert.equal(await page.getByLabel('创作目标',{exact:true}).inputValue(),'先检查这个项目有哪些素材，再规划一个雨夜开场。');
+ await page.goto(`${base}/projects/${project}/workbench`);await page.getByLabel('创作想法').waitFor();await shot('workbench-dark');
+ await page.getByRole('button',{name:'为雨夜重逢的故事构思镜头',exact:true}).click();assert.equal(await page.getByLabel('创作想法').inputValue(),'为雨夜重逢的故事构思镜头');await page.getByRole('button',{name:'带入创作助理'}).click();assert.equal(await page.getByLabel('创作目标',{exact:true}).inputValue(),'为雨夜重逢的故事构思镜头');assert.equal(runsStarted,0);
+ await page.goto(`${base}/projects/${project}/library`);await page.getByRole('heading',{name:'视频素材库',exact:true}).waitFor();await noOverflow();await shot('library-shell-dark');
+ await page.setViewportSize({width:390,height:844});await page.goto(`${base}/projects/${project}/workbench`);await page.getByLabel('创作想法').waitFor();await noOverflow();assert.ok(await page.locator('main').evaluate(e=>e.scrollWidth<=e.clientWidth));await shot('workbench-mobile');
+ await page.getByRole('button',{name:'打开导航',exact:true}).click();await page.getByRole('dialog',{name:'项目导航'}).waitFor();await shot('navigation-mobile');await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog',{name:'项目导航'}).count(),0);
+ await page.goto(base+'/projects');await page.getByLabel('创作想法').waitFor();await noOverflow();await shot('home-mobile');
+ await page.getByLabel('搜索项目',{exact:true}).fill('THIS_PROJECT_DOES_NOT_EXIST_UI');await page.getByText('没有匹配的项目',{exact:true}).waitFor();await page.getByRole('button',{name:'清除搜索',exact:true}).click();
+ await page.evaluate(()=>{localStorage.removeItem('inspiration_token');localStorage.setItem('inspiration_theme','light')});await page.goto(base+'/login');await page.getByLabel('用户名',{exact:true}).waitFor();await noOverflow();await page.screenshot({path:`${out}/login-mobile-light.png`,fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await shot('login-light');
+ assert.deepEqual(errors,[]);await writeFile(`${out}/report.json`,JSON.stringify({passed:true,project,runsStarted,checks:['real login error and success','password visibility','home and workbench goal handoff to exact project','reload retains handoff','no automatic agent task request','project search empty and clear','library navigation preserved','mobile navigation opens and Escape closes','390px no horizontal overflow','dark and light login'],errors},null,2));console.log('Studio UI flow passed');
+}catch(e){await shot('failure');throw e}finally{await browser.close()}

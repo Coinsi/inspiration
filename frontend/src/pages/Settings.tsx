@@ -1,275 +1,493 @@
+import CreativePreferences from "@/components/CreativePreferences";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  Cable,
+  ChevronRight,
+  FolderOpen,
+  Server,
+  Wallet,
+  Settings2,
+  Users,
+} from "lucide-react";
+import { ModelChannels } from "@/components/ModelChannels";
+import { ProjectDialog } from "@/components/ProjectDialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useI18n } from "@/lib/i18n";
-import { api, ApiError, type ProviderConfig, type Quota } from "@/lib/api";
+import { api, blobUrl, type Project, type Quota } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import "./settings-workspace.css";
 
-function Note({ ok, msg }: { ok: boolean; msg: string }) {
-  if (!msg) return null;
-  return <p className={`text-sm ${ok ? "text-success" : "text-danger"}`}>{msg}</p>;
-}
-
+const sections = [
+  {
+    id: "creative",
+    label: "创作偏好",
+    description: "默认项与提示词",
+    icon: Settings2,
+    group: "当前项目",
+  },
+  {
+    id: "project",
+    label: "项目资料",
+    description: "封面与成员",
+    icon: FolderOpen,
+    group: "当前项目",
+  },
+  {
+    id: "channels",
+    label: "渠道与模型",
+    description: "连接创作服务",
+    icon: Server,
+    group: "当前项目",
+  },
+  {
+    id: "quota",
+    label: "项目配额",
+    description: "用量与内部额度",
+    icon: Wallet,
+    group: "当前项目",
+  },
+  {
+    id: "connections",
+    label: "外部 AI 连接",
+    description: "连接桌面助手",
+    icon: Cable,
+    group: "连接",
+  },
+] as const;
+type Section = (typeof sections)[number]["id"];
 export default function Settings() {
   const { projectId } = useParams();
-  const base = `/projects/${projectId}`;
-  const qc = useQueryClient();
-  const { t: tr } = useI18n();
+  const { me } = useAuth();
+  return (
+    <SettingsContent
+      key={`${projectId}:${me?.user.id}`}
+      projectId={projectId!}
+    />
+  );
+}
+function SettingsContent({ projectId }: { projectId: string }) {
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("section");
+  useEffect(() => {
+    if (requested !== "appearance") return;
+    const next = new URLSearchParams(params);
+    next.set("section", "project");
+    next.set("account", "preferences");
+    setParams(next, { replace: true });
+  }, [requested, params, setParams]);
+  const active: Section =
+    sections.find((s) => s.id === requested)?.id ?? "channels";
+  const [visited, setVisited] = useState<Section[]>([active]);
+  const navigation = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = navigation.current;
+    const selected = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (nav && selected && nav.scrollWidth > nav.clientWidth) {
+      nav.scrollLeft +=
+        selected.getBoundingClientRect().left -
+        nav.getBoundingClientRect().left -
+        (nav.clientWidth - selected.clientWidth) / 2;
+    }
+  }, [active]);
 
-  const { data: providers } = useQuery({
-    queryKey: ["providers", projectId],
-    queryFn: () => api.get<ProviderConfig[]>(`${base}/providers`),
+  useEffect(() => {
+    setVisited((old) => (old.includes(active) ? old : [...old, active]));
+  }, [active]);
+  const role = useAuth().me?.memberships.find(
+    (m) => m.project_id === projectId,
+  )?.role;
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get<Project>(`/projects/${projectId}`),
   });
-  const { data: quota } = useQuery({
+  const entry = sections.find((s) => s.id === active)!;
+  return (
+    <div className="settings-workspace">
+      <header className="settings-hero">
+        <div className="settings-heading-icon">
+          <Settings2 size={22} />
+        </div>
+        <div>
+          <h1>项目设置</h1>
+          <p>管理当前项目的资料、模型与创作默认项。</p>
+        </div>
+        <span className="settings-project-badge">
+          {project.data?.name || "当前项目"}
+        </span>
+      </header>
+      <div className="settings-frame">
+        <nav
+          ref={navigation}
+          className="settings-sidebar"
+          aria-label="设置分类"
+        >
+          {sections.map((s, i) => (
+            <div key={s.id}>
+              {(i === 0 || sections[i - 1].group !== s.group) && (
+                <p className="settings-group">{s.group}</p>
+              )}
+              <button
+                aria-current={active === s.id ? "page" : undefined}
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.set("section", s.id);
+                  setParams(next);
+                }}
+              >
+                <s.icon size={18} />
+                <span>
+                  <strong>{s.label}</strong>
+                  <small>{s.description}</small>
+                </span>
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          ))}
+        </nav>
+        <div className="settings-content" aria-label={`${entry.label}设置内容`}>
+          {(visited.includes("creative") || active === "creative") && (
+            <section hidden={active !== "creative"}>
+              <CreativePreferences
+                projectId={projectId}
+                admin={role === "admin"}
+              />
+            </section>
+          )}
+          {(visited.includes("channels") || active === "channels") && (
+            <section hidden={active !== "channels"}>
+              {role === "admin" ? (
+                <ModelChannels projectId={projectId} />
+              ) : (
+                <div className="settings-pane">
+                  <h2>渠道与模型</h2>
+                  <p>
+                    渠道、密钥和模型由项目管理员管理。已启用的模型可在创作页面选择。
+                  </p>
+                  <Link
+                    className="studio-link"
+                    to={`/projects/${projectId}/members`}
+                  >
+                    查看项目成员
+                  </Link>
+                </div>
+              )}
+            </section>
+          )}
+          {(visited.includes("project") || active === "project") && (
+            <section hidden={active !== "project"}>
+              <ProjectPane projectId={projectId} admin={role === "admin"} />
+            </section>
+          )}
+          {(visited.includes("quota") || active === "quota") && (
+            <section hidden={active !== "quota"}>
+              <QuotaPane projectId={projectId} admin={role === "admin"} />
+            </section>
+          )}
+          {(visited.includes("connections") || active === "connections") && (
+            <section hidden={active !== "connections"}>
+              <ConnectionPane projectId={projectId} />
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function ProjectPane({
+  projectId,
+  admin,
+}: {
+  projectId: string;
+  admin: boolean;
+}) {
+  const qc = useQueryClient();
+  const [cover, setCover] = useState(false);
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get<Project>(`/projects/${projectId}`),
+  });
+  return (
+    <div className="settings-pane">
+      <div className="settings-pane-heading">
+        <span>当前项目</span>
+        <h2>项目资料</h2>
+        <p>封面和项目资料供项目成员共同使用。</p>
+      </div>
+      {project.isPending ? (
+        <p role="status">正在读取项目资料…</p>
+      ) : project.error ? (
+        <div role="alert">
+          <p>{project.error.message}</p>
+          <Button onClick={() => void project.refetch()}>重新读取项目</Button>
+        </div>
+      ) : (
+        <>
+          <div className="settings-project-card">
+            <div className="settings-project-cover">
+              {project.data.cover_blob_hash ? (
+                <img
+                  src={blobUrl(projectId, project.data.cover_blob_hash)}
+                  alt="项目封面"
+                />
+              ) : (
+                <FolderOpen size={38} />
+              )}
+            </div>
+            <div>
+              <h3>{project.data.name}</h3>
+              <p>{project.data.description || "还没有填写项目简介"}</p>
+              {admin && (
+                <Button variant="outline" onClick={() => setCover(true)}>
+                  管理项目封面
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="settings-row">
+            <div>
+              <h3>项目成员</h3>
+              <p>查看成员与角色，按项目权限协作。</p>
+            </div>
+            <Link className="studio-link" to={`/projects/${projectId}/members`}>
+              <Users size={16} />
+              查看成员
+              <ChevronRight size={14} />
+            </Link>
+          </div>
+          <div className="settings-row">
+            <div>
+              <h3>项目内容</h3>
+              <p>回到工作台继续创作；所有项目与回收站在项目首页管理。</p>
+            </div>
+            <Link className="studio-link" to="/projects">
+              所有项目
+              <ChevronRight size={14} />
+            </Link>
+          </div>
+          {cover && (
+            <ProjectDialog
+              project={project.data}
+              onClose={() => setCover(false)}
+              onSaved={(p) => {
+                qc.setQueryData(["project", projectId], p);
+                void qc.invalidateQueries({ queryKey: ["projects"] });
+              }}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+function QuotaPane({
+  projectId,
+  admin,
+}: {
+  projectId: string;
+  admin: boolean;
+}) {
+  const qc = useQueryClient();
+  const base = `/projects/${projectId}`;
+  const query = useQuery({
     queryKey: ["quota", projectId],
     queryFn: () => api.get<Quota | null>(`${base}/quota`),
   });
-
-  // ── 生成供应商 ──
-  const [gName, setGName] = useState("jimeng");
-  const [gEndpoint, setGEndpoint] = useState("");
-  const [gToken, setGToken] = useState("");
-  const [gModel, setGModel] = useState("gpt-image-1");
-  const [gQuality, setGQuality] = useState("");
-  const [gMsg, setGMsg] = useState({ ok: false, msg: "" });
-  // 切到 GPT Image 时带出默认端点与已存模型/质量
-  useEffect(() => {
-    if (gName === "gpt_image") {
-      const existing = providers?.find((p) => p.provider_name === "gpt_image");
-      setGEndpoint((existing?.endpoint as string) ?? "https://api.openai.com/v1");
-      setGModel(((existing?.config?.model as string) || "gpt-image-1"));
-      setGQuality(((existing?.config?.quality as string) || ""));
-    }
-  }, [gName, providers]);
-  const gConfig = () =>
-    gName === "gpt_image" ? { model: gModel, ...(gQuality ? { quality: gQuality } : {}) } : {};
-  const saveGen = useMutation({
-    mutationFn: () =>
-      api.put(`${base}/providers`, {
-        provider_name: gName,
-        kind: "generation",
-        enabled: true,
-        endpoint: gEndpoint || null,
-        token: gToken || null,
-        config: gConfig(),
-      }),
-    onSuccess: () => {
-      setGToken("");
-      setGMsg({ ok: true, msg: tr("set.savedEnc") });
-      void qc.invalidateQueries({ queryKey: ["providers", projectId] });
-    },
-    onError: (e) => setGMsg({ ok: false, msg: e instanceof ApiError ? e.message : tr("set.saveFail") }),
-  });
-  const testGen = useMutation({
-    mutationFn: () =>
-      api.post<{ ok: boolean; message: string }>(`${base}/providers/test`, {
-        provider_name: gName,
-        kind: "generation",
-        endpoint: gEndpoint || null,
-        token: gToken || null,
-        config: gConfig(),
-      }),
-    onSuccess: (r) => setGMsg({ ok: r.ok, msg: r.message }),
-    onError: (e) => setGMsg({ ok: false, msg: e instanceof ApiError ? e.message : tr("set.saveFail") }),
-  });
-
-  // ── AI 拆解 LLM ──
-  const llm = providers?.find((p) => p.kind === "llm");
-  const [lBase, setLBase] = useState("https://api.openai.com/v1");
-  const [lModel, setLModel] = useState("gpt-4o-mini");
-  const [lToken, setLToken] = useState("");
-  const [lMsg, setLMsg] = useState({ ok: false, msg: "" });
-  useEffect(() => {
-    if (llm) {
-      setLBase(llm.endpoint ?? "https://api.openai.com/v1");
-      setLModel((llm.config?.model as string) ?? "gpt-4o-mini");
-    }
-  }, [llm]);
-  const saveLlm = useMutation({
-    mutationFn: () =>
-      api.put(`${base}/providers`, {
-        provider_name: "cloud_llm",
-        kind: "llm",
-        enabled: true,
-        endpoint: lBase,
-        token: lToken || null,
-        config: { model: lModel },
-      }),
-    onSuccess: () => {
-      setLToken("");
-      setLMsg({ ok: true, msg: tr("set.llmSaved") });
-      void qc.invalidateQueries({ queryKey: ["providers", projectId] });
-    },
-    onError: (e) => setLMsg({ ok: false, msg: e instanceof ApiError ? e.message : tr("set.saveFail") }),
-  });
-  const testLlm = useMutation({
-    mutationFn: () =>
-      api.post<{ ok: boolean; message: string }>(`${base}/providers/test`, {
-        provider_name: "cloud_llm",
-        kind: "llm",
-        endpoint: lBase,
-        token: lToken || null,
-        config: { model: lModel },
-      }),
-    onSuccess: (r) => setLMsg({ ok: r.ok, msg: r.message }),
-    onError: (e) => setLMsg({ ok: false, msg: e instanceof ApiError ? e.message : tr("set.saveFail") }),
-  });
-
-  // ── 配额 ──
   const [limit, setLimit] = useState("");
-  const [qMsg, setQMsg] = useState({ ok: false, msg: "" });
+  const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const pending = useRef(false);
   useEffect(() => {
-    if (quota) setLimit(String(quota.limit_cost));
-  }, [quota]);
-  const saveQuota = useMutation({
-    mutationFn: () => api.put(`${base}/quota`, { scope: "project", limit_cost: Number(limit) }),
-    onSuccess: () => {
-      setQMsg({ ok: true, msg: tr("set.quotaSaved") });
-      void qc.invalidateQueries({ queryKey: ["quota", projectId] });
+    if (!dirty && query.isSuccess)
+      setLimit(query.data ? String(query.data.limit_cost) : "");
+  }, [query.data, query.isSuccess, dirty]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  const save = useMutation({
+    mutationFn: (value: number) =>
+      api.put<Quota>(`${base}/quota`, { scope: "project", limit_cost: value }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["quota", projectId] });
+      setDirty(false);
+      setSaved(true);
     },
-    onError: (e) => setQMsg({ ok: false, msg: e instanceof ApiError ? e.message : tr("set.quotaSaveFail") }),
   });
-
+  const valid =
+    limit.trim() !== "" && Number.isFinite(Number(limit)) && Number(limit) >= 0;
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-5">
-      <p className="text-sm text-muted-foreground">{tr("set.hint")}</p>
-
-      {/* 生成供应商 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{tr("set.genProvider")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex gap-2 flex-wrap items-center">
-            <select
-              className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
-              value={gName}
-              onChange={(e) => setGName(e.target.value)}
-            >
-              <option value="jimeng">即梦 Jimeng</option>
-              <option value="gpt_image">GPT Image{tr("set.gptImageNote")}</option>
-              <option value="mock">{tr("set.mockOpt")}</option>
-            </select>
-            <Input
-              placeholder={tr("set.endpointPh")}
-              value={gEndpoint}
-              onChange={(e) => setGEndpoint(e.target.value)}
-              className="flex-1 min-w-[260px]"
-            />
-            {gName === "gpt_image" && (
-              <>
-                <Input
-                  placeholder={tr("set.gptModelPh")}
-                  value={gModel}
-                  onChange={(e) => setGModel(e.target.value)}
-                  className="w-44"
-                />
-                <select
-                  className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
-                  value={gQuality}
-                  onChange={(e) => setGQuality(e.target.value)}
-                  title={tr("set.gptQualityHint")}
-                >
-                  <option value="">{tr("set.gptQualityAuto")}</option>
-                  <option value="low">{tr("set.gptQualityLow")}</option>
-                  <option value="medium">{tr("set.gptQualityMedium")}</option>
-                  <option value="high">{tr("set.gptQualityHigh")}</option>
-                </select>
-              </>
-            )}
-          </div>
-          <Input
-            type="password"
-            placeholder="API Key / Token"
-            value={gToken}
-            onChange={(e) => setGToken(e.target.value)}
-          />
-          <div className="flex items-center gap-3">
-            <Button size="sm" onClick={() => saveGen.mutate()}>
-              {tr("set.saveProvider")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => testGen.mutate()} disabled={testGen.isPending}>
-              {testGen.isPending ? tr("set.testing") : tr("set.test")}
-            </Button>
-            <Note ok={gMsg.ok} msg={gMsg.msg} />
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {tr("set.configured")}
-            {providers?.filter((p) => p.kind === "generation").map((p) => (
-              <span key={p.id} className="ml-2">
-                {p.provider_name}
-                {p.enabled ? tr("set.enabled") : tr("set.disabled")}
-              </span>
-            )) || tr("set.none")}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* AI 拆解 LLM */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{tr("set.llm")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Input
-            placeholder={tr("set.baseUrlPh")}
-            value={lBase}
-            onChange={(e) => setLBase(e.target.value)}
-          />
-          <div className="flex gap-2">
-            <Input placeholder={tr("set.modelPh")} value={lModel} onChange={(e) => setLModel(e.target.value)} />
-            <Input
-              type="password"
-              placeholder={llm ? tr("set.apiKeyKeep") : "API Key"}
-              value={lToken}
-              onChange={(e) => setLToken(e.target.value)}
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            <Button size="sm" onClick={() => saveLlm.mutate()}>
-              {tr("set.saveLlm")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => testLlm.mutate()} disabled={testLlm.isPending}>
-              {testLlm.isPending ? tr("set.testing") : tr("set.test")}
-            </Button>
-            <Note ok={lMsg.ok} msg={lMsg.msg} />
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {llm
-              ? tr("set.llmCurrent").replace("{ep}", llm.endpoint ?? "").replace("{model}", (llm.config?.model as string) ?? "")
-              : tr("set.llmNone")}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 配额 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{tr("set.quota")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex gap-2 items-center">
-            <Input
-              type="number"
-              placeholder={tr("set.quotaLimitPh")}
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              className="w-48"
-            />
-            <Button size="sm" onClick={() => saveQuota.mutate()}>
-              {tr("set.saveQuota")}
-            </Button>
-            <Note ok={qMsg.ok} msg={qMsg.msg} />
-          </div>
-          {quota && (
-            <div className="text-xs text-muted-foreground">
-              {tr("set.quotaUsed").replace("{used}", String(quota.used_cost)).replace("{limit}", String(quota.limit_cost))}
+    <div className="settings-pane">
+      <div className="settings-pane-heading">
+        <span>当前项目</span>
+        <h2>项目配额</h2>
+        <p>为项目设置内部额度，了解已记录的创作用量。</p>
+      </div>
+      {query.isPending ? (
+        <p role="status">正在读取项目配额…</p>
+      ) : query.error ? (
+        <div role="alert">
+          <p>{query.error.message}</p>
+          <Button onClick={() => void query.refetch()}>重新读取配额</Button>
+        </div>
+      ) : (
+        <>
+          <div className="settings-quota-summary">
+            <div>
+              <span>已记录用量</span>
+              <strong>{query.data?.used_cost ?? "—"}</strong>
             </div>
+            <div>
+              <span>当前额度</span>
+              <strong>{query.data?.limit_cost ?? "未设置"}</strong>
+            </div>
+          </div>
+          <p className="settings-note">
+            项目内部额度不代表上游账户余额；未配置模型计价时，以上游实际账单为准。
+          </p>
+          {admin ? (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!valid || pending.current) return;
+                pending.current = true;
+                try {
+                  await save.mutateAsync(Number(limit));
+                } catch {
+                  /* Keep the input for retry. */
+                } finally {
+                  pending.current = false;
+                }
+              }}
+            >
+              <div className="settings-row">
+                <label htmlFor="project-quota">
+                  <h3>项目额度</h3>
+                  <p>修改后影响当前项目的新任务。</p>
+                </label>
+                <Input
+                  id="project-quota"
+                  aria-label="项目配额"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  required
+                  value={limit}
+                  disabled={save.isPending}
+                  onChange={(e) => {
+                    setLimit(e.target.value);
+                    setDirty(true);
+                    setSaved(false);
+                  }}
+                  className="max-w-48"
+                />
+              </div>
+              <div className="settings-save-row">
+                <span>{dirty ? "有未保存修改" : ""}</span>
+                <Button disabled={!valid || save.isPending || !dirty}>
+                  {save.isPending ? "保存中…" : "保存配额"}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <p className="settings-note">只有项目管理员可以修改额度。</p>
           )}
-        </CardContent>
-      </Card>
+        </>
+      )}
+      {save.error && (
+        <p role="alert" className="text-danger">
+          {save.error.message}
+        </p>
+      )}
+      {saved && (
+        <p role="status" className="text-success">
+          配额已保存
+        </p>
+      )}
+    </div>
+  );
+}
+function ConnectionPane({ projectId }: { projectId: string }) {
+  const [copied, setCopied] = useState(false),
+    [error, setError] = useState("");
+  const config = JSON.stringify(
+    {
+      mcpServers: {
+        inspiration: {
+          command: "/absolute/path/to/python",
+          args: ["/absolute/path/to/services/mcp-gateway/server.py"],
+          env: {
+            INSPIRATION_API_URL: `${window.location.origin}/api/v1`,
+            INSPIRATION_PROJECT_ID: projectId,
+            INSPIRATION_TOKEN: "<在客户端凭据配置中填写访问令牌>",
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+  return (
+    <div className="settings-pane">
+      <div className="settings-pane-heading">
+        <span>当前项目 · 桌面助手</span>
+        <h2>外部 AI 连接</h2>
+        <p>让支持 MCP 的外部助手读取项目，并提交可审阅的创作修改。</p>
+      </div>
+      <div className="settings-connection-card">
+        <Cable size={24} />
+        <div>
+          <h3>MCP 连接程序</h3>
+          <p>
+            在运行外部助手的设备上安装连接程序。网页里的创作助理直接连接服务器，无需这一步。
+          </p>
+          <span className="settings-scope">stdio · 手动配置</span>
+        </div>
+      </div>
+      <ol className="settings-steps">
+        <li>
+          在助手设备准备 Python 3.12 环境，安装项目
+          services/mcp-gateway/requirements.txt 中的依赖。
+        </li>
+        <li>
+          将下面示例的 Python 与 server.py
+          路径替换为该设备的实际绝对路径，并填写你自己的访问令牌。
+        </li>
+        <li>在助手中启用连接。修改与生成提议会进入创作助理，审阅后执行。</li>
+      </ol>
+      <details className="settings-config">
+        <summary>查看连接配置示例</summary>
+        <pre>{config}</pre>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setCopied(false);
+            setError("");
+            void navigator.clipboard
+              .writeText(config)
+              .then(() => setCopied(true))
+              .catch(() => setError("未能复制，请选择示例文本手动复制。"));
+          }}
+        >
+          复制配置示例
+        </Button>
+        {copied && <p role="status">已复制示例，请替换路径和令牌</p>}
+        {error && <p role="alert">{error}</p>}
+      </details>
+      <p className="settings-note">
+        连接地址需要从助手设备可访问；不同设备不能使用本机的 127.0.0.1
+        地址。远程服务使用 HTTPS。示例不包含你的密钥或登录令牌。
+      </p>
+      <Link className="studio-link" to={`/projects/${projectId}/agent`}>
+        前往创作助理查看提议
+        <ChevronRight size={14} />
+      </Link>
     </div>
   );
 }

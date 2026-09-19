@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><title>Persistent state regression fixture</title></head>
+  <body>
+    <div id="fixture"></div>
+    <script type="module">
+      import React from "react";
+      import { createRoot } from "react-dom/client";
+      import { usePersistentState } from "/src/lib/usePersistentState.ts";
+      localStorage.setItem("scope-a", '"first"');
+      localStorage.setItem("scope-b", '"second"');
+      function App() {
+        const [key, setKey] = React.useState("scope-a");
+        const [value, setValue] = usePersistentState(key, "empty");
+        return React.createElement("div", null,
+          React.createElement("output", null, value),
+          React.createElement("button", { onClick: () => setKey((k) => k === "scope-a" ? "scope-b" : "scope-a") }, "switch"),
+          React.createElement("button", { onClick: () => setValue((v) => v + "!") }, "edit"));
+      }
+      createRoot(document.getElementById("fixture")).render(React.createElement(React.StrictMode, null, React.createElement(App)));
+    </script>
+  </body>
+</html>

@@ -42,8 +42,23 @@ def _get_timeline(db: Session, project_id: uuid.UUID, timeline_id: uuid.UUID) ->
 
 
 def set_items(
-    db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, items
+    db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, items, revision=None
 ) -> list[TimelineItem]:
+    from app.modules.timeline import editing
+
+    t = editing.lock(db, ctx.project.id, timeline_id)
+    current = editing.document(db, ctx.project.id, timeline_id)
+    data = schemas.TimelineDocumentIn(
+        revision=t.revision if revision is None else revision,
+        items=items,
+        audio=current["audio"],
+        subtitles=current["subtitles"],
+    )
+    editing.save_document(db, ctx, timeline_id, data)
+    return list_items(db, ctx.project.id, timeline_id)
+
+
+def _replace_items(db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, items):
     t = _get_timeline(db, ctx.project.id, timeline_id)
     from app.core.errors import CapabilityUnsupported
     from app.modules.generation.jobs import source, validate_target
@@ -117,6 +132,9 @@ def finalize_cut(db: Session, ctx: ProjectContext, cut_id: uuid.UUID) -> Baselin
     db.refresh(cut, with_for_update=True)
     if cut.status == VersionStatus.locked:
         raise Conflict("该成片已经定剪")
+    from app.modules.timeline import editing
+
+    editing.lock(db, ctx.project.id, cut.timeline_id)
     items = list_items(db, ctx.project.id, cut.timeline_id)
     if not items:
         raise CapabilityUnsupported("时间线为空，不能定剪")
@@ -131,6 +149,24 @@ def finalize_cut(db: Session, ctx: ProjectContext, cut_id: uuid.UUID) -> Baselin
     db.flush()
 
     vs = VersioningService(db)
+    timeline_version = vs.commit(
+        project_id=ctx.project.id,
+        entity_type="timeline",
+        entity_id=cut.timeline_id,
+        content=editing.document(db, ctx.project.id, cut.timeline_id),
+        created_by=ctx.user.id,
+        label=f"基线 {baseline.name}",
+        status=VersionStatus.locked,
+    )
+    timeline_version.is_locked = True
+    db.add(
+        BaselineItem(
+            baseline_id=baseline.id,
+            entity_type="timeline",
+            entity_id=cut.timeline_id,
+            version_id=timeline_version.id,
+        )
+    )
     seen = set()
     for it in items:
         if it.shot_id in seen:

@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "inspiration"
     minio_secure: bool = False
+    library_staging_dir: str = "./_library_staging"
+    library_max_upload_bytes: int = 10 * 1024 * 1024 * 1024
+    agent_worker_enabled: bool = True
+    canvas_worker_enabled: bool = True
+    library_worker_enabled: bool = True
+    library_indexer_url: str = "http://127.0.0.1:8011"
+    library_indexer_token: str | None = None
+    transcription_worker_enabled: bool = True
+    transcriber_url: str = ""
+    transcriber_token: str | None = None
 
     # 密钥加密
     credentials_fernet_key: str | None = None

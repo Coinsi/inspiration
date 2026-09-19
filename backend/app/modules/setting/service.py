@@ -5,6 +5,7 @@
 合并后的完整版),新名字新建;每章提交一次,进度可轮询、可取消、中断后重发即续跑
 (已有名录会让 AI 不再重复产出已完整的设定)。
 """
+
 import threading
 import uuid
 
@@ -23,13 +24,19 @@ from app.modules.narrative.service import _strategy
 from app.modules.setting import schemas
 
 # 设定分类 → 资产类型(可转资产的三类)
-_CATEGORY_TO_ASSET = {"character": AssetType.character, "location": AssetType.location, "item": AssetType.prop}
+_CATEGORY_TO_ASSET = {
+    "character": AssetType.character,
+    "location": AssetType.location,
+    "item": AssetType.prop,
+}
 
 
 # ── CRUD ──
 def list_settings(
-    db: Session, project_id: uuid.UUID,
-    novel_id: uuid.UUID | None = None, category: str | None = None,
+    db: Session,
+    project_id: uuid.UUID,
+    novel_id: uuid.UUID | None = None,
+    category: str | None = None,
 ) -> list[Setting]:
     stmt = select(Setting).where(Setting.project_id == project_id)
     if novel_id:
@@ -47,9 +54,18 @@ def _get(db: Session, project_id: uuid.UUID, setting_id: uuid.UUID) -> Setting:
 
 
 def create_setting(db: Session, ctx: ProjectContext, data: schemas.SettingIn) -> Setting:
+    from app.modules.narrative.service import get_novel
+
+    if data.novel_id:
+        get_novel(db, ctx.project.id, data.novel_id)
+    if not data.name.strip():
+        raise Conflict("设定名称不能为空")
     s = Setting(
-        project_id=ctx.project.id, novel_id=data.novel_id,
-        category=data.category, name=data.name.strip(), content=data.content,
+        project_id=ctx.project.id,
+        novel_id=data.novel_id,
+        category=data.category,
+        name=data.name.strip(),
+        content=data.content,
         created_by=ctx.user.id,
     )
     db.add(s)
@@ -57,11 +73,15 @@ def create_setting(db: Session, ctx: ProjectContext, data: schemas.SettingIn) ->
     return s
 
 
-def update_setting(db: Session, ctx: ProjectContext, setting_id: uuid.UUID, data: schemas.SettingUpdate) -> Setting:
+def update_setting(
+    db: Session, ctx: ProjectContext, setting_id: uuid.UUID, data: schemas.SettingUpdate
+) -> Setting:
     s = _get(db, ctx.project.id, setting_id)
     if data.category is not None:
         s.category = data.category
     if data.name is not None:
+        if not data.name.strip():
+            raise Conflict("设定名称不能为空")
         s.name = data.name.strip()
     if data.content is not None:
         s.content = data.content
@@ -84,8 +104,15 @@ def to_asset(db: Session, ctx: ProjectContext, setting_id: uuid.UUID):
     a = asset_service.create(
         db, ctx, asset_schemas.AssetIn(type=asset_type, name=s.name, summary=s.content[:2000])
     )
-    audit.record(db, action="setting.to_asset", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="setting", target_id=s.id, detail={"asset_id": str(a.id)})
+    audit.record(
+        db,
+        action="setting.to_asset",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="setting",
+        target_id=s.id,
+        detail={"asset_id": str(a.id)},
+    )
     return a
 
 
@@ -93,14 +120,23 @@ def to_asset(db: Session, ctx: ProjectContext, setting_id: uuid.UUID):
 _GLOBAL_CATEGORIES = ("world", "power_system")  # 全局规则类:无论哪章都注入
 
 _CATEGORY_LABEL = {
-    "world": "世界观", "power_system": "力量体系", "faction": "势力组织", "character": "人物",
-    "location": "地点", "item": "物品道具", "glossary": "术语", "timeline": "大事记",
+    "world": "世界观",
+    "power_system": "力量体系",
+    "faction": "势力组织",
+    "character": "人物",
+    "location": "地点",
+    "item": "物品道具",
+    "glossary": "术语",
+    "timeline": "大事记",
 }
 
 
 def settings_context(
-    db: Session, project_id: uuid.UUID, novel_id: uuid.UUID,
-    chapter_ordinal: int | None = None, max_chars: int = 3500,
+    db: Session,
+    project_id: uuid.UUID,
+    novel_id: uuid.UUID,
+    chapter_ordinal: int | None = None,
+    max_chars: int = 3500,
 ) -> str:
     """组装某章相关的设定上下文文本:出现在该章的设定 + 全局规则类设定。
 
@@ -108,7 +144,8 @@ def settings_context(
     """
     rows = list_settings(db, project_id, novel_id=novel_id)
     picked = [
-        s for s in rows
+        s
+        for s in rows
         if s.category in _GLOBAL_CATEGORIES
         or chapter_ordinal is None
         or chapter_ordinal in (s.source_chapters or [])
@@ -132,20 +169,34 @@ def settings_context(
 
 
 # ── 设定合并 upsert(提取线程使用;ordinals 为该条设定本次涉及的章节序号) ──
-def _upsert_draft(db: Session, project_id: uuid.UUID, novel_id: uuid.UUID,
-                  draft, ordinals: list[int], user_id: uuid.UUID | None) -> None:
+def _upsert_draft(
+    db: Session,
+    project_id: uuid.UUID,
+    novel_id: uuid.UUID,
+    draft,
+    ordinals: list[int],
+    user_id: uuid.UUID | None,
+) -> None:
     name = (draft.name or "").strip()
     if not name:
         return
     row = db.scalar(
         select(Setting).where(
-            Setting.project_id == project_id, Setting.novel_id == novel_id,
-            Setting.category == draft.category, Setting.name == name,
+            Setting.project_id == project_id,
+            Setting.novel_id == novel_id,
+            Setting.category == draft.category,
+            Setting.name == name,
         )
     )
     if row is None:
-        row = Setting(project_id=project_id, novel_id=novel_id, category=draft.category,
-                      name=name, content=draft.content, created_by=user_id)
+        row = Setting(
+            project_id=project_id,
+            novel_id=novel_id,
+            category=draft.category,
+            name=name,
+            content=draft.content,
+            created_by=user_id,
+        )
         db.add(row)
     else:
         row.content = draft.content  # AI 已给出合并后的完整版,整条覆盖
@@ -162,8 +213,11 @@ def _upsert_draft(db: Session, project_id: uuid.UUID, novel_id: uuid.UUID,
 
 # ── 一键提取(后台线程;可选章节范围,默认全书) ──
 def start_extraction(
-    db: Session, ctx: ProjectContext, novel_id: uuid.UUID,
-    from_chapter: int | None = None, to_chapter: int | None = None,
+    db: Session,
+    ctx: ProjectContext,
+    novel_id: uuid.UUID,
+    from_chapter: int | None = None,
+    to_chapter: int | None = None,
     concurrency: int = 4,
 ) -> SettingExtraction:
     novel = db.get(Novel, novel_id)
@@ -186,25 +240,44 @@ def start_extraction(
     if not chapters:
         raise Conflict("所选范围内没有章节")
     job = SettingExtraction(
-        project_id=ctx.project.id, novel_id=novel_id,
-        status="running", total_chapters=len(chapters), done_chapters=0, created_by=ctx.user.id,
+        project_id=ctx.project.id,
+        novel_id=novel_id,
+        status="running",
+        total_chapters=len(chapters),
+        done_chapters=0,
+        created_by=ctx.user.id,
     )
     db.add(job)
     db.flush()
-    audit.record(db, action="setting.extract", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="novel", target_id=novel_id,
-                 detail={"job": str(job.id), "chapters": len(chapters),
-                         "from": from_chapter, "to": to_chapter})
+    audit.record(
+        db,
+        action="setting.extract",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="novel",
+        target_id=novel_id,
+        detail={
+            "job": str(job.id),
+            "chapters": len(chapters),
+            "from": from_chapter,
+            "to": to_chapter,
+        },
+    )
     db.commit()  # 先落库,线程才能读到任务行
 
     concurrency = max(1, min(int(concurrency or 1), 8))
-    t = threading.Thread(target=_run_extraction, args=(job.id, from_chapter, to_chapter, concurrency), daemon=True)
+    t = threading.Thread(
+        target=_run_extraction, args=(job.id, from_chapter, to_chapter, concurrency), daemon=True
+    )
     t.start()
     return job
 
 
 def _run_extraction(
-    job_id: uuid.UUID, from_chapter: int | None = None, to_chapter: int | None = None, concurrency: int = 4
+    job_id: uuid.UUID,
+    from_chapter: int | None = None,
+    to_chapter: int | None = None,
+    concurrency: int = 4,
 ) -> None:
     """后台线程:波次并发提取 —— 每波并发 N 章(同一份已有名录快照),
     波内同名冲突交给策略 merge_setting_versions 融合,波结束统一落库;
@@ -221,7 +294,8 @@ def _run_extraction(
             return
         strat = _strategy(db, job.project_id, None)  # 配了云 LLM 自动用,否则 mock
         stmt = (
-            select(Chapter).join(Novel, Chapter.novel_id == Novel.id)
+            select(Chapter)
+            .join(Novel, Chapter.novel_id == Novel.id)
             .where(Chapter.novel_id == job.novel_id)
         )
         if from_chapter is not None:
@@ -235,7 +309,7 @@ def _run_extraction(
             if job.status == "cancelled":
                 db.commit()
                 return
-            wave = chapters[wave_start: wave_start + concurrency]
+            wave = chapters[wave_start : wave_start + concurrency]
             existing = [
                 {"category": s.category, "name": s.name, "content": s.content}
                 for s in list_settings(db, job.project_id, novel_id=job.novel_id)
@@ -244,7 +318,9 @@ def _run_extraction(
             # 并发提取(工作线程只调 LLM,不碰数据库)
             results: list[tuple[int, list]] = []  # (章节序号, drafts)
             with ThreadPoolExecutor(max_workers=concurrency) as ex:
-                futures = {ex.submit(strat.extract_settings, ch.content or "", existing): ch for ch in wave}
+                futures = {
+                    ex.submit(strat.extract_settings, ch.content or "", existing): ch for ch in wave
+                }
                 for fut in as_completed(futures):
                     ch = futures[fut]
                     try:
@@ -273,27 +349,57 @@ def _run_extraction(
                 if len(versions) == 1:
                     singles.append((cat, name, versions[0], g["ordinals"]))
                 else:
-                    conflicts.append({"category": cat, "name": name, "versions": versions, "ordinals": g["ordinals"]})
+                    conflicts.append(
+                        {
+                            "category": cat,
+                            "name": name,
+                            "versions": versions,
+                            "ordinals": g["ordinals"],
+                        }
+                    )
 
             from app.adapters.contracts import SettingDraft
 
             for cat, name, content, ordinals in singles:
-                _upsert_draft(db, job.project_id, job.novel_id,
-                              SettingDraft(category=cat, name=name, content=content), ordinals, job.created_by)
+                _upsert_draft(
+                    db,
+                    job.project_id,
+                    job.novel_id,
+                    SettingDraft(category=cat, name=name, content=content),
+                    ordinals,
+                    job.created_by,
+                )
             if conflicts:
                 try:
                     merged = strat.merge_setting_versions(
-                        [{"category": c["category"], "name": c["name"], "versions": c["versions"]} for c in conflicts]
+                        [
+                            {
+                                "category": c["category"],
+                                "name": c["name"],
+                                "versions": c["versions"],
+                            }
+                            for c in conflicts
+                        ]
                     )
                 except Exception:  # noqa: BLE001  合并失败退化为取最长版本
                     merged = [
-                        SettingDraft(category=c["category"], name=c["name"], content=max(c["versions"], key=len))
+                        SettingDraft(
+                            category=c["category"],
+                            name=c["name"],
+                            content=max(c["versions"], key=len),
+                        )
                         for c in conflicts
                     ]
                 ordinal_map = {(c["category"], c["name"]): c["ordinals"] for c in conflicts}
                 for m in merged:
-                    _upsert_draft(db, job.project_id, job.novel_id, m,
-                                  ordinal_map.get((m.category, m.name), []), job.created_by)
+                    _upsert_draft(
+                        db,
+                        job.project_id,
+                        job.novel_id,
+                        m,
+                        ordinal_map.get((m.category, m.name), []),
+                        job.created_by,
+                    )
             db.commit()
 
         job.status = "succeeded"
@@ -318,7 +424,9 @@ def get_extraction(db: Session, project_id: uuid.UUID, job_id: uuid.UUID) -> Set
     return j
 
 
-def latest_extraction(db: Session, project_id: uuid.UUID, novel_id: uuid.UUID) -> SettingExtraction | None:
+def latest_extraction(
+    db: Session, project_id: uuid.UUID, novel_id: uuid.UUID
+) -> SettingExtraction | None:
     return db.scalar(
         select(SettingExtraction)
         .where(SettingExtraction.project_id == project_id, SettingExtraction.novel_id == novel_id)

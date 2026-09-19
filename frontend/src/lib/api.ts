@@ -42,7 +42,14 @@ async function request<T>(
     try {
       const data = await res.json();
       code = data?.error?.code ?? code;
-      message = data?.error?.message ?? message;
+      message =
+        data?.error?.message ??
+        (Array.isArray(data?.detail)
+          ? data.detail
+              .map((d: { msg?: string }) => d.msg)
+              .filter(Boolean)
+              .join("；")
+          : message);
     } catch {
       /* ignore */
     }
@@ -115,6 +122,8 @@ export interface Project {
   code: string;
   name: string;
   description: string | null;
+  cover_blob_hash?: string | null;
+  deleted_at?: string | null;
   owner_id: string;
   settings: Record<string, unknown>;
   created_at: string;
@@ -123,6 +132,7 @@ export interface Member {
   id: string;
   user_id: string;
   role: string;
+  project_id?: string;
 }
 export interface Me {
   user: {
@@ -219,6 +229,7 @@ export interface ScriptBlock {
   text: string;
 }
 export interface ScriptDetail extends Script {
+  content_revision: string;
   source_chapter_id: string | null;
   content_blocks: ScriptBlock[];
 }
@@ -240,6 +251,7 @@ export interface AssistProposal {
   applied_at: string | null;
 }
 export interface AssistMessage {
+  skills?: { id: string; name: string; revision: number }[];
   id: string;
   role: string;
   content: string;
@@ -366,6 +378,7 @@ export interface Board {
   by_status: Record<string, number>;
 }
 export interface Fragment {
+  updated_at: string;
   id: string;
   code: string;
   category: string;
@@ -394,6 +407,12 @@ export interface GenJob {
   created_at: string;
   updated_at: string;
   input_snapshot: {
+    skills?: {
+      id: string;
+      name: string;
+      revision: number;
+      files: { path: string; sha256: string }[];
+    }[];
     operation?: string;
     prompt?: string;
     retry_of?: string;
@@ -406,12 +425,27 @@ export interface GenJob {
 }
 export interface Generation {
   input_refs?: {
+    original_prompt?: string;
+    skills?: { id: string; name: string; revision: number }[];
+    library_origin?: {
+      media_id: string;
+      version_id: string;
+      usage_id: string;
+      ordinal: number;
+      name: string;
+      start_ms: number;
+      end_ms: number;
+    };
     character_preset?: {
       mode: string;
       preset: string;
       label: string;
       label_en: string;
     };
+    cell_index?: number;
+    rows?: number;
+    columns?: number;
+    crop_box?: number[];
     source_generation_id?: string;
     operation?: string;
     actual_media?: { source_time_ms?: number; duration_ms?: number };
@@ -435,6 +469,8 @@ export interface Quota {
   used_cost: number;
 }
 export interface ProviderConfig {
+  display_name?: string;
+  channel_name?: string;
   id: string;
   provider_name: string;
   kind: string;

@@ -1,4 +1,5 @@
 """narrative 业务:小说导入(解析策略)、剧本/场次、AI 拆解与落库。"""
+
 import uuid
 
 from sqlalchemy import func, select
@@ -8,7 +9,7 @@ from app.adapters.contracts import SCRIPT_BLOCK_TYPES, decomposition_registry, p
 from app.core import audit
 from app.core.config import settings
 from app.core.deps import ProjectContext
-from app.core.errors import NotFound
+from app.core.errors import NotFound, Conflict, Locked
 from app.models.enums import AssetType
 from app.models.narrative import Chapter, Novel, Script, Scene
 from app.models.shot import Shot
@@ -54,8 +55,15 @@ def import_novel(db: Session, ctx: ProjectContext, filename: str, mime: str, dat
     db.flush()
     for ch in doc.chapters:
         db.add(Chapter(novel_id=novel.id, ordinal=ch.ordinal, title=ch.title, content=ch.content))
-    audit.record(db, action="novel.import", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="novel", target_id=novel.id, detail={"chapters": len(doc.chapters)})
+    audit.record(
+        db,
+        action="novel.import",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="novel",
+        target_id=novel.id,
+        detail={"chapters": len(doc.chapters)},
+    )
     db.flush()
     return novel
 
@@ -70,8 +78,15 @@ def get_novel(db: Session, project_id: uuid.UUID, novel_id: uuid.UUID) -> Novel:
 def rename_novel(db: Session, ctx: ProjectContext, novel_id: uuid.UUID, title: str) -> Novel:
     n = get_novel(db, ctx.project.id, novel_id)
     n.title = title.strip()
-    audit.record(db, action="novel.rename", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="novel", target_id=n.id, detail={"title": n.title})
+    audit.record(
+        db,
+        action="novel.rename",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="novel",
+        target_id=n.id,
+        detail={"title": n.title},
+    )
     db.flush()
     return n
 
@@ -80,15 +95,22 @@ def delete_novel(db: Session, ctx: ProjectContext, novel_id: uuid.UUID) -> None:
     """软删除小说(标记 deleted_at);章节与已落库场次保持不动,可恢复。"""
     n = get_novel(db, ctx.project.id, novel_id)
     n.deleted_at = func.now()
-    audit.record(db, action="novel.delete", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="novel", target_id=n.id)
+    audit.record(
+        db,
+        action="novel.delete",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="novel",
+        target_id=n.id,
+    )
     db.flush()
 
 
 def list_novels(db: Session, project_id: uuid.UUID) -> list[Novel]:
     return list(
         db.scalars(
-            select(Novel).where(Novel.project_id == project_id, Novel.deleted_at.is_(None))
+            select(Novel)
+            .where(Novel.project_id == project_id, Novel.deleted_at.is_(None))
             .order_by(Novel.created_at.desc())
         )
     )
@@ -98,7 +120,8 @@ def list_deleted_novels(db: Session, project_id: uuid.UUID) -> list[Novel]:
     """回收站:已软删除的小说。"""
     return list(
         db.scalars(
-            select(Novel).where(Novel.project_id == project_id, Novel.deleted_at.is_not(None))
+            select(Novel)
+            .where(Novel.project_id == project_id, Novel.deleted_at.is_not(None))
             .order_by(Novel.deleted_at.desc())
         )
     )
@@ -109,8 +132,14 @@ def restore_novel(db: Session, ctx: ProjectContext, novel_id: uuid.UUID) -> Nove
     if n is None or n.project_id != ctx.project.id or n.deleted_at is None:
         raise NotFound("小说不存在或未删除")
     n.deleted_at = None
-    audit.record(db, action="novel.restore", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="novel", target_id=n.id)
+    audit.record(
+        db,
+        action="novel.restore",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="novel",
+        target_id=n.id,
+    )
     db.flush()
     return n
 
@@ -121,8 +150,15 @@ def chapters_of(db: Session, novel_id: uuid.UUID) -> list[Chapter]:
     )
 
 
-def _get_chapter(db: Session, chapter_id: uuid.UUID) -> Chapter:
-    ch = db.get(Chapter, chapter_id)
+def _get_chapter(
+    db: Session, project_id: uuid.UUID, chapter_id: uuid.UUID, *, allow_archived=False
+) -> Chapter:
+    query = (
+        select(Chapter).join(Novel).where(Chapter.id == chapter_id, Novel.project_id == project_id)
+    )
+    if not allow_archived:
+        query = query.where(Novel.deleted_at.is_(None))
+    ch = db.scalar(query)
     if ch is None:
         raise NotFound("章节不存在")
     return ch
@@ -131,8 +167,10 @@ def _get_chapter(db: Session, chapter_id: uuid.UUID) -> Chapter:
 # ── 剧本 / 场次 ──
 def create_script(db: Session, ctx: ProjectContext, title: str) -> Script:
     s = Script(
-        project_id=ctx.project.id, code=coding.next_code(db, ctx.project, "script"),
-        title=title, created_by=ctx.user.id,
+        project_id=ctx.project.id,
+        code=coding.next_code(db, ctx.project, "script"),
+        title=title,
+        created_by=ctx.user.id,
     )
     db.add(s)
     db.flush()
@@ -142,24 +180,33 @@ def create_script(db: Session, ctx: ProjectContext, title: str) -> Script:
 def list_scripts(db: Session, project_id: uuid.UUID) -> list[Script]:
     return list(
         db.scalars(
-            select(Script).where(Script.project_id == project_id, Script.deleted_at.is_(None))
+            select(Script)
+            .where(Script.project_id == project_id, Script.deleted_at.is_(None))
             .order_by(Script.created_at.desc())
         )
     )
 
 
 def list_scenes(db: Session, project_id: uuid.UUID, script_id: uuid.UUID) -> list[Scene]:
+    _get_script(db, project_id, script_id)
     return list(
         db.scalars(
-            select(Scene).where(Scene.script_id == script_id, Scene.deleted_at.is_(None))
+            select(Scene)
+            .where(
+                Scene.script_id == script_id,
+                Scene.project_id == project_id,
+                Scene.deleted_at.is_(None),
+            )
             .order_by(Scene.ordinal)
         )
     )
 
 
 def list_all_scenes(
-    db: Session, project_id: uuid.UUID,
-    novel_id: uuid.UUID | None = None, chapter_id: uuid.UUID | None = None,
+    db: Session,
+    project_id: uuid.UUID,
+    novel_id: uuid.UUID | None = None,
+    chapter_id: uuid.UUID | None = None,
 ) -> list[schemas.SceneListItem]:
     """分镜工作台:全项目场景 + 镜头数 + 章节/小说上下文,支持按小说/章节筛选。"""
     cnt = (
@@ -170,7 +217,12 @@ def list_all_scenes(
     )
     stmt = (
         select(
-            Scene, Chapter.id, Chapter.ordinal, Chapter.title, Novel.id, Novel.title,
+            Scene,
+            Chapter.id,
+            Chapter.ordinal,
+            Chapter.title,
+            Novel.id,
+            Novel.title,
             func.coalesce(cnt.c.cnt, 0),
         )
         .outerjoin(Chapter, Scene.adapted_from_chapter_id == Chapter.id)
@@ -184,12 +236,22 @@ def list_all_scenes(
         stmt = stmt.where(Chapter.novel_id == novel_id)
 
     out: list[schemas.SceneListItem] = []
-    for sc, ch_id, ch_ord, ch_title, nv_id, nv_title, shot_count in db.execute(stmt.order_by(Scene.code)):
+    for sc, ch_id, ch_ord, ch_title, nv_id, nv_title, shot_count in db.execute(
+        stmt.order_by(Scene.code)
+    ):
         out.append(
             schemas.SceneListItem(
-                id=sc.id, code=sc.code, ordinal=sc.ordinal, title=sc.title, summary=sc.summary,
-                shot_count=shot_count, chapter_id=ch_id, chapter_ordinal=ch_ord, chapter_title=ch_title,
-                novel_id=nv_id, novel_title=nv_title,
+                id=sc.id,
+                code=sc.code,
+                ordinal=sc.ordinal,
+                title=sc.title,
+                summary=sc.summary,
+                shot_count=shot_count,
+                chapter_id=ch_id,
+                chapter_ordinal=ch_ord,
+                chapter_title=ch_title,
+                novel_id=nv_id,
+                novel_title=nv_title,
             )
         )
     return out
@@ -210,8 +272,14 @@ def delete_script(db: Session, ctx: ProjectContext, script_id: uuid.UUID) -> Non
     """软删除剧本(标记 deleted_at);其下已落库场次/镜头保持不动。"""
     s = _get_script(db, ctx.project.id, script_id)
     s.deleted_at = func.now()
-    audit.record(db, action="script.delete", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="script", target_id=s.id)
+    audit.record(
+        db,
+        action="script.delete",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="script",
+        target_id=s.id,
+    )
     db.flush()
 
 
@@ -250,7 +318,7 @@ def generate_script_from_chapter(
 
     S3:自动注入设定库上下文(该章出现的设定 + 全局世界观/体系),改编遵守既定人设。
     """
-    ch = _get_chapter(db, data.chapter_id)
+    ch = _get_chapter(db, ctx.project.id, data.chapter_id)
     strat = _strategy(db, ctx.project.id, data.strategy)
     from app.modules.setting.service import settings_context  # 局部导入避免循环依赖
 
@@ -267,20 +335,43 @@ def generate_script_from_chapter(
     )
     db.add(script)
     db.flush()
-    audit.record(db, action="script.generate", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="script", target_id=script.id,
-                 detail={"chapter_id": str(ch.id), "blocks": len(blocks), "strategy": strat.name})
+    audit.record(
+        db,
+        action="script.generate",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="script",
+        target_id=script.id,
+        detail={"chapter_id": str(ch.id), "blocks": len(blocks), "strategy": strat.name},
+    )
     return script
 
 
 def update_script_blocks(
-    db: Session, ctx: ProjectContext, script_id: uuid.UUID, blocks
+    db: Session, ctx: ProjectContext, script_id: uuid.UUID, blocks, expected_revision=None
 ) -> Script:
     """整体保存剧本正文(P1:整篇替换;版本快照随 P3 接入)。"""
     script = _get_script(db, ctx.project.id, script_id)
+    script = db.scalar(
+        select(Script)
+        .where(Script.id == script.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if script.status == "locked":
+        raise Locked("剧本已锁定，请先解锁")
+    if expected_revision is not None and script.content_revision != expected_revision:
+        raise Conflict("剧本已被其他页面或助手修改。当前草稿已保留，请核对新版本后再保存。")
     script.content_blocks = _normalize_blocks(blocks)
-    audit.record(db, action="script.update_blocks", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="script", target_id=script.id, detail={"blocks": len(script.content_blocks)})
+    audit.record(
+        db,
+        action="script.update_blocks",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="script",
+        target_id=script.id,
+        detail={"blocks": len(script.content_blocks)},
+    )
     db.flush()
     return script
 
@@ -291,7 +382,9 @@ def script_stats(db: Session, project_id: uuid.UUID, script_id: uuid.UUID) -> di
 
     script = _get_script(db, project_id, script_id)
     scenes = db.scalar(
-        select(func.count()).select_from(Scene).where(Scene.script_id == script.id, Scene.deleted_at.is_(None))
+        select(func.count())
+        .select_from(Scene)
+        .where(Scene.script_id == script.id, Scene.deleted_at.is_(None))
     )
     shots = db.scalar(
         select(func.count())
@@ -410,19 +503,13 @@ def _to_fountain(title: str, blocks: list[dict]) -> str:
 # ── AI 拆解 ──
 def _llm_config(db: Session, project_id: uuid.UUID):
     """取项目内已启用的 LLM 供应商配置(provider_config kind=llm)。"""
-    from app.models.enums import ProviderKind
-    from app.models.generation import ProviderConfig
-
-    return db.scalar(
-        select(ProviderConfig).where(
-            ProviderConfig.project_id == project_id,
-            ProviderConfig.kind == ProviderKind.llm,
-            ProviderConfig.enabled.is_(True),
-        )
-    )
+    from app.modules.generation.channels import llm_config
+    return llm_config(db, project_id)
 
 
 def _strategy(db: Session, project_id: uuid.UUID, name: str | None):
+    if name == "mock":
+        return decomposition_registry.create("mock")
     pc = _llm_config(db, project_id)
     # 未显式指定:配了 LLM 则自动用云模型,否则回落默认(mock)
     chosen = name or ("cloud_llm" if pc is not None else settings.decomposition_strategy)
@@ -441,14 +528,16 @@ def _strategy(db: Session, project_id: uuid.UUID, name: str | None):
 def decompose_chapter(
     db: Session, project_id: uuid.UUID, chapter_id: uuid.UUID, strategy_name: str | None
 ) -> schemas.DecomposeOut:
-    ch = _get_chapter(db, chapter_id)
+    ch = _get_chapter(db, project_id, chapter_id)
     strat = _strategy(db, project_id, strategy_name)
     scenes = []
     for sc in strat.suggest_scenes(ch.content):
         shots = strat.suggest_shots(sc.body or sc.summary)
         scenes.append(
             schemas.SceneSuggestionOut(
-                title=sc.title, summary=sc.summary, body=sc.body,
+                title=sc.title,
+                summary=sc.summary,
+                body=sc.body,
                 source_chapter_ordinal=ch.ordinal,
                 shots=[schemas.ShotBrief(title=s.title, description=s.description) for s in shots],
             )
@@ -460,28 +549,49 @@ def apply_scenes(
     db: Session, ctx: ProjectContext, script_id: uuid.UUID, data: schemas.ApplyScenesIn
 ) -> list[Scene]:
     script = _get_script(db, ctx.project.id, script_id)
+    chapter_id = data.chapter_id or script.source_chapter_id
+    if chapter_id:
+        _get_chapter(db, ctx.project.id, chapter_id, allow_archived=data.chapter_id is None)
     base_ord = db.scalar(
         select(func.coalesce(func.max(Scene.ordinal), 0)).where(Scene.script_id == script.id)
     )
     created = []
     for i, sc in enumerate(data.scenes, 1):
         scene = Scene(
-            project_id=ctx.project.id, script_id=script.id,
+            project_id=ctx.project.id,
+            script_id=script.id,
             code=coding.next_code(db, ctx.project, "scene"),
-            ordinal=base_ord + i, title=sc.title, summary=sc.summary, body=sc.body,
-            adapted_from_chapter_id=data.chapter_id, created_by=ctx.user.id,
+            ordinal=base_ord + i,
+            title=sc.title,
+            summary=sc.summary,
+            body=sc.body,
+            adapted_from_chapter_id=chapter_id,
+            created_by=ctx.user.id,
         )
         db.add(scene)
         db.flush()
         for j, shot in enumerate(sc.shots, 1):
-            db.add(Shot(
-                project_id=ctx.project.id, scene_id=scene.id,
-                code=f"{scene.code}-SH{j:03d}", ordinal=j,
-                title=shot.title, description=shot.description, created_by=ctx.user.id,
-            ))
+            db.add(
+                Shot(
+                    project_id=ctx.project.id,
+                    scene_id=scene.id,
+                    code=f"{scene.code}-SH{j:03d}",
+                    ordinal=j,
+                    title=shot.title,
+                    description=shot.description,
+                    created_by=ctx.user.id,
+                )
+            )
         created.append(scene)
-    audit.record(db, action="narrative.apply_scenes", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="script", target_id=script.id, detail={"scenes": len(created)})
+    audit.record(
+        db,
+        action="narrative.apply_scenes",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="script",
+        target_id=script.id,
+        detail={"scenes": len(created)},
+    )
     db.flush()
     return created
 
@@ -491,9 +601,11 @@ def extract_entities(
 ) -> list[schemas.EntityDraftOut]:
     text = data.text
     if text is None and data.script_id:
-        text = _script_to_plain_text(_get_script(db, project_id, data.script_id).content_blocks or [])
+        text = _script_to_plain_text(
+            _get_script(db, project_id, data.script_id).content_blocks or []
+        )
     if text is None and data.chapter_id:
-        text = _get_chapter(db, data.chapter_id).content
+        text = _get_chapter(db, project_id, data.chapter_id).content
     if not text:
         raise NotFound("需提供 text、script_id 或 chapter_id")
     drafts = _strategy(db, project_id, strategy_name).extract_entities(text)

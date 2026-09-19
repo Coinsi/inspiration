@@ -4,23 +4,36 @@ import { api } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
+import {
+  ImageReferencePicker,
+  type PromptReference,
+} from "@/components/ImageReferencePicker";
 
 type Result = {
   prompt: string;
   avoid: string;
   explanation: string;
   assumptions: string[];
+  optimizer_model: string;
+  target_provider: string | null;
+  reference_sources: PromptReference[];
 };
 export function PromptOptimizer({
   projectId,
   initial,
   mediaType,
+  targetType,
+  targetId,
+  provider,
   onClose,
   onApply,
 }: {
   projectId: string;
   initial: string;
   mediaType: string;
+  targetType: "shot" | "asset";
+  targetId: string;
+  provider: string;
   onClose: () => void;
   onApply: (value: string) => void;
 }) {
@@ -29,6 +42,7 @@ export function PromptOptimizer({
     [mode, setMode] = useState("refine"),
     [style, setStyle] = useState("");
   const [result, setResult] = useState<Result | null>(null);
+  const [references, setReferences] = useState<PromptReference[]>([]);
   const optimize = useMutation({
     mutationFn: () =>
       api.post<Result>(`/projects/${projectId}/prompts/optimize`, {
@@ -36,6 +50,11 @@ export function PromptOptimizer({
         mode,
         media_type: mediaType,
         style,
+        references:
+          mode === "reference"
+            ? references.map(({ kind, id }) => ({ kind, id }))
+            : [],
+        target_provider: mode === "model-adapt" ? provider : undefined,
       }),
     onSuccess: setResult,
   });
@@ -71,12 +90,15 @@ export function PromptOptimizer({
           ["refine", zh ? "精修表达" : "Refine"],
           ["expand", zh ? "扩展想法" : "Expand"],
           ["style", zh ? "强化风格" : "Style"],
+          ["reference", zh ? "结合参考" : "Use references"],
+          ["model-adapt", zh ? "适配生成能力" : "Adapt to provider"],
         ].map(([value, label]) => (
           <Button
             key={value}
             size="sm"
             variant={mode === value ? "default" : "ghost"}
             disabled={optimize.isPending}
+            aria-pressed={mode === value}
             onClick={() => {
               setMode(value);
               setResult(null);
@@ -86,6 +108,33 @@ export function PromptOptimizer({
           </Button>
         ))}
       </div>
+      {mode === "reference" && (
+        <div className="mb-3">
+          <ImageReferencePicker
+            projectId={projectId}
+            targetType={targetType}
+            targetId={targetId}
+            value={references}
+            disabled={optimize.isPending}
+            onChange={(refs) => {
+              setReferences(refs);
+              setResult(null);
+            }}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            {zh
+              ? "需要项目文本模型支持看图。仅用于理解提示词，不会自动添加为生成参考图。"
+              : "The project text model must support vision. These images inform the prompt; they are not automatically added as generation references."}
+          </p>
+        </div>
+      )}
+      {mode === "model-adapt" && (
+        <p className="mb-3 rounded-lg border bg-surface p-3 text-xs text-muted-foreground">
+          {zh
+            ? `目标：${provider} · ${mediaType === "video" ? "视频" : "图片"}。依据已声明能力整理表达，不自动改变参数，也不保证提高生成质量。`
+            : `Target: ${provider} · ${mediaType}. Uses declared capabilities; settings remain unchanged and quality improvements are not guaranteed.`}
+        </p>
+      )}
       {mode === "style" && (
         <input
           aria-label={zh ? "目标风格" : "Target style"}
@@ -108,7 +157,8 @@ export function PromptOptimizer({
         disabled={
           !original.trim() ||
           optimize.isPending ||
-          (mode === "style" && !style.trim())
+          (mode === "style" && !style.trim()) ||
+          (mode === "reference" && !references.length)
         }
         onClick={() => {
           setResult(null);
@@ -130,6 +180,17 @@ export function PromptOptimizer({
       )}
       {result && (
         <div className="mt-4 space-y-3 border-t pt-4">
+          <p className="text-xs text-muted-foreground">
+            {zh ? "优化模型" : "Optimizer"} · {result.optimizer_model}
+          </p>
+          {!!result.reference_sources?.length && (
+            <p className="text-xs text-muted-foreground">
+              {zh ? "本次参考" : "References used"}：
+              {result.reference_sources
+                .map((r, i) => `${i + 1}. ${r.title}`)
+                .join(" · ")}
+            </p>
+          )}
           <label className="block text-sm">
             {zh ? "优化结果（可编辑）" : "Result (editable)"}
             <textarea

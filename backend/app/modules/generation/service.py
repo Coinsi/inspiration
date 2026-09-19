@@ -15,6 +15,7 @@ from app.core.errors import CapabilityUnsupported, NotFound
 from app.models.enums import JobStatus, QuotaScope
 from app.models.generation import Generation, GenerationJob, ProviderConfig, Quota
 from app.modules.generation import schemas
+from app.modules.generation.channels import model_snapshot
 from app.modules.shot import service as shot_service
 from app.storage import cas
 
@@ -23,12 +24,17 @@ from app.storage import cas
 def configure_provider(
     db: Session, ctx: ProjectContext, data: schemas.ProviderConfigIn
 ) -> ProviderConfig:
+    from app.core.errors import Conflict
+    if any(k in data.config for k in ("channel_id", "protocol", "modality")):
+        raise Conflict("渠道模型请通过模型管理保存")
     pc = db.scalar(
         select(ProviderConfig).where(
             ProviderConfig.project_id == ctx.project.id,
             ProviderConfig.provider_name == data.provider_name,
         )
     )
+    if pc is not None and pc.config.get("channel_id"):
+        raise Conflict("该配置已迁移，请在渠道模型管理中编辑")
     if pc is None:
         pc = ProviderConfig(project_id=ctx.project.id, provider_name=data.provider_name)
         db.add(pc)
@@ -44,7 +50,10 @@ def configure_provider(
 
 
 def list_providers(db: Session, project_id: uuid.UUID) -> list[ProviderConfig]:
-    return list(db.scalars(select(ProviderConfig).where(ProviderConfig.project_id == project_id)))
+    from app.modules.generation.channels import provider_view
+    return [provider_view(db, p) for p in db.scalars(
+        select(ProviderConfig).where(ProviderConfig.project_id == project_id)
+    )]
 
 
 # ── 配额 ──
@@ -160,23 +169,39 @@ def get_project_quota(db: Session, project_id: uuid.UUID) -> Quota | None:
 
 
 # ── 供应商实例 ──
-def _provider_instance(db: Session, project_id: uuid.UUID, name: str):
+def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=None):
     pc = db.scalar(
         select(ProviderConfig).where(
             ProviderConfig.project_id == project_id, ProviderConfig.provider_name == name
         )
     )
     kwargs = {}
+    adapter_name = name
+    config = {}
     if pc is not None:
-        if not pc.enabled or pc.kind != "generation":
+        from app.modules.generation.channels import resolved
+        r = resolved(db, pc)
+        if not r.enabled or pc.kind != "generation":
             raise CapabilityUnsupported("该生成供应商已停用")
+        config = (snapshot or {}).get("model_profile") or pc.config
+        if config.get("channel_id") != pc.config.get("channel_id"):
+            raise CapabilityUnsupported("模型渠道已改变，请重新提交创作")
+        adapter_name = config.get("protocol", name)
         kwargs = {
-            "endpoint": pc.endpoint,
-            "token": decrypt(pc.credentials_encrypted),
-            "config": pc.config,
+            "endpoint": r.endpoint,
+            "token": decrypt(r.credentials_encrypted),
+            "config": config,
         }
     try:
-        return generation_registry.create(name, **kwargs)
+        provider = generation_registry.create(adapter_name, **kwargs)
+        if config.get("modality"):
+            caps = provider.capabilities()
+            caps.strict_parameters = True
+            caps.modalities &= {config["modality"]}
+            if config.get("max_reference_images", 0) == 0:
+                caps.features -= {"reference", "img2img", "inpaint", "first_frame", "last_frame"}
+            provider.capabilities = lambda: caps
+        return provider
     except KeyError as exc:
         raise CapabilityUnsupported("该生成供应商尚未接入") from exc
 
@@ -267,6 +292,11 @@ def _build_request(
 def _validate_controls(data, caps):
     if data.request_type.value not in caps.modalities:
         raise CapabilityUnsupported("供应商不支持该媒体类型")
+    if caps.strict_parameters:
+        for name, value in data.provider_params.items():
+            allowed = caps.param_schema.get(name, {}).get("enum", [])
+            if value not in allowed:
+                raise CapabilityUnsupported(f"模型未声明支持该参数或选项：{name}")
     if data.request_type.value == "video":
         for name in ("duration", "aspect_ratio", "resolution"):
             if name not in data.provider_params:
@@ -305,6 +335,10 @@ def estimate(
 ) -> schemas.EstimateOut:
     provider = _provider_instance(db, ctx.project.id, gen_in.provider)
     prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
+    from app.modules.identity.preferences import guide
+    prompt = guide(db, ctx.project.id, prompt, "generation")
+    from app.modules.skill.service import compose as compose_skills
+    prompt, used_skills = compose_skills(db, ctx.project.id, gen_in.skills, prompt)
     caps = provider.capabilities()
     _validate_controls(gen_in, caps)
     refs = _explicit_references(db, ctx.project.id, gen_in, caps)
@@ -322,6 +356,11 @@ def submit(
     *,
     mask: ReferenceImage | None = None,
     character_preset: dict | None = None,
+    extra_references: list[ReferenceImage] | None = None,
+    defer_dispatch: bool = False,
+    execution_origin: dict | None = None,
+    skill_snapshot: list | None = None,
+    project_guidance: str | None = None,
 ) -> GenerationJob:
     provider = _provider_instance(db, ctx.project.id, gen_in.provider)
     caps = provider.capabilities()
@@ -333,6 +372,18 @@ def submit(
             {"modalities": list(caps.modalities)},
         )
     prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
+    original_prompt = prompt
+    from app.modules.identity.preferences import guide
+    if project_guidance is None:
+        prompt = guide(db, ctx.project.id, prompt, "generation")
+    elif project_guidance:
+        prompt = "【项目创作偏好】\n" + project_guidance + "\n\n【本次要求】\n" + (prompt or "")
+    from app.modules.skill.service import compose as compose_skills
+    if skill_snapshot is None:
+        prompt, used_skills = compose_skills(db, ctx.project.id, gen_in.skills, prompt)
+    else:
+        from app.modules.skill.service import compose_documents
+        prompt, used_skills = compose_documents(skill_snapshot, prompt)
 
     # 收集参考图(资产生图):按供应商能力上限截断
     refs: list[ReferenceImage] = []
@@ -340,6 +391,10 @@ def submit(
         refs = _collect_references(db, ctx.project.id, target_type, target_id)
         if caps.max_reference_images:
             refs = refs[: caps.max_reference_images]
+    if extra_references:
+        if "reference" not in caps.features:
+            raise CapabilityUnsupported("供应商不支持画布参考图片")
+        refs.extend(extra_references)
     refs.extend(_explicit_references(db, ctx.project.id, gen_in, caps))
     if caps.max_reference_images and len(refs) > caps.max_reference_images:
         raise CapabilityUnsupported("参考图数量超过供应商限制")
@@ -363,12 +418,36 @@ def submit(
         estimated_cost=est.points,
         created_by=ctx.user.id,
         input_snapshot={
+            **model_snapshot(db, ctx.project.id, gen_in.provider),
+            **({"canvas_origin": execution_origin} if execution_origin else {}),
             "prompt": prompt,
+            "skills": used_skills,
+            "original_prompt": original_prompt,
             "request_type": gen_in.request_type.value,
             "params": gen_in.params,
             "provider_params": gen_in.provider_params,
             "count": gen_in.count,
             "references": [{"blob_hash": r.blob_hash, "role": r.role} for r in refs],
+            "source_generation_id": str(gen_in.source_generation_id)
+            if gen_in.source_generation_id
+            else None,
+            "first_frame_id": str(gen_in.first_frame_id) if gen_in.first_frame_id else None,
+            "last_frame_id": str(gen_in.last_frame_id) if gen_in.last_frame_id else None,
+            "reference_sources": [
+                {
+                    "generation_id": str(gid),
+                    "role": role,
+                    "library_origin": (db.get(Generation, gid).input_refs or {}).get(
+                        "library_origin"
+                    ),
+                }
+                for gid, role in (
+                    (gen_in.source_generation_id, "ref"),
+                    (gen_in.first_frame_id, "first_frame"),
+                    (gen_in.last_frame_id, "last_frame"),
+                )
+                if gid
+            ],
             **(
                 {
                     "operation": "character",
@@ -403,7 +482,7 @@ def submit(
 
     from app.modules.generation.jobs import dispatch
 
-    return dispatch(db, job)
+    return job if defer_dispatch else dispatch(db, job)
 
 
 # ── 任务执行(溯源核心) ──

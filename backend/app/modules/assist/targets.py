@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.contracts import SCRIPT_BLOCK_TYPES
 from app.core.deps import ProjectContext
-from app.core.errors import NotFound
+from app.core.errors import Locked, NotFound
 from app.kernel.versioning import VersioningService
 from app.models.asset import Asset
 from app.models.narrative import Scene, Script
@@ -151,6 +151,8 @@ class ScriptAdapter(TargetAdapter):
 
     def apply(self, db, ctx: ProjectContext, target_id, ops, *, dry_run=False) -> dict:
         s = self._get(db, ctx.project.id, target_id)
+        if str(s.status) in ("locked", "VersionStatus.locked"):
+            raise Locked("对象已锁定，请先在原始对象中解锁")
         new_title, new_blocks = self._compute(s.title, list(s.content_blocks or []), ops)
         state = {"title": new_title, "blocks": new_blocks}
         if dry_run:
@@ -188,6 +190,8 @@ class _FieldAdapter(TargetAdapter):
 
     def apply(self, db, ctx: ProjectContext, target_id, ops, *, dry_run=False) -> dict:
         o = self._get(db, ctx.project.id, target_id)
+        if str(getattr(o,"status","")) in ("locked", "VersionStatus.locked"):
+            raise Locked("对象已锁定，请先在原始对象中解锁")
         new_vals = {f: getattr(o, f, None) for f in self.fields}
         for op in ops:
             if op.get("op") != "set_field":
@@ -262,6 +266,6 @@ class SettingAdapter(_FieldAdapter):
         from app.models.setting import Setting
 
         o = db.get(Setting, target_id)
-        if o is None or o.project_id != project_id:
+        if o is None or o.project_id != project_id or getattr(o,"deleted_at",None):
             raise NotFound("设定不存在")
         return o

@@ -28,7 +28,7 @@ _SYSTEM = """你是「Inspiration」影视创作平台的 AI 编辑助手。用�
 {"reply":"","summary":"","needs_clarification":false,"ops":[]}"""
 
 
-def _chat(system: str, user: str, base_url: str, api_key: str | None, model: str) -> str:
+def _chat(system: str, user: str | list[dict], base_url: str, api_key: str | None, model: str) -> str:
     if not api_key:
         raise ProviderError("未配置 LLM API Key,无法使用 AI 助手(请在项目设置中配置,或用 mock 引擎)")
     payload = {

@@ -1,8 +1,9 @@
 """identity DTO(请求/响应模型)。"""
+
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.enums import Role
 
@@ -34,10 +35,15 @@ class RegisterIn(BaseModel):
 
 
 class ProjectIn(BaseModel):
-    code: str = Field(min_length=1, max_length=32)
-    name: str
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     settings: dict = Field(default_factory=dict)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def trim_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class ProjectOut(BaseModel):
@@ -46,6 +52,8 @@ class ProjectOut(BaseModel):
     code: str
     name: str
     description: str | None
+    cover_blob_hash: str | None = None
+    deleted_at: datetime | None = None
     owner_id: uuid.UUID
     settings: dict
     created_at: datetime
@@ -59,6 +67,7 @@ class MemberIn(BaseModel):
 class MemberOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    project_id: uuid.UUID
     user_id: uuid.UUID
     role: Role
 

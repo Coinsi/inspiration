@@ -1,4 +1,5 @@
 """narrative DTO。"""
+
 import uuid
 from datetime import datetime
 
@@ -32,6 +33,7 @@ class NovelUpdate(BaseModel):
 
 class SceneListItem(BaseModel):
     """分镜工作台用:全项目场景 + 镜头数 + 章节/小说上下文。"""
+
     id: uuid.UUID
     code: str
     ordinal: int
@@ -74,10 +76,12 @@ class ScriptDetailOut(BaseModel):
     created_at: datetime
     source_chapter_id: uuid.UUID | None = None
     content_blocks: list[ScriptBlockDTO] = Field(default_factory=list)
+    content_revision: str
 
 
 class GenerateScriptIn(BaseModel):
     """从章节改编生成剧本正文(自动新建一条 Script)。"""
+
     chapter_id: uuid.UUID
     title: str | None = None
     strategy: str | None = None
@@ -85,6 +89,7 @@ class GenerateScriptIn(BaseModel):
 
 class UpdateScriptBlocksIn(BaseModel):
     blocks: list[ScriptBlockDTO]
+    expected_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class SceneOut(BaseModel):

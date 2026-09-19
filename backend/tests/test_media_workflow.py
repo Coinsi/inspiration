@@ -7,6 +7,7 @@ import io
 import os
 import threading
 import uuid
+from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
@@ -92,6 +93,10 @@ def test_render_mixed_media_audio_and_cancel(tmp_path):
 
 @pytest.fixture
 def studio(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "transcription_worker_enabled", False)
+    monkeypatch.setattr(settings, "agent_worker_enabled", False)
+    monkeypatch.setattr(settings, "canvas_worker_enabled", False)
+    monkeypatch.setattr(settings, "library_worker_enabled", False)
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
         pytest.skip("Set TEST_DATABASE_URL for isolated PostgreSQL integration checks")
@@ -208,7 +213,7 @@ def test_video_tools_frames_audio_and_trim(changing_video, tmp_path):
     from app.modules.generation.video_tools import probe_file, process
 
     frames = process(changing_video, {"operation": "frames", "times_ms": [200, 1200]})
-    for (data, typ, info), channel in zip(frames, [0, 2]):
+    for (data, typ, info), channel in zip(frames, [0, 2], strict=True):
         im = Image.open(io.BytesIO(data))
         pixel = im.getpixel((160, 90))
         assert typ == "image" and im.size == (320, 180)
@@ -652,6 +657,172 @@ def test_optimizer_requires_config_and_valid_json_without_changing_source(studio
         assert list(db.scalars(select(GenerationJob))) == []
 
 
+def test_visual_optimizer_resolves_project_images_and_preserves_provenance(studio, monkeypatch):
+    import base64
+    import json
+
+    from app.core.crypto import encrypt
+    from app.models.asset import Asset, AssetReferenceImage
+    from app.models.generation import ProviderConfig
+    from app.modules.generation import editing
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    png = io.BytesIO()
+    Image.new("RGB", (2400, 1200), "red").save(png, "PNG")
+    uploaded = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("source.png", png.getvalue(), "image/png")},
+    ).json()
+    with sessions() as db:
+        initial_jobs = set(db.scalars(select(GenerationJob.id)))
+    with sessions() as db:
+        db.add(
+            ProviderConfig(
+                project_id=uuid.UUID(ids["project"]),
+                provider_name="cloud_llm",
+                kind="llm",
+                enabled=True,
+                endpoint="https://example.invalid/v1",
+                credentials_encrypted=encrypt("test"),
+                config={"model": "vision-test"},
+            )
+        )
+        asset = Asset(
+            project_id=uuid.UUID(ids["project"]),
+            code="REF",
+            type="character",
+            name="Reference person",
+        )
+        foreign = Asset(
+            project_id=ids["other"], code="OTHER", type="character", name="Private person"
+        )
+        db.add_all([asset, foreign])
+        db.flush()
+        refs = [
+            AssetReferenceImage(asset_id=a.id, blob_hash=uploaded["output_blob_hash"])
+            for a in [asset, foreign]
+        ]
+        db.add_all(refs)
+        db.flush()
+        ref_id, foreign_id, asset_id = str(refs[0].id), str(refs[1].id), asset.id
+        db.commit()
+    sent = []
+
+    def reply(system, content, *args):
+        sent.append(content)
+        return json.dumps(
+            {
+                "prompt": "红色画面",
+                "reference_sources": [{"title": "forged"}],
+                "optimizer_model": "forged",
+            }
+        )
+
+    monkeypatch.setattr(editing, "_chat", reply)
+    path = f"{base}/prompts/optimize"
+    body = {
+        "prompt": "描述参考画面",
+        "mode": "reference",
+        "references": [
+            {"kind": "generation", "id": uploaded["id"]},
+            {"kind": "asset_reference", "id": ref_id},
+        ],
+    }
+    result = post_ok(client, path, body)
+    assert result["optimizer_model"] == "vision-test"
+    assert [r["id"] for r in result["reference_sources"]] == [uploaded["id"], ref_id]
+    assert result["reference_sources"][1]["title"] == "Reference person"
+    content = sent[0]
+    images = [p["image_url"]["url"] for p in content if p["type"] == "image_url"]
+    assert len(images) == 2
+    with Image.open(io.BytesIO(base64.b64decode(images[0].split(",", 1)[1]))) as image:
+        assert image.size == (1024, 512)
+        assert image.getpixel((10, 10))[0] > 240
+    # Cross-project references, removed targets and malformed references never reach the model.
+    assert (
+        client.post(
+            path, json={**body, "references": [{"kind": "asset_reference", "id": foreign_id}]}
+        ).status_code
+        == 404
+    )
+    assert client.post(path, json={**body, "references": body["references"] * 2}).status_code == 422
+    assert client.post(path, json={**body, "references": []}).status_code == 422
+    assert client.post(path, json={**body, "references": body["references"] * 3}).status_code == 422
+    from datetime import datetime
+
+    with sessions() as db:
+        db.get(Asset, asset_id).deleted_at = datetime.now(UTC)
+        db.commit()
+    assert (
+        client.post(
+            path, json={**body, "references": [{"kind": "asset_reference", "id": ref_id}]}
+        ).status_code
+        == 404
+    )
+    assert len(sent) == 1
+    adapted = post_ok(
+        client,
+        path,
+        {
+            "prompt": "人物走向窗边",
+            "mode": "model-adapt",
+            "target_provider": "mock",
+            "media_type": "video",
+        },
+    )
+    assert adapted["target_provider"] == "mock"
+    assert json.loads(sent[-1])["target"]["capabilities"]["modalities"]
+    assert client.post(path, json={"prompt": "test", "mode": "model-adapt"}).status_code == 422
+    assert (
+        client.post(
+            path,
+            json={
+                "prompt": "test",
+                "mode": "model-adapt",
+                "target_provider": "gpt_image",
+                "media_type": "video",
+            },
+        ).status_code
+        == 422
+    )
+    with sessions() as db:
+        assert db.get(Shot, uuid.UUID(ids["shot"])).title == "Test shot"
+        assert set(db.scalars(select(GenerationJob.id))) == initial_jobs
+
+
+def test_visual_optimizer_rejects_large_or_broken_images_before_network(studio, monkeypatch):
+    from app.models.storage import Blob
+    from app.modules.generation import editing
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    uploaded = client.post(
+        f"{base}/media/shot/{ids['shot']}/upload",
+        files={"file": ("source.png", media_engine.mock_image(), "image/png")},
+    ).json()
+
+    def unexpected(*args):
+        pytest.fail("Invalid image must not be sent to the model")
+
+    monkeypatch.setattr(editing, "_chat", unexpected)
+    body = {
+        "prompt": "test",
+        "mode": "reference",
+        "references": [{"kind": "generation", "id": uploaded["id"]}],
+    }
+    with sessions() as db:
+        db.get(Blob, uploaded["output_blob_hash"]).size_bytes = 21 * 1024 * 1024
+        db.commit()
+    response = client.post(f"{base}/prompts/optimize", json=body)
+    assert response.status_code == 422 and "20 MB" in response.text
+    with sessions() as db:
+        db.get(Blob, uploaded["output_blob_hash"]).size_bytes = 100
+        db.commit()
+    monkeypatch.setattr(editing.cas, "read_bytes", lambda *args: b"broken image")
+    assert client.post(f"{base}/prompts/optimize", json=body).status_code == 422
+
+
 def test_end_to_end_refine_render_and_range(studio, tmp_path):
     client, sessions, ids = studio
     base = f"/api/v1/projects/{ids['project']}"
@@ -1002,6 +1173,9 @@ def test_baseline_preserves_repeated_shot_timing(studio):
                 select(BaselineItem).where(BaselineItem.baseline_id == uuid.UUID(baseline["id"]))
             )
         )
-        assert len(rows) == 1
-        snapshot = db.get(Version, rows[0].version_id).content
+        assert len(rows) == 2
+        timeline_row = next(r for r in rows if r.entity_type == "timeline")
+        assert len(db.get(Version, timeline_row.version_id).content["items"]) == 2
+        shot_row = next(r for r in rows if r.entity_type == "shot")
+        snapshot = db.get(Version, shot_row.version_id).content
         assert [c["duration_ms"] for c in snapshot["timeline_items"]] == [1000, 3000]

@@ -14,4 +14,12 @@ from app.models import (  # noqa: F401
     review,
     assist,
     setting,
+    library,
+    media_index,
+    canvas,
+    agent,
+    skill,
+    director,
+    evidence,
+    transcription,
 )

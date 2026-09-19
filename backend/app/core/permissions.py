@@ -8,6 +8,7 @@ from app.models.enums import Role
 # 写/敏感动作 → 允许的角色
 PERMISSIONS: dict[str, set[Role]] = {
     "project.manage": {Role.admin},
+    "director.edit": {Role.admin, Role.director, Role.artist},
     "member.manage": {Role.admin},
     "quota.manage": {Role.admin},
     "provider.manage": {Role.admin},
@@ -19,6 +20,9 @@ PERMISSIONS: dict[str, set[Role]] = {
     "review.submit": {Role.admin, Role.director, Role.artist},
     "review.decide": {Role.admin, Role.director},
     "lock.baseline": {Role.admin, Role.director},
+    "skill.edit": {Role.admin,Role.director,Role.artist,Role.writer},
+    "agent.run": {Role.admin, Role.director, Role.artist, Role.writer},
+    "canvas.edit": {Role.admin, Role.director, Role.artist, Role.writer},
     "timeline.edit": {Role.admin, Role.director},
 }
 

@@ -18,6 +18,18 @@ PROVIDER_MANAGE = require_action("provider.manage")
 QUOTA_MANAGE = require_action("quota.manage")
 
 
+@router.post("/generations/{gen_id}/grid-split", response_model=list[schemas.GenerationOut])
+def grid_split(
+    gen_id: uuid.UUID,
+    data: schemas.GridSplitIn,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.grid_tools import split
+
+    return split(db, ctx, gen_id, data)
+
+
 @router.get("/character-presets")
 def character_presets(ctx: ProjectContext = Depends(get_project_context)):
     from app.modules.generation.character_tools import catalog
@@ -30,7 +42,7 @@ def character_preview(
     gen_id: uuid.UUID,
     data: schemas.CharacterToolIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.generation.character_tools import preview
 
@@ -42,7 +54,7 @@ def character_generate(
     gen_id: uuid.UUID,
     data: schemas.CharacterToolIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.generation.character_tools import submit
 
@@ -53,7 +65,7 @@ def character_generate(
 def video_info(
     gen_id: uuid.UUID,
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.generation.video_tools import metadata
 
@@ -65,7 +77,7 @@ def video_tools(
     gen_id: uuid.UUID,
     data: schemas.VideoToolIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.generation.video_tools import submit
 
@@ -77,7 +89,7 @@ def inpaint(
     gen_id: uuid.UUID,
     data: schemas.InpaintIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.generation.editing import inpaint as submit_inpaint
 
@@ -88,7 +100,7 @@ def inpaint(
 def optimize_prompt(
     data: schemas.OptimizePromptIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.generation.editing import optimize_prompt as optimize
 
@@ -97,7 +109,9 @@ def optimize_prompt(
 
 @router.get("/providers/{name}/capabilities")
 def capabilities(
-    name: str, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)
+    name: str,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return (
         service._provider_instance(db, ctx.project.id, name).capabilities().model_dump(mode="json")
@@ -110,7 +124,7 @@ def list_jobs(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     q = select(GenerationJob).where(GenerationJob.project_id == ctx.project.id)
     if status:
@@ -118,16 +132,48 @@ def list_jobs(
     return list(db.scalars(q.order_by(GenerationJob.created_at.desc()).limit(limit).offset(offset)))
 
 
+@router.get("/jobs/catalog")
+def task_catalog(
+    status: Literal[
+        "", "active", "pending", "submitted", "running", "failed", "succeeded", "canceled"
+    ] = "",
+    operation: str = Query("", max_length=40),
+    search: str = Query("", max_length=200),
+    offset: int = Query(0, ge=0, le=100000),
+    limit: int = Query(24, ge=1, le=100),
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.task_center import catalog
+
+    return catalog(db, ctx.project.id, status, operation, search, offset, limit)
+
+
+@router.get("/jobs/{job_id}/workspace")
+def task_workspace(
+    job_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.task_center import workspace
+
+    return workspace(db, ctx, job_id)
+
+
 @router.post("/jobs/{job_id}/cancel", response_model=schemas.JobOut)
 def cancel_job(
-    job_id: uuid.UUID, ctx: ProjectContext = Depends(TRIGGER), db: Session = Depends(get_db)
+    job_id: uuid.UUID,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return jobs.cancel(db, ctx, job_id)
 
 
 @router.post("/jobs/{job_id}/retry", response_model=schemas.JobOut)
 def retry_job(
-    job_id: uuid.UUID, ctx: ProjectContext = Depends(TRIGGER), db: Session = Depends(get_db)
+    job_id: uuid.UUID,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return jobs.retry(db, ctx, job_id)
 
@@ -137,7 +183,7 @@ def refine(
     gen_id: uuid.UUID,
     data: schemas.RefineIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return jobs.refine(db, ctx, gen_id, data)
 
@@ -147,7 +193,7 @@ def render(
     timeline_id: uuid.UUID,
     data: schemas.RenderIn,
     ctx: ProjectContext = Depends(require_action("timeline.edit")),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return jobs.render_timeline(db, ctx, timeline_id, data)
 
@@ -158,7 +204,7 @@ def upload_media(
     target_id: uuid.UUID,
     file: UploadFile = File(...),
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     import io
     import tempfile
@@ -253,14 +299,15 @@ def upload_media(
 def configure_provider(
     data: schemas.ProviderConfigIn,
     ctx: ProjectContext = Depends(PROVIDER_MANAGE),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.ProviderConfigOut.model_validate(service.configure_provider(db, ctx, data))
 
 
 @router.get("/providers", response_model=list[schemas.ProviderConfigOut])
 def list_providers(
-    ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return [
         schemas.ProviderConfigOut.model_validate(p)
@@ -272,7 +319,7 @@ def list_providers(
 def test_provider(
     data: schemas.ProviderConfigIn,
     ctx: ProjectContext = Depends(PROVIDER_MANAGE),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     ok, message = service.test_provider(
         db, ctx.project.id, data.provider_name, data.kind, data.endpoint, data.token, data.config
@@ -284,13 +331,16 @@ def test_provider(
 def set_quota(
     data: schemas.QuotaIn,
     ctx: ProjectContext = Depends(QUOTA_MANAGE),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.QuotaOut.model_validate(service.set_quota(db, ctx, data))
 
 
 @router.get("/quota", response_model=schemas.QuotaOut | None)
-def get_quota(ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)):
+def get_quota(
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
     q = service.get_project_quota(db, ctx.project.id)
     return schemas.QuotaOut.model_validate(q) if q else None
 
@@ -301,7 +351,7 @@ def estimate(
     shot_id: uuid.UUID,
     data: schemas.GenerateIn,
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return service.estimate(db, ctx, "shot", shot_id, data)
 
@@ -311,7 +361,7 @@ def generate(
     shot_id: uuid.UUID,
     data: schemas.GenerateIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.JobOut.model_validate(service.submit(db, ctx, "shot", shot_id, data))
 
@@ -321,7 +371,7 @@ def estimate_asset(
     asset_id: uuid.UUID,
     data: schemas.GenerateIn,
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return service.estimate(db, ctx, "asset", asset_id, data)
 
@@ -331,7 +381,7 @@ def generate_asset(
     asset_id: uuid.UUID,
     data: schemas.GenerateIn,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.JobOut.model_validate(service.submit(db, ctx, "asset", asset_id, data))
 
@@ -340,7 +390,7 @@ def generate_asset(
 def get_job(
     job_id: uuid.UUID,
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.JobOut.model_validate(service.get_job(db, ctx.project.id, job_id))
 
@@ -350,10 +400,23 @@ def list_generations(
     target_type: str = Query("shot"),
     target_id: uuid.UUID = Query(...),
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     items = service.list_generations(db, ctx.project.id, target_type, target_id)
     return [schemas.GenerationOut.model_validate(g) for g in items]
+
+
+@router.get("/generations/{gen_id}", response_model=schemas.GenerationOut)
+def get_generation(
+    gen_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation import jobs
+
+    g = jobs.source(db, ctx.project.id, gen_id)
+    jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
+    return schemas.GenerationOut.model_validate(g)
 
 
 @router.patch("/generations/{gen_id}", response_model=schemas.GenerationOut)
@@ -361,7 +424,7 @@ def patch_generation(
     gen_id: uuid.UUID,
     data: schemas.RatePatch,
     ctx: ProjectContext = Depends(TRIGGER),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.GenerationOut.model_validate(
         service.patch_generation(db, ctx.project.id, gen_id, data)
@@ -370,6 +433,8 @@ def patch_generation(
 
 @router.post("/generations/{gen_id}/select", response_model=schemas.GenerationOut)
 def select_variant(
-    gen_id: uuid.UUID, ctx: ProjectContext = Depends(TRIGGER), db: Session = Depends(get_db)
+    gen_id: uuid.UUID,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return schemas.GenerationOut.model_validate(service.select_variant(db, ctx, gen_id))

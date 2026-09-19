@@ -1,6 +1,16 @@
+import SkillPicker from "@/components/SkillPicker";
+import type { SkillUse } from "@/lib/skills";
 // 贯穿式 AI 对话助手侧栏:对当前对象多轮对话 → 修改提议(预览)→ 应用(版本快照)。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, Loader2, PanelRightClose, Send, Sparkles, UserRound } from "lucide-react";
+import {
+  Bot,
+  Check,
+  Loader2,
+  PanelRightClose,
+  Send,
+  Sparkles,
+  UserRound,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -27,6 +37,7 @@ export default function AssistPanel({
   const qc = useQueryClient();
   const toast = useToast();
   const { t: tr } = useI18n();
+  const [skills, setSkills] = useState<SkillUse[]>([]);
   const [input, setInput] = useState("");
   const [chatId, setChatId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -34,7 +45,10 @@ export default function AssistPanel({
   // 复用该对象最近一次会话;没有则首次发送时创建
   const { data: chats } = useQuery({
     queryKey: ["assist-chats", targetType, targetId],
-    queryFn: () => api.get<AssistChat[]>(`${base}/assist/chats?target_type=${targetType}&target_id=${targetId}`),
+    queryFn: () =>
+      api.get<AssistChat[]>(
+        `${base}/assist/chats?target_type=${targetType}&target_id=${targetId}`,
+      ),
   });
   useEffect(() => {
     if (!chatId && chats && chats.length > 0) setChatId(chats[0].id);
@@ -62,12 +76,17 @@ export default function AssistPanel({
         cid = created.id;
         setChatId(cid);
       }
-      return api.post(`${base}/assist/chats/${cid}/messages`, { content });
+      return api.post(`${base}/assist/chats/${cid}/messages`, {
+        content,
+        skills: skills.map(({ id, revision }) => ({ id, revision })),
+      });
     },
     onSuccess: () => {
       setInput("");
       void qc.invalidateQueries({ queryKey: ["assist-chat", chatId] });
-      void qc.invalidateQueries({ queryKey: ["assist-chats", targetType, targetId] });
+      void qc.invalidateQueries({
+        queryKey: ["assist-chats", targetType, targetId],
+      });
     },
     onError: (e) => toast.push((e as Error).message, "error"),
   });
@@ -89,7 +108,12 @@ export default function AssistPanel({
   };
 
   return (
-    <div className={cn("flex min-h-0 flex-col rounded-lg border border-border bg-card", className)}>
+    <div
+      className={cn(
+        "flex min-h-0 flex-col rounded-lg border border-border bg-card",
+        className,
+      )}
+    >
       <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-3 text-sm font-medium">
         <Sparkles className="h-4 w-4 text-primary" />
         <span className="flex-1 truncate">{tr("assist.title")}</span>
@@ -104,7 +128,10 @@ export default function AssistPanel({
         )}
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 space-y-3 overflow-auto p-3"
+      >
         {messages.length === 0 && !send.isPending && (
           <div className="flex flex-col items-center gap-2 px-3 py-10 text-center text-muted-foreground">
             <Bot className="h-7 w-7 opacity-40" />
@@ -112,16 +139,28 @@ export default function AssistPanel({
           </div>
         )}
         {messages.map((m) => (
-          <Message key={m.id} m={m} onApply={(id) => apply.mutate(id)} applying={apply.isPending} />
+          <Message
+            key={m.id}
+            m={m}
+            onApply={(id) => apply.mutate(id)}
+            applying={apply.isPending}
+          />
         ))}
         {send.isPending && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tr("assist.thinking")}
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
+            {tr("assist.thinking")}
           </div>
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border p-2">
+      <div className="shrink-0 border-t border-border p-2 space-y-2">
+        <SkillPicker
+          projectId={projectId}
+          value={skills}
+          onChange={setSkills}
+          disabled={send.isPending}
+        />
         <div className="flex items-end gap-1.5">
           <textarea
             value={input}
@@ -136,7 +175,13 @@ export default function AssistPanel({
             placeholder={tr("assist.placeholder")}
             className="min-h-[3rem] flex-1 resize-none rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           />
-          <Button size="sm" className="h-9 w-9 p-0" disabled={!input.trim() || send.isPending} onClick={submit} title={tr("assist.send")}>
+          <Button
+            size="sm"
+            className="h-9 w-9 p-0"
+            disabled={!input.trim() || send.isPending}
+            onClick={submit}
+            title={tr("assist.send")}
+          >
             <Send className="h-4 w-4" />
           </Button>
         </div>
@@ -152,7 +197,15 @@ function fmtTime(iso: string | null): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function Message({ m, onApply, applying }: { m: AssistMessage; onApply: (id: string) => void; applying: boolean }) {
+function Message({
+  m,
+  onApply,
+  applying,
+}: {
+  m: AssistMessage;
+  onApply: (id: string) => void;
+  applying: boolean;
+}) {
   const { t: tr } = useI18n();
 
   if (m.role === "user") {
@@ -161,7 +214,9 @@ function Message({ m, onApply, applying }: { m: AssistMessage; onApply: (id: str
         {/* 发送者:我 */}
         <div className="flex items-center gap-1.5 text-[11px] text-faint">
           <span>{fmtTime(m.created_at)}</span>
-          <span className="font-medium text-muted-foreground">{tr("assist.me")}</span>
+          <span className="font-medium text-muted-foreground">
+            {tr("assist.me")}
+          </span>
           <span className="grid h-5 w-5 place-items-center rounded-full bg-primary/20 text-primary">
             <UserRound className="h-3 w-3" />
           </span>
@@ -169,6 +224,12 @@ function Message({ m, onApply, applying }: { m: AssistMessage; onApply: (id: str
         <div className="max-w-[88%] rounded-xl rounded-tr-sm bg-primary px-3 py-2 text-sm leading-6 text-primary-foreground shadow-sm">
           {m.content}
         </div>
+        {!!m.skills?.length && (
+          <p className="text-xs text-muted-foreground">
+            参考技能：
+            {m.skills.map((s) => `${s.name} v${s.revision}`).join("、")}
+          </p>
+        )}
       </div>
     );
   }
@@ -182,12 +243,15 @@ function Message({ m, onApply, applying }: { m: AssistMessage; onApply: (id: str
         <span className="grid h-5 w-5 place-items-center rounded-full bg-primary text-primary-foreground">
           <Bot className="h-3 w-3" />
         </span>
-        <span className="font-medium text-muted-foreground">{tr("assist.title")}</span>
+        <span className="font-medium text-muted-foreground">
+          {tr("assist.title")}
+        </span>
         <span>{fmtTime(m.created_at)}</span>
       </div>
       <div className="max-w-[92%] space-y-1.5">
         <div className="rounded-xl rounded-tl-sm border border-border bg-elevated px-3 py-2 text-sm leading-6">
-          {m.content || (p?.needs_clarification ? tr("assist.needsClarify") : "")}
+          {m.content ||
+            (p?.needs_clarification ? tr("assist.needsClarify") : "")}
         </div>
         {hasOps && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/8 px-2.5 py-1.5">
@@ -200,7 +264,12 @@ function Message({ m, onApply, applying }: { m: AssistMessage; onApply: (id: str
                 <Check className="h-3.5 w-3.5" /> {tr("assist.applied")}
               </span>
             ) : (
-              <Button size="sm" className="h-6 px-2 text-xs" disabled={applying} onClick={() => onApply(m.id)}>
+              <Button
+                size="sm"
+                className="h-6 px-2 text-xs"
+                disabled={applying}
+                onClick={() => onApply(m.id)}
+              >
                 {tr("assist.apply")}
               </Button>
             )}

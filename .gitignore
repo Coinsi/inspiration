@@ -14,6 +14,7 @@ backend/.env
 # Node
 node_modules/
 frontend/dist/
+frontend/test-results/
 
 # 数据/构建
 *.log
@@ -21,6 +22,7 @@ frontend/dist/
 
 # 本地存储(blob 内容,依赖本地 DB,无意义且大)
 _storage/
+_library_staging/
 
 # 第三方 pgvector 源码克隆(本地编译扩展用,非本项目代码)
 pgvector/

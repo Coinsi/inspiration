@@ -16,7 +16,12 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 
 def get_db() -> Iterator[Session]:
-    """FastAPI 依赖:请求级数据库会话。"""
+    """Use Depends(get_db, scope='function'): commit before sending the response.
+
+    Request-scoped yield teardown runs after the response in modern FastAPI; a
+    follow-up upload/read can otherwise race the commit and see a false 404.
+    Streaming endpoints must capture detached file metadata before returning.
+    """
     db = SessionLocal()
     try:
         yield db

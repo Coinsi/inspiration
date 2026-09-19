@@ -24,6 +24,8 @@ def _now() -> str:
 
 
 def _engine(db: Session, project_id: uuid.UUID, name: str | None):
+    if name == "mock":
+        return assist_registry.create("mock")
     pc = _llm_config(db, project_id)
     chosen = name or ("cloud_llm" if pc is not None else "mock")
     kwargs = {}
@@ -100,13 +102,16 @@ def post_message(
             if ctx_text:
                 state = {**state, "story_settings(已确立的故事设定,修改时必须遵守)": ctx_text}
 
+    from app.modules.skill.service import compose
+    from app.modules.identity.preferences import guide
+    instruction, skill_refs = compose(db, ctx.project.id, data.skills, guide(db, ctx.project.id, data.content, "assistant"))
     engine = _engine(db, ctx.project.id, data.engine)
     proposal = engine.propose(
         object_desc=adapter.object_desc,
         ops_help=adapter.ops_help,
         state=state,
         history=chat.messages or [],
-        instruction=data.content,
+        instruction=instruction,
     )
 
     # dry-run 预览:提议可应用才给 preview;不可应用则转为澄清,避免脏提议
@@ -121,7 +126,7 @@ def post_message(
             ops = []
             proposal.needs_clarification = True
 
-    user_msg = {"id": uuid.uuid4().hex, "role": "user", "content": data.content, "created_at": _now()}
+    user_msg = {"id": uuid.uuid4().hex, "role": "user", "content": data.content, "created_at": _now(), "skills": skill_refs}
     asst_msg = {
         "id": uuid.uuid4().hex,
         "role": "assistant",

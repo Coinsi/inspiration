@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+assert.equal(process.env.TEST_ISOLATED_PREVIEW,'1');
+const base=process.env.APP_URL,out=process.env.ARTIFACT_DIR;await mkdir(out,{recursive:true});
+const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
+const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+try {
+ const login=await context.request.post(`${base}/api/v1/auth/login`,{data:{username:'demo',password:'demo1234'}});assert.ok(login.ok());const token=(await login.json()).access_token,headers={Authorization:`Bearer ${token}`};
+ const call=async(method,path,data)=>{const r=await context.request[method](`${base}/api/v1${path}`,{headers,data});assert.ok(r.ok(),await r.text());return r.json()};
+ const p=await call('post','/projects',{code:'FOLDER-'+Date.now(),name:'素材整理验收 · 目录与批量移动'}),root=`/projects/${p.id}`,lib=root+'/library';
+ await context.addInitScript(t=>{localStorage.setItem('inspiration_token',t);localStorage.setItem('inspiration_lang','zh')},token);await page.goto(base+lib);
+ await page.getByRole('button',{name:'目录与批量管理',exact:true}).click();
+ const create=async name=>{await page.getByRole('button',{name:'新建目录',exact:true}).click();await page.getByLabel('目录名称',{exact:true}).fill(name);const wait=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/library/folders'));await page.getByRole('button',{name:'保存目录',exact:true}).click();const response=await wait;assert.ok(response.ok());const f=await response.json();await page.waitForFunction(id=>document.querySelector('select[aria-label="当前素材目录"]')?.value===id,f.id);return f};
+ const parent=await create('第一集'),child=await create('海边');assert.equal(child.parent_id,parent.id);
+ await page.getByRole('button',{name:'导入视频',exact:true}).click();await page.getByLabel('选择视频文件',{exact:true}).setInputFiles({name:'归档验收.mp4',mimeType:'video/mp4',buffer:await readFile(process.env.VIDEO_FIXTURE)});
+ const uploaded=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/library/uploads'));await page.getByRole('button',{name:'开始 / 继续上传',exact:true}).click();const started=await uploaded;assert.ok(started.ok());const version=await started.json();await page.getByText('上传完成，后台正在制作预览，可以关闭此窗口。',{exact:true}).waitFor();await page.getByRole('dialog').getByTitle('关闭',{exact:true}).click();
+ let ready;for(let i=0;i<120;i++){ready=await call('get',lib+`/versions/${version.id}`);if(['ready','failed'].includes(ready.status))break;await page.waitForTimeout(500)}assert.equal(ready.status,'ready');assert.equal((await call('get',lib+`/items/${version.media_id}`)).folder_id,child.id);
+ const reuseFixture=JSON.parse(await readFile(process.env.REUSE_REPORT,'utf8'));
+ const reused=await call('post',lib+'/reuse',{source_project_id:reuseFixture.sourceProject,source_version_id:reuseFixture.sourceVersion,folder_id:child.id});
+ const script=await call('post',root+'/scripts',{title:'归档不改变引用'});await call('post',root+`/scripts/${script.id}/apply-scenes`,{scenes:[{title:'海边',shots:[{title:'固定片段'}]}]});const shot=(await call('get',root+'/shots'))[0];
+ const usage=await call('post',lib+'/usages',{version_id:version.id,shot_id:shot.id,start_ms:1000,end_ms:Math.min(3000,ready.duration_ms),purpose:'editing_source'});
+ await page.reload();await page.getByLabel('选择 归档验收.mp4',{exact:true}).waitFor();assert.equal(await page.getByLabel('当前素材目录',{exact:true}).inputValue(),child.id);
+ await page.getByRole('button',{name:'选择本页',exact:true}).click();await page.getByText('已选 2 项 · 每次最多移动100项',{exact:true}).waitFor();await page.getByRole('button',{name:'移动所选素材',exact:true}).click();await page.getByLabel('目标目录',{exact:true}).selectOption('');
+ await page.screenshot({path:`${out}/batch-move-preview.png`,animations:'disabled'});
+ const moved=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/library/move'));await page.getByRole('button',{name:'确认移动',exact:true}).click();assert.ok((await moved).ok());
+ assert.equal((await call('get',lib+'/catalog?root_only=true')).total,2);const after=(await call('get',lib+'/usages'))[0];assert.equal(after.id,usage.id);assert.equal(after.version_id,version.id);assert.equal(after.start_ms,1000);
+ await page.getByLabel('当前素材目录',{exact:true}).selectOption('root');await page.getByLabel('选择 归档验收.mp4',{exact:true}).check();await page.getByRole('button',{name:'移动所选素材',exact:true}).click();await page.getByLabel('目标目录',{exact:true}).selectOption(parent.id);
+ const movedAgain=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/library/move'));await page.getByRole('button',{name:'确认移动',exact:true}).click();assert.ok((await movedAgain).ok());
+ await page.getByLabel('当前素材目录',{exact:true}).selectOption(parent.id);await page.getByRole('button',{name:'编辑当前目录',exact:true}).click();await page.getByLabel('目录名称',{exact:true}).fill('第一集·定稿');await page.getByRole('button',{name:'保存目录',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});
+ assert.equal((await call('get',lib+'/folders')).find(f=>f.id===parent.id).name,'第一集·定稿');
+ await page.getByLabel('当前素材目录',{exact:true}).selectOption(child.id);await page.getByRole('button',{name:'删除当前目录',exact:true}).click();await page.getByRole('alertdialog').getByRole('button',{name:'确定',exact:true}).click();await page.waitForFunction(id=>document.querySelector('select[aria-label="当前素材目录"]')?.value===id,parent.id);
+ await page.getByRole('button',{name:'删除当前目录',exact:true}).click();await page.getByRole('alertdialog').getByRole('button',{name:'确定',exact:true}).click();await page.getByText('目录内仍有子目录或素材（含回收站），请先移出，删除目录不会删除视频',{exact:true}).waitFor();
+ await page.screenshot({path:`${out}/folder-library-dark.png`,animations:'disabled'});
+ await page.setViewportSize({width:390,height:844});await page.evaluate(()=>{document.documentElement.classList.remove('dark');document.documentElement.classList.add('light')});await page.locator('main').evaluate(e=>e.scrollTop=0);assert.ok(await page.locator('main').evaluate(e=>e.scrollWidth<=e.clientWidth));await page.screenshot({path:`${out}/folder-library-mobile-light.png`,fullPage:true,animations:'disabled'});
+ assert.deepEqual(errors,[]);await writeFile(`${out}/report.json`,JSON.stringify({passed:true,project:p.id,folder:parent.id,media:version.media_id,version:version.id,reusedMedia:reused.media_id,shot:shot.id,usage:usage.id,checks:['Nested folders created and restored by URL after reload','Browser upload and cross-project reuse land in chosen folder','Two-item move preserves version and shot usage/time','Folder rename, empty-child delete and nonempty-folder delete guard','390px layout and desktop operation previews'],errors},null,2));console.log('Folder organization live flow passed');
+}catch(e){await page.screenshot({path:`${out}/failure.png`,fullPage:true});throw e}finally{await browser.close()}

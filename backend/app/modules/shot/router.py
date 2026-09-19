@@ -14,14 +14,14 @@ EDIT = require_action("shot.edit")
 
 
 @router.get("/scenes/{scene_id}/shots", response_model=list[schemas.ShotOut])
-def list_shots(scene_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)):
+def list_shots(scene_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
     return service.list_shots(db, ctx.project.id, scene_id)
 
 
 @router.post("/scenes/{scene_id}/shots", response_model=schemas.ShotOut)
 def create_shot(
     scene_id: uuid.UUID, data: schemas.ShotCreate,
-    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function"),
 ):
     return service.create_shot(db, ctx, scene_id, data)
 
@@ -29,7 +29,7 @@ def create_shot(
 @router.post("/scenes/{scene_id}/shots/reorder", response_model=list[schemas.ShotOut])
 def reorder_shots(
     scene_id: uuid.UUID, data: schemas.ReorderIn,
-    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function"),
 ):
     return service.reorder_shots(db, ctx, scene_id, data.shot_ids)
 
@@ -37,13 +37,13 @@ def reorder_shots(
 @router.post("/scenes/{scene_id}/breakdown", response_model=list[schemas.ShotOut])
 def breakdown_scene(
     scene_id: uuid.UUID, strategy: str | None = None,
-    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function"),
 ):
     return service.breakdown_scene(db, ctx, scene_id, strategy)
 
 
 @router.delete("/shots/{shot_id}", status_code=204)
-def delete_shot(shot_id: uuid.UUID, ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db)):
+def delete_shot(shot_id: uuid.UUID, ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function")):
     service.delete_shot(db, ctx, shot_id)
 
 
@@ -53,25 +53,25 @@ def list_all_shots(
     novel_id: uuid.UUID | None = None,
     chapter_id: uuid.UUID | None = None,
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return service.list_all_shots(db, ctx.project.id, status, novel_id, chapter_id)
 
 
 @router.get("/shots/board", response_model=schemas.BoardOut)
-def board(ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)):
+def board(ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
     return service.board(db, ctx.project.id)
 
 
 @router.get("/shots/{shot_id}", response_model=schemas.ShotOut)
-def get_shot(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)):
+def get_shot(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
     return service.get(db, ctx.project.id, shot_id)
 
 
 @router.patch("/shots/{shot_id}", response_model=schemas.ShotOut)
 def update_shot(
     shot_id: uuid.UUID, data: schemas.ShotUpdate,
-    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function"),
 ):
     return service.update(db, ctx, shot_id, data)
 
@@ -79,24 +79,24 @@ def update_shot(
 @router.put("/shots/{shot_id}/asset-refs", response_model=list[schemas.AssetRefOut])
 def set_asset_refs(
     shot_id: uuid.UUID, data: schemas.SetAssetRefsIn,
-    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function"),
 ):
     return service.set_asset_refs(db, ctx, shot_id, data.refs)
 
 
 @router.get("/shots/{shot_id}/asset-refs", response_model=list[schemas.AssetRefOut])
-def list_asset_refs(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)):
+def list_asset_refs(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
     return service.list_asset_refs(db, ctx.project.id, shot_id)
 
 
 @router.post("/shots/{shot_id}/transition", response_model=schemas.ShotOut)
 def transition(
     shot_id: uuid.UUID, data: schemas.TransitionIn,
-    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function"),
 ):
     return service.transition(db, ctx, shot_id, data.to)
 
 
 @router.get("/shots/{shot_id}/compose-prompt", response_model=schemas.ComposeOut)
-def compose_prompt(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)):
+def compose_prompt(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
     return service.compose_prompt(db, ctx.project.id, shot_id)

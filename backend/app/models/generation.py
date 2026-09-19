@@ -20,6 +20,18 @@ from app.models.base import Base, ProjectScopedMixin, TimestampMixin, uuid_pk
 from app.models.enums import JobStatus, ProviderKind, QuotaScope, RequestType
 
 
+class ModelChannel(Base, TimestampMixin):
+    __tablename__ = "model_channel"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(512), default="")
+    credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
 class ProviderConfig(Base, TimestampMixin):
     """供应商配置 + 加密密钥(platform 模块)。"""
 

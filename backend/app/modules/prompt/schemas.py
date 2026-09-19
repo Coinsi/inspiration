@@ -36,6 +36,13 @@ class FragmentIn(BaseModel):
     text: str = ""
 
 
+class FragmentUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    text: str = Field(min_length=1)
+    category: str = Field(min_length=1, max_length=32)
+    expected_updated_at: datetime
+
+
 class FragmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -44,3 +51,4 @@ class FragmentOut(BaseModel):
     name: str
     text: str
     created_at: datetime
+    updated_at: datetime

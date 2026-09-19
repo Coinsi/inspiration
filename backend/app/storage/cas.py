@@ -7,6 +7,10 @@
 
 import hashlib
 import io
+import os
+import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -15,6 +19,78 @@ from app.core.config import settings
 from app.models.storage import Blob
 
 _client = None
+
+
+def put_file(db, path: Path, mime: str, **metadata):
+    """Hash and store a disk file with bounded memory on either storage backend."""
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    existing = db.get(Blob, digest)
+    if existing:
+        try:
+            with open_range(existing, 0, 1) as stream:
+                if stream.read(1):
+                    return existing
+        except (OSError, ValueError):
+            pass  # An exact re-upload may repair a missing object, preserving all references.
+    object_name = f"{digest[:2]}/{digest}"
+    if settings.storage_backend == "fs":
+        target = (Path(settings.fs_storage_dir) / object_name).resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, staging = tempfile.mkstemp(dir=target.parent, prefix=".upload-")
+        try:
+            with os.fdopen(fd, "wb") as output, path.open("rb") as source:
+                shutil.copyfileobj(source, output, 1024 * 1024)
+            os.replace(staging, target)
+        finally:
+            Path(staging).unlink(missing_ok=True)
+        uri = str(target)
+    else:
+        with path.open("rb") as source:
+            _minio().put_object(
+                settings.minio_bucket, object_name, source, path.stat().st_size, content_type=mime
+            )
+        uri = f"{settings.minio_bucket}/{object_name}"
+    from sqlalchemy.dialects.postgresql import insert
+
+    if existing:
+        existing.storage_uri = uri
+        db.flush()
+        return existing
+    db.execute(
+        insert(Blob)
+        .values(hash=digest, storage_uri=uri, mime=mime, size_bytes=path.stat().st_size, **metadata)
+        .on_conflict_do_nothing(index_elements=[Blob.hash])
+    )
+    return db.get(Blob, digest)
+
+
+@contextmanager
+def open_range(blob, start=0, length=None):
+    """Open a bounded range without loading a whole video into process memory."""
+    path = Path(blob.storage_uri)
+    if path.is_absolute() or path.is_file():
+        with path.open("rb") as stream:
+            stream.seek(start)
+            yield stream
+        return
+    bucket, object_name = blob.storage_uri.split("/", 1)
+    try:
+        response = _minio().get_object(bucket, object_name, offset=start, length=length or 0)
+    except Exception:
+        # Preserve the verified local repair fallback of read_bytes for legacy objects.
+        path = Path(settings.fs_storage_dir) / blob.hash[:2] / blob.hash
+        with path.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != blob.hash:
+                raise ValueError("Local repair hash mismatch") from None
+            stream.seek(start)
+            yield stream
+        return
+    try:
+        yield response
+    finally:
+        response.close()
+        response.release_conn()
 
 
 # ── MinIO 后端 ──
@@ -59,10 +135,15 @@ def put_bytes(
     digest = hashlib.sha256(data).hexdigest()
     existing = db.get(Blob, digest)
     if existing is not None:
+        # Verified technical metadata may arrive after the same immutable bytes were stored.
+        for name, value in {"width": width, "height": height, "duration_ms": duration_ms}.items():
+            if value is not None and getattr(existing, name) is None:
+                setattr(existing, name, value)
         if settings.storage_backend == "fs" and not Path(existing.storage_uri).is_file():
             # Re-uploading the same bytes can repair an unavailable legacy object.
             existing.storage_uri = _store_fs(f"{digest[:2]}/{digest}", data)
             db.flush()
+        db.flush()
         return existing
 
     object_name = f"{digest[:2]}/{digest}"

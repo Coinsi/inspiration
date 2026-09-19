@@ -28,6 +28,8 @@ class ProviderConfigOut(BaseModel):
     endpoint: str | None
     config: dict
     capabilities: dict
+    display_name: str = ""
+    channel_name: str = ""
     # 注意:不返回 token
 
 
@@ -48,7 +50,11 @@ class QuotaOut(BaseModel):
     period: str
 
 
+from app.modules.skill.schemas import SkillUse
+
+
 class GenerateIn(BaseModel):
+    skills: list[SkillUse] = Field(default_factory=list, max_length=4)
     provider: str = "mock"
     request_type: RequestType = RequestType.image
     params: dict = Field(default_factory=dict)
@@ -106,11 +112,25 @@ class InpaintIn(BaseModel):
     strokes: list[MaskStroke] = Field(min_length=1, max_length=100)
 
 
+class GridSplitIn(BaseModel):
+    rows: int = Field(ge=1, le=4)
+    columns: int = Field(ge=1, le=4)
+    cells: list[Annotated[int, Field(ge=0, le=15)]] = Field(min_length=1, max_length=16)
+    request_key: uuid.UUID
+
+
+class PromptImageReference(BaseModel):
+    kind: Literal["generation", "asset_reference"]
+    id: uuid.UUID
+
+
 class OptimizePromptIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
-    mode: Literal["expand", "refine", "style"] = "refine"
+    mode: Literal["expand", "refine", "style", "reference", "model-adapt"] = "refine"
     media_type: Literal["image", "video"] = "image"
     style: str = Field(default="", max_length=1000)
+    references: list[PromptImageReference] = Field(default_factory=list, max_length=4)
+    target_provider: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class OptimizedPrompt(BaseModel):
@@ -120,12 +140,17 @@ class OptimizedPrompt(BaseModel):
     assumptions: list[Annotated[str, Field(max_length=1000)]] = Field(
         default_factory=list, max_length=20
     )
+    reference_sources: list[dict] = Field(default_factory=list)
+    optimizer_model: str = ""
+    target_provider: str | None = None
 
 
 class RenderIn(BaseModel):
     height: Literal[720, 1080] = 720
     aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
     mute: bool = False
+    subtitle_mode: Literal["burn", "track", "none"] = "burn"
+    revision: int | None = Field(default=None, ge=0)
 
 
 class CharacterToolIn(BaseModel):

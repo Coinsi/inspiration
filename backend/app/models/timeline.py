@@ -1,11 +1,19 @@
-"""timeline:时间线、片段组装、成片(cut)。audio_track 为 EXT-11 占位。"""
+"""Timeline assembly, audio, subtitles and durable editing history."""
+
 import uuid
 
 from sqlalchemy import ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CodedMixin, ProjectScopedMixin, SoftDeleteMixin, TimestampMixin, uuid_pk
+from app.models.base import (
+    Base,
+    CodedMixin,
+    ProjectScopedMixin,
+    SoftDeleteMixin,
+    TimestampMixin,
+    uuid_pk,
+)
 from app.models.enums import CutKind, VersionStatus
 
 
@@ -18,6 +26,9 @@ class Timeline(Base, TimestampMixin, SoftDeleteMixin):
     kind: Mapped[str] = mapped_column(String(16), default="main")  # main/sequence
     status: Mapped[VersionStatus] = mapped_column(String(16), default=VersionStatus.draft)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    subtitles: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    visuals: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
 
 
 class TimelineItem(Base, TimestampMixin):
@@ -53,7 +64,7 @@ class Cut(Base, CodedMixin, TimestampMixin):
 
 
 class AudioTrack(Base, TimestampMixin):
-    """EXT-11 预留:音轨层(对白/配乐/音效)。本期仅占位。"""
+    """Immutable source reference plus placement, gain and fade settings."""
 
     __tablename__ = "audio_track"
 
@@ -64,3 +75,16 @@ class AudioTrack(Base, TimestampMixin):
     kind: Mapped[str] = mapped_column(String(16), default="dialogue")
     blob_hash: Mapped[str | None] = mapped_column(String(128), ForeignKey("blob.hash"))
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class TimelineRevision(Base, TimestampMixin):
+    __tablename__ = "timeline_revision"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    timeline_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("timeline.id"))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+    __table_args__ = (Index("uq_timeline_revision", "timeline_id", "revision", unique=True),)

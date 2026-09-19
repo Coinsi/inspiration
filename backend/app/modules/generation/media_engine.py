@@ -101,13 +101,14 @@ def ffmpeg() -> str:
     return os.environ.get("FFMPEG_BINARY") or imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def run(args: list[str], canceled=lambda: False, timeout=180) -> str:
+def run(args: list[str], canceled=lambda: False, timeout=180, cwd=None) -> str:
     # A file avoids pipe-buffer deadlocks during long encodes.
     with tempfile.TemporaryFile() as log:
         proc = subprocess.Popen(
             [ffmpeg(), "-hide_banner", "-nostdin", "-y", *args],
             stdout=subprocess.DEVNULL,
             stderr=log,
+            cwd=cwd,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         start = time.monotonic()
@@ -130,9 +131,12 @@ def run(args: list[str], canceled=lambda: False, timeout=180) -> str:
 
 
 def render(clips: list[dict], read_blob, options: dict, canceled=lambda: False) -> bytes:
+    from app.modules.media.timing import duration
+
+    duration_ms = duration(clips)
     if not clips or len(clips) > 100:
         raise ValueError("请选择 1–100 段素材")
-    if sum(c["duration_ms"] for c in clips) > 1_800_000:
+    if duration_ms > 1_800_000:
         raise ValueError("时间线最长 30 分钟")
     height = int(options.get("height", 720))
     aspect = options.get("aspect_ratio", "16:9")
@@ -167,7 +171,11 @@ def render(clips: list[dict], read_blob, options: dict, canceled=lambda: False) 
             ]
             if not has_audio:
                 args += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
-            vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,tpad=stop_mode=clone:stop_duration={seconds}"
+            vf = (
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,"
+                f"tpad=stop_mode=clone:stop_duration={seconds}"
+            )
             dest = root / f"clip{i}.mp4"
             args += [
                 "-map",
@@ -200,26 +208,195 @@ def render(clips: list[dict], read_blob, options: dict, canceled=lambda: False) 
             ]
             run(args, canceled, timeout=max(180, seconds * 10))
             paths.append(dest)
-        listing = root / "clips.txt"
-        listing.write_text("\n".join(f"file '{p.name}'" for p in paths), encoding="utf-8")
         output = root / "film.mp4"
-        run(
-            [
-                "-f",
-                "concat",
-                "-safe",
-                "1",
-                "-i",
-                str(listing),
-                "-c",
-                "copy",
-                "-movflags",
-                "+faststart",
-                str(output),
-            ],
+        if any(c.get("transition") for c in clips):
+            join_transitions(paths, clips, output, duration_ms, canceled)
+        else:
+            listing = root / "clips.txt"
+            listing.write_text("\n".join(f"file '{p.name}'" for p in paths), encoding="utf-8")
+            run(
+                [
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "1",
+                    "-i",
+                    str(listing),
+                    "-c",
+                    "copy",
+                    "-movflags",
+                    "+faststart",
+                    str(output),
+                ],
+                canceled,
+            )
+        from app.modules.timeline.visuals import compose
+
+        output = compose(
+            output,
+            root,
+            read_blob,
+            options.get("visuals", []),
+            width,
+            height,
+            duration_ms,
             canceled,
         )
-        return output.read_bytes()
+        return finish_tracks(output, root, read_blob, options, duration_ms, canceled).read_bytes()
+
+
+def join_transitions(paths, clips, output, duration_ms, canceled):
+    from app.modules.media.timing import TRANSITIONS
+
+    args, filters = [], []
+    for i, path in enumerate(paths):
+        args += ["-i", str(path)]
+        filters += [
+            f"[{i}:v:0]setpts=PTS-STARTPTS,fps=24,settb=AVTB[v{i}]",
+            f"[{i}:a:0]asetpts=PTS-STARTPTS[a{i}]",
+        ]
+    video, audio, elapsed = "v0", "a0", clips[0]["duration_ms"] / 1000
+    for i in range(1, len(paths)):
+        transition = clips[i - 1].get("transition")
+        if transition:
+            seconds = transition["duration_ms"] / 1000
+            filters.append(
+                f"[{video}][v{i}]xfade=transition={TRANSITIONS[transition['type']]}:"
+                f"duration={seconds}:offset={elapsed - seconds}[mv{i}]"
+            )
+            filters.append(f"[{audio}][a{i}]acrossfade=d={seconds}:c1=tri:c2=tri[ma{i}]")
+            elapsed -= seconds
+        else:
+            filters.append(f"[{video}][{audio}][v{i}][a{i}]concat=n=2:v=1:a=1[cv{i}][ma{i}]")
+        if not transition:
+            filters.append(f"[cv{i}]fps=24,settb=AVTB[mv{i}]")
+        video, audio = f"mv{i}", f"ma{i}"
+        elapsed += clips[i]["duration_ms"] / 1000
+    args += [
+        "-filter_complex_threads",
+        "1",
+        "-filter_complex",
+        ";".join(filters),
+        "-map",
+        f"[{video}]",
+        "-map",
+        f"[{audio}]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-threads",
+        "2",
+        "-c:a",
+        "aac",
+        "-ar",
+        "48000",
+        "-t",
+        str(duration_ms / 1000),
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+    run(args, canceled, timeout=max(180, duration_ms / 100))
+
+
+def finish_tracks(source, root, read_blob, options, duration_ms, canceled):
+    """Mix real audio and render/mux captions from the immutable submission snapshot."""
+    from app.modules.media.subtitles import export_srt
+
+    audio = (
+        [] if options.get("mute") else [a for a in options.get("audio", []) if not a.get("muted")]
+    )
+    cues = options.get("subtitles", [])
+    # The render policy is separate from cue data in the snapshot.
+    policy = options.get("subtitle_mode", "burn")
+    if policy == "none":
+        cues = []
+    if not audio and not cues:
+        return source
+    if len(audio) > 24:
+        raise ValueError("最多支持24段独立音频")
+    args = ["-protocol_whitelist", "file,pipe", "-i", str(source)]
+    filters = []
+    for n, track in enumerate(audio, 1):
+        if canceled():
+            raise Canceled()
+        path = root / f"audio{n}"
+        path.write_bytes(read_blob(track["blob_hash"]))
+        args += [
+            "-ss",
+            str(track["in_point_ms"] / 1000),
+            "-protocol_whitelist",
+            "file,pipe",
+            "-i",
+            str(path),
+        ]
+        seconds = track["duration_ms"] / 1000
+        chain = (
+            f"[{n}:a:0]atrim=duration={seconds},asetpts=PTS-STARTPTS,aresample=48000,"
+            f"aformat=channel_layouts=stereo,volume={track['gain_db']}dB"
+        )
+        if track["fade_in_ms"]:
+            chain += f",afade=t=in:st=0:d={track['fade_in_ms'] / 1000}"
+        if track["fade_out_ms"]:
+            fade = track["fade_out_ms"] / 1000
+            chain += f",afade=t=out:st={seconds - fade}:d={fade}"
+        chain += f",adelay={track['start_ms']}|{track['start_ms']}[a{n}]"
+        filters.append(chain)
+    if audio:
+        filters.append(
+            "[0:a:0]"
+            + "".join(f"[a{n}]" for n in range(1, len(audio) + 1))
+            + f"amix=inputs={len(audio) + 1}:duration=first:dropout_transition=0:normalize=0,"
+            "alimiter=limit=0.95:level=false:latency=true[mix]"
+        )
+    if cues:
+        (root / "subtitles.srt").write_text(export_srt(cues), encoding="utf-8")
+        if policy == "burn":
+            # Fixed relative filename and cwd avoid Windows drive/filter escaping and user paths.
+            filters.append(
+                "[0:v:0]subtitles=filename=subtitles.srt:force_style='FontSize=22,Outline=1,MarginV=24'[captions]"
+            )
+        elif policy == "track":
+            args += ["-f", "srt", "-i", str(root / "subtitles.srt")]
+    if filters:
+        args += ["-filter_complex", ";".join(filters)]
+    burn = bool(cues and policy == "burn")
+    args += ["-map", "[captions]" if burn else "0:v:0", "-map", "[mix]" if audio else "0:a:0"]
+    if cues and policy == "track":
+        args += [
+            "-map",
+            f"{len(audio) + 1}:s:0",
+            "-c:s",
+            "mov_text",
+            "-metadata:s:s:0",
+            "language=zho",
+            "-disposition:s:0",
+            "default",
+        ]
+    args += ["-c:v", "libx264" if burn else "copy"]
+    if burn:
+        args += ["-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-threads", "2"]
+    output = root / "film-tracks.mp4"
+    args += [
+        "-c:a",
+        "aac",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-t",
+        str(duration_ms / 1000),
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+    run(args, canceled, timeout=max(180, duration_ms / 100), cwd=root)
+    return output
 
 
 def mock_image(index=0) -> bytes:

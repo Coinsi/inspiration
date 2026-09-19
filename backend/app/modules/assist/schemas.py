@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.modules.skill.schemas import SkillUse
 
 
 class CreateChatIn(BaseModel):
@@ -25,6 +26,7 @@ class MessageOut(BaseModel):
     content: str = ""
     created_at: str | None = None
     proposal: ProposalOut | None = None
+    skills: list[dict] = Field(default_factory=list)
 
 
 class ChatOut(BaseModel):
@@ -43,6 +45,7 @@ class ChatDetailOut(ChatOut):
 
 class PostMessageIn(BaseModel):
     content: str
+    skills: list[SkillUse] = Field(default_factory=list, max_length=4)
     engine: str | None = None  # 可选:强制 mock / cloud_llm
 
 

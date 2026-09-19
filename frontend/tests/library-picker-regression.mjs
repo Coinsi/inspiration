@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+assert.equal(process.env.TEST_ISOLATED_PREVIEW, '1');
+const base = process.env.APP_URL, out = process.env.ARTIFACT_DIR;
+await mkdir(out, { recursive: true });
+const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
+const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const page = await context.newPage(), errors = [], requests = [];
+page.on('pageerror', e => errors.push(e.message));
+page.on('request', r => requests.push(r.url()));
+try {
+  const login = await context.request.post(`${base}/api/v1/auth/login`, { data: { username: 'demo', password: 'demo1234' } });
+  assert.ok(login.ok());
+  const token = (await login.json()).access_token;
+  await context.addInitScript(t => { localStorage.setItem('inspiration_token', t); localStorage.setItem('inspiration_lang', 'zh'); }, token);
+  const root = `/projects/${process.env.QA_PROJECT}`, versionId = process.env.QA_VERSION;
+  const get = async path => { const r = await context.request.get(`${base}/api/v1${path}`, { headers: { Authorization: `Bearer ${token}` } }); assert.ok(r.ok(), await r.text()); return r.json(); };
+  const actual = await get(root + `/library/versions/${versionId}`);
+  assert.equal(actual.status, 'ready');
+  // First verify the real catalog and deep link before substituting scale/failure responses.
+  const realCatalog = await get(root + '/library/version-catalog');
+  assert.ok(realCatalog.items.some(v => v.id === actual.id));
+  await page.goto(`${base}${root}/transcriptions?version=${versionId}`);
+  const picker = page.getByLabel('转写视频版本', { exact: true });
+  await page.getByRole('button', { name: '开始转写', exact: true }).waitFor();
+  await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === '开始转写')?.disabled);
+  assert.equal(await picker.inputValue(), actual.id);
+  await page.getByLabel('字幕 1 内容', { exact: true }).waitFor();
+  // Controlled 51-version catalog: one exact real version is outside the first two pages.
+  const rows = [...Array.from({ length: 50 }, (_, i) => ({ ...actual, id: `scale-version-${i}`, name: `分页样本 ${i + 1}`, ordinal: i + 1 })), actual];
+  let failed = true;
+  await page.route(`**/api/v1${root}/library/version-catalog?*`, async route => {
+    const url = new URL(route.request().url()), q = url.searchParams.get('query'), offset = Number(url.searchParams.get('offset'));
+    if (q === '恢复' && failed) return route.fulfill({ status: 503, json: { error: { message: 'controlled catalog failure' } } });
+    if (q === '迟到') await new Promise(r => setTimeout(r, 900));
+    const items = q === '恢复' ? [actual] : rows.filter(v => !q || v.name.includes(q));
+    await route.fulfill({ json: { items: items.slice(offset, offset + 24), total: items.length, offset, limit: 24 } });
+  });
+  await page.reload();
+  await page.getByText('1–24 / 51 个版本', { exact: true }).waitFor();
+  assert.equal(await picker.inputValue(), actual.id);
+  assert.equal(await picker.locator('option').count(), 26); // Placeholder, 24 results, pinned choice.
+  await page.getByLabel('转写视频版本：下一页', { exact: true }).click();
+  await page.getByText('25–48 / 51 个版本', { exact: true }).waitFor();
+  assert.equal(await picker.inputValue(), actual.id);
+  await page.getByLabel('转写视频版本：下一页', { exact: true }).click();
+  await page.getByText('49–51 / 51 个版本', { exact: true }).waitFor();
+  assert.equal(await picker.locator(`option[value="${actual.id}"]`).count(), 1);
+  const search = page.getByLabel('转写视频版本：搜索', { exact: true });
+  await search.fill('迟到');
+  await page.waitForRequest(r => new URL(r.url()).searchParams.get('query') === '迟到');
+  await search.fill(actual.name);
+  await page.getByText('1–1 / 1 个版本', { exact: true }).waitFor();
+  await page.waitForTimeout(1000);
+  assert.equal(await picker.inputValue(), actual.id);
+  assert.equal(await picker.locator('option').count(), 2);
+  await search.fill('恢复');
+  await page.getByText('视频列表读取失败。', { exact: false }).waitFor({ timeout: 15000 });
+  failed = false;
+  await page.getByRole('button', { name: '重试', exact: true }).click();
+  await page.getByText('1–1 / 1 个版本', { exact: true }).waitFor();
+  await search.fill('没有这个名称');
+  await page.getByText('没有匹配的视频', { exact: true }).waitFor();
+  assert.equal(await picker.inputValue(), actual.id);
+  await page.screenshot({ path: `${out}/transcription-picker-dark.png`, animations: 'disabled' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.locator('main').evaluate(e => e.scrollWidth <= e.clientWidth));
+  await page.screenshot({ path: `${out}/transcription-picker-mobile.png`, fullPage: true, animations: 'disabled' });
+  await page.goto(`${base}${root}/evidence?version=${versionId}&start=100&end=1000`);
+  const evidencePicker = page.getByLabel('证据视频版本', { exact: true });
+  await page.getByText('1–24 / 51 个版本', { exact: true }).waitFor();
+  assert.equal(await evidencePicker.inputValue(), actual.id);
+  await page.getByLabel('实际观察', { exact: true }).fill('只读选择器回归，不保存此观察。');
+  assert.ok(await page.getByRole('button', { name: '保存观察', exact: true }).isEnabled());
+  await page.evaluate(() => { document.documentElement.classList.remove('dark'); document.documentElement.classList.add('light'); });
+  assert.ok(await page.locator('main').evaluate(e => e.scrollWidth <= e.clientWidth));
+  await page.screenshot({ path: `${out}/evidence-picker-mobile-light.png`, fullPage: true, animations: 'disabled' });
+  assert.equal(requests.filter(url => new URL(url).pathname === '/api/v1' + root + '/library').length, 0);
+  assert.deepEqual(errors, []);
+  await writeFile(`${out}/picker-report.json`, JSON.stringify({ passed: true, project: process.env.QA_PROJECT, checks: ['Real catalog, exact source and existing transcript loaded', 'Controlled 51-version pagination and fixed off-page selection', 'Search response race, error retry and empty result preserve selected version', 'Evidence form resolves original duration independently', '390px layouts and no whole-library request'], errors }, null, 2));
+  console.log('Library version picker regression passed');
+} catch (e) { await page.screenshot({ path: `${out}/failure.png`, fullPage: true }); throw e; }
+finally { await browser.close(); }

@@ -55,6 +55,7 @@ class JimengProvider(GenerationProvider):
         self._require()
         # TODO: 按即梦/火山引擎 API 组装请求体与鉴权签名
         body = {
+            **({"model": self.config["model"]} if self.config.get("model") else {}),
             "prompt": req.prompt,
             "negative_prompt": req.negative,
             "type": req.request_type,

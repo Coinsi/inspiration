@@ -19,7 +19,7 @@ _bearer = HTTPBearer(auto_error=False)
 
 def get_current_user(
     cred: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> User:
     if cred is None:
         raise Unauthorized("缺少认证令牌")
@@ -50,7 +50,7 @@ class ProjectContext:
 def get_project_context(
     project_id: uuid.UUID = Path(..., alias="project_id"),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> ProjectContext:
     project = db.get(Project, project_id)
     if project is None or project.deleted_at is not None:

@@ -1,3 +1,5 @@
+import { useWorkspaceScroll } from "@/lib/useWorkspaceScroll";
+import { MaterialTabs } from "@/components/MaterialTabs";
 import { MediaImage } from "@/components/MediaImage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,7 +11,6 @@ import {
   LayoutGrid,
   List,
   Lock,
-  Pencil,
   Plus,
   Share2,
   Sparkles,
@@ -17,7 +18,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AssetPreview } from "@/components/AssetPreview";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import AssetGraph from "@/components/AssetGraph";
 import { Button } from "@/components/ui/button";
@@ -32,56 +34,117 @@ import { api, ApiError, ASSET_TYPES, blobUrl, type Asset } from "@/lib/api";
 
 export default function Assets() {
   const { projectId } = useParams();
+  return <AssetsContent key={projectId} />;
+}
+
+function AssetsContent() {
+  const { projectId } = useParams();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
+  const zh = lang === "zh";
+  const [preview, setPreview] = useState<Asset | null>(null);
   const base = `/projects/${projectId}`;
-  const [filter, setFilter] = useState("");
-  const [q, setQ] = useState("");
-  const [tag, setTag] = useState("");
+  const [filter, setFilter] = usePersistentState(
+    `assets.type.${projectId}`,
+    "",
+  );
+  const [q, setQ] = usePersistentState(`assets.search.${projectId}`, "");
+  const [tag, setTag] = usePersistentState(`assets.tag.${projectId}`, "");
+  const [search, setSearch] = useState({ q: q.trim(), tag: tag.trim() });
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setSearch({ q: q.trim(), tag: tag.trim() }),
+      250,
+    );
+    return () => clearTimeout(timer);
+  }, [q, tag]);
+  const searchPending = q.trim() !== search.q || tag.trim() !== search.tag;
   // 批量选择模式
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // 视图:卡片 / 图谱 / 列表
-  const [view, setView] = usePersistentState<"cards" | "graph" | "list">(`assets.view.${projectId}`, "cards");
-  // 列表排序
-  const [sortKey, setSortKey] = useState<"name" | "type" | "ref_count" | "gen_count" | "shot_count">(
-    "shot_count",
+  const [view, setView] = usePersistentState<"cards" | "graph" | "list">(
+    `assets.view.${projectId}`,
+    "cards",
   );
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // 列表排序
+  const [sortKey, setSortKey] = usePersistentState<
+    "name" | "type" | "ref_count" | "gen_count" | "shot_count"
+  >(`assets.sort.${projectId}`, "shot_count");
+  const [sortDir, setSortDir] = usePersistentState<"asc" | "desc">(
+    `assets.sortDirection.${projectId}`,
+    "desc",
+  );
 
   const {
     data: assets,
     isLoading,
     isError,
+    refetch,
   } = useQuery({
-    queryKey: ["assets", projectId, filter, q, tag],
+    queryKey: ["assets", projectId, filter, search.q, search.tag],
     queryFn: () => {
       const params = new URLSearchParams();
       if (filter) params.set("type", filter);
-      if (q) params.set("q", q);
-      if (tag) params.set("tag", tag);
+      if (search.q) params.set("q", search.q);
+      if (search.tag) params.set("tag", search.tag);
       return api.get<Asset[]>(`${base}/assets?${params.toString()}`);
     },
   });
 
+  const [page, setPage] = usePersistentState(`assets.page.${projectId}`, 0);
+  const filterScope = `${filter}\n${q}\n${tag}\n${sortKey}\n${sortDir}`;
+  const previousScope = useRef(filterScope);
+  useEffect(() => {
+    if (previousScope.current !== filterScope) {
+      previousScope.current = filterScope;
+      setPage(0);
+    }
+  }, [filterScope, setPage]);
+  useWorkspaceScroll(
+    `assets.${projectId}.${view}.${page}.${filter}.${search.q}.${search.tag}`,
+    !!assets && !isLoading,
+  );
+  useEffect(() => {
+    if (assets && page * 48 >= assets.length && page > 0)
+      setPage(Math.max(0, Math.ceil(assets.length / 48) - 1));
+  }, [assets, page, setPage]);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState("character");
   const create = useMutation({
-    mutationFn: () => api.post<Asset>(`${base}/assets`, { type, name, metadata: {}, tags: [] }),
+    mutationFn: () =>
+      api.post<Asset>(`${base}/assets`, {
+        type,
+        name: name.trim(),
+        metadata: {},
+        tags: [],
+      }),
     onSuccess: () => {
       setName("");
       setCreateOpen(false);
       toast.push(tr("toast.assetCreated"), "success");
       void qc.invalidateQueries({ queryKey: ["assets", projectId] });
     },
-    onError: (e) => toast.push(e instanceof ApiError ? e.message : tr("toast.createFailed"), "error"),
+    onError: (e) =>
+      toast.push(
+        e instanceof ApiError ? e.message : tr("toast.createFailed"),
+        "error",
+      ),
   });
 
   const selectable = (assets ?? []).filter((a) => a.status !== "locked");
+  const visibleSelected = new Set(
+    selectable.filter((a) => selected.has(a.id)).map((a) => a.id),
+  );
+  const allSelected =
+    selectable.length > 0 && selectable.every((a) => visibleSelected.has(a.id));
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filter, q, tag]);
   const toggle = (id: string) =>
     setSelected((s) => {
       const next = new Set(s);
@@ -94,10 +157,23 @@ export default function Assets() {
     setSelected(new Set());
   };
   const batchDelete = useMutation({
-    mutationFn: () =>
-      api.post<{ deleted: number; skipped: number }>(`${base}/assets/batch-delete`, { ids: [...selected] }),
+    mutationFn: (ids: string[]) =>
+      api.post<{ deleted: number; skipped: number }>(
+        `${base}/assets/batch-delete`,
+        { ids },
+      ),
     onSuccess: (r) => {
-      toast.push(tr("assets.batchDeleted").replace("{n}", String(r.deleted)), "success");
+      toast.push(
+        tr("assets.batchDeleted").replace("{n}", String(r.deleted)),
+        "success",
+      );
+      if (r.skipped)
+        toast.push(
+          zh
+            ? `${r.skipped} 项未删除，请检查锁定状态或引用关系`
+            : `${r.skipped} items skipped; check locks or references`,
+          "info",
+        );
       exitSelecting();
       void qc.invalidateQueries({ queryKey: ["assets", projectId] });
     },
@@ -125,123 +201,178 @@ export default function Assets() {
   };
 
   return (
-    <div className="studio-page">
+    <div className="studio-page material-workspace">
+      <MaterialTabs projectId={projectId!} />
       {/* 头部 */}
       <div className="page-heading mb-5">
         <div>
           <h1 className="text-xl font-semibold">{tr("assets.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            {tr("assets.subtitle")}（{assets?.length ?? 0}）
+            {zh
+              ? "管理角色、场景与道具，让参考画面衔接到创作。"
+              : "Organize characters, scenes and props for your next creation."}
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          {tr("common.new")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            {tr("common.new")}
+          </Button>
+        </div>
       </div>
       <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-border pb-4">
         <div className="flex flex-wrap items-center gap-2">
           {selecting ? (
             <>
               <span className="text-sm text-muted-foreground">
-                {tr("assets.selected").replace("{n}", String(selected.size))}
+                {tr("assets.selected").replace(
+                  "{n}",
+                  String(visibleSelected.size),
+                )}
               </span>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() =>
                   setSelected(
-                    selected.size === selectable.length ? new Set() : new Set(selectable.map((a) => a.id)),
+                    allSelected
+                      ? new Set()
+                      : new Set(selectable.map((a) => a.id)),
                   )
                 }
               >
-                {selected.size === selectable.length ? tr("assets.unselectAll") : tr("assets.selectAll")}
+                {allSelected
+                  ? tr("assets.unselectAll")
+                  : tr("assets.selectAll")}
               </Button>
               <Button
                 size="sm"
                 className="bg-danger text-white hover:bg-danger/90"
-                disabled={selected.size === 0 || batchDelete.isPending}
+                disabled={
+                  visibleSelected.size === 0 ||
+                  batchDelete.isPending ||
+                  isLoading ||
+                  isError ||
+                  searchPending
+                }
                 onClick={async () => {
+                  const ids = [...visibleSelected];
                   if (
                     await confirm({
                       title: tr("assets.deleteSelected"),
-                      message: tr("assets.batchDeleteConfirm").replace("{n}", String(selected.size)),
+                      message: tr("assets.batchDeleteConfirm").replace(
+                        "{n}",
+                        String(ids.length),
+                      ),
                       confirmText: tr("common.delete"),
                       danger: true,
                     })
                   ) {
-                    batchDelete.mutate();
+                    batchDelete.mutate(ids);
                   }
                 }}
               >
-                <Trash2 className="h-4 w-4 mr-1" /> {tr("assets.deleteSelected")}
-                {selected.size > 0 && ` (${selected.size})`}
+                <Trash2 className="h-4 w-4 mr-1" />{" "}
+                {tr("assets.deleteSelected")}
+                {visibleSelected.size > 0 && ` (${visibleSelected.size})`}
               </Button>
-              <Button variant="ghost" size="icon" title={tr("common.cancel")} onClick={exitSelecting}>
+              <Button
+                variant="ghost"
+                size="icon"
+                title={tr("common.cancel")}
+                onClick={exitSelecting}
+              >
                 <X className="h-4 w-4" />
               </Button>
             </>
           ) : (
             <>
-              {/* 视图切换:卡片 / 图谱 / 列表 */}
-              <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
+              <Input
+                aria-label={tr("assets.search")}
+                placeholder={zh ? "搜索角色、场景或道具…" : "Search materials…"}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className="w-64 max-w-full"
+              />
+              <div className="flex rounded-lg border bg-card p-0.5">
                 {(
                   [
-                    { key: "cards", icon: LayoutGrid, label: tr("assets.viewCards") },
-                    { key: "graph", icon: Share2, label: tr("assets.viewGraph") },
+                    {
+                      key: "cards",
+                      icon: LayoutGrid,
+                      label: tr("assets.viewCards"),
+                    },
                     { key: "list", icon: List, label: tr("assets.viewList") },
+                    {
+                      key: "graph",
+                      icon: Share2,
+                      label: tr("assets.viewGraph"),
+                    },
                   ] as const
                 ).map((v) => (
                   <button
                     key={v.key}
-                    onClick={() => setView(v.key)}
+                    aria-label={v.label}
                     title={v.label}
                     aria-pressed={view === v.key}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors ${
-                      view === v.key
-                        ? "bg-primary/15 text-primary font-medium"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
+                    onClick={() => setView(v.key)}
+                    className={`p-2 rounded-md ${view === v.key ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}
                   >
-                    <v.icon className="h-3.5 w-3.5" /> {v.label}
+                    <v.icon size={16} />
                   </button>
                 ))}
               </div>
-              <Input
-                aria-label={tr("assets.search")}
-                placeholder={tr("assets.search")}
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className="w-40"
-              />
-              <Input
-                aria-label={tr("assets.filterTag")}
-                placeholder={tr("assets.filterTag")}
-                value={tag}
-                onChange={(e) => setTag(e.target.value)}
-                className="w-32"
-              />
-              {view !== "graph" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelecting(true)}
-                  disabled={!assets?.length}
-                >
-                  <CheckSquare className="h-4 w-4 mr-1" /> {tr("assets.batch")}
-                </Button>
-              )}
-              <Link to={`${base}/assets/trash`}>
-                <Button variant="outline" size="icon" title={tr("assets.trash")}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </Link>
+              <details className="relative">
+                <summary className="cursor-pointer rounded-lg border px-3 py-2 text-sm">
+                  {zh ? "筛选与管理" : "Filter & manage"}
+                  {tag ? " · 1" : ""}
+                </summary>
+                <div className="absolute top-full right-0 mt-2 z-20 w-60 rounded-xl border bg-card shadow-xl p-4 space-y-3">
+                  <Input
+                    aria-label={tr("assets.filterTag")}
+                    placeholder={tr("assets.filterTag")}
+                    value={tag}
+                    onChange={(e) => setTag(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelecting(true)}
+                    disabled={
+                      !selectable.length ||
+                      isError ||
+                      isLoading ||
+                      searchPending
+                    }
+                  >
+                    <CheckSquare size={15} />
+                    {tr("assets.batch")}
+                  </Button>
+                  <Link
+                    className="studio-link w-full"
+                    to={`${base}/assets/import`}
+                  >
+                    {zh ? "导入外部目录" : "Import catalog"}
+                  </Link>
+                  <Link
+                    className="studio-link w-full"
+                    to={`${base}/assets/trash`}
+                  >
+                    {tr("assets.trash")}
+                  </Link>
+                </div>
+              </details>
             </>
           )}
         </div>
       </div>
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={tr("common.new")} width={480}>
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title={tr("common.new")}
+        width={480}
+      >
         <form
           className="space-y-4"
           onSubmit={(e) => {
@@ -273,7 +404,11 @@ export default function Assets() {
             />
           </label>
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreateOpen(false)}
+            >
               {tr("common.cancel")}
             </Button>
             <Button type="submit" disabled={!name.trim() || create.isPending}>
@@ -285,26 +420,133 @@ export default function Assets() {
 
       {/* 分面 */}
       <div className="flex gap-2 flex-wrap mb-5">
-        <Chip active={!filter} onClick={() => setFilter("")}>
+        <Chip
+          active={!filter}
+          onClick={() => {
+            setFilter("");
+            exitSelecting();
+          }}
+        >
           {tr("assets.all")}
         </Chip>
         {ASSET_TYPES.map((t) => (
-          <Chip key={t} active={filter === t} onClick={() => setFilter(t)}>
+          <Chip
+            key={t}
+            active={filter === t}
+            onClick={() => {
+              setFilter(t);
+              exitSelecting();
+            }}
+          >
             {tr(`asset.${t}`)}
           </Chip>
         ))}
       </div>
 
       {/* 海报墙 */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span role="status">
+          {isLoading || searchPending
+            ? zh
+              ? "正在查找素材…"
+              : "Finding assets…"
+            : isError
+              ? zh
+                ? "素材数量暂不可用"
+                : "Count unavailable"
+              : zh
+                ? `当前结果 ${assets?.length ?? 0} 项`
+                : `${assets?.length ?? 0} results`}
+        </span>
+        <div className="flex items-center gap-2">
+          {(q || tag || filter) && (
+            <button
+              className="studio-link"
+              onClick={() => {
+                setQ("");
+                setTag("");
+                setFilter("");
+                exitSelecting();
+              }}
+            >
+              {zh ? "清除筛选" : "Clear filters"}
+            </button>
+          )}
+          {view !== "graph" && (
+            <select
+              aria-label={zh ? "素材排序" : "Sort assets"}
+              className="h-8 max-w-full rounded-md border bg-bg px-2"
+              value={`${sortKey}.${sortDir}`}
+              onChange={(e) => {
+                const [k, d] = e.target.value.split(".");
+                setSortKey(k as typeof sortKey);
+                setSortDir(d as typeof sortDir);
+              }}
+            >
+              <option value="shot_count.desc">
+                {zh ? "镜头使用最多" : "Most used in shots"}
+              </option>
+              <option value="gen_count.desc">
+                {zh ? "生成版本最多" : "Most generations"}
+              </option>
+              <option value="ref_count.desc">
+                {zh ? "参考图片最多" : "Most references"}
+              </option>
+              <option value="name.asc">
+                {zh ? "名称 A → Z" : "Name A → Z"}
+              </option>
+              <option value="name.desc">
+                {zh ? "名称 Z → A" : "Name Z → A"}
+              </option>
+              <option value="shot_count.asc">
+                {zh ? "镜头使用最少" : "Least used in shots"}
+              </option>
+              <option value="gen_count.asc">
+                {zh ? "生成版本最少" : "Fewest generations"}
+              </option>
+              <option value="ref_count.asc">
+                {zh ? "参考图片最少" : "Fewest references"}
+              </option>
+              <option value="type.asc">
+                {zh ? "类型 A → Z" : "Type A → Z"}
+              </option>
+              <option value="type.desc">
+                {zh ? "类型 Z → A" : "Type Z → A"}
+              </option>
+            </select>
+          )}
+        </div>
+      </div>
+      {preview && (
+        <AssetPreview
+          projectId={projectId!}
+          asset={preview}
+          onClose={() => setPreview(null)}
+        />
+      )}
       {isError ? (
         <div role="alert" className="studio-empty">
           {tr("common.loadFailed")}
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            {zh ? "重试" : "Retry"}
+          </Button>
         </div>
       ) : isLoading ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-44 rounded-lg" />
           ))}
+        </div>
+      ) : !assets?.length ? (
+        <div className="studio-empty">
+          <ImageOff className="h-8 w-8" />
+          <p>
+            {q || tag || filter
+              ? zh
+                ? "没有符合筛选的素材"
+                : "No matching assets"
+              : tr("assets.empty")}
+          </p>
         </div>
       ) : view === "graph" ? (
         <AssetGraph
@@ -314,19 +556,19 @@ export default function Assets() {
         />
       ) : view === "list" ? (
         <ListView
-          assets={sortedAssets}
+          assets={sortedAssets.slice(page * 48, (page + 1) * 48)}
           projectId={projectId!}
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={toggleSort}
           selecting={selecting}
-          selected={selected}
+          selected={visibleSelected}
           onToggle={toggle}
-          onOpen={(id) => navigate(`${base}/assets/${id}`)}
+          onOpen={(id) => setPreview(assets.find((a) => a.id === id) ?? null)}
         />
       ) : assets && assets.length > 0 ? (
-        <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {assets.map((a) => (
+        <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
+          {sortedAssets.slice(page * 48, (page + 1) * 48).map((a) => (
             <article
               key={a.id}
               className={`group flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card transition-colors ${selecting && selected.has(a.id) ? "border-primary ring-1 ring-primary" : "border-border hover:border-border-strong"} ${selecting && a.status === "locked" ? "opacity-50" : ""}`}
@@ -336,18 +578,36 @@ export default function Assets() {
                 aria-label={`${a.name} · ${tr(`asset.${a.type}`)}`}
                 aria-disabled={selecting && a.status === "locked"}
                 onClick={(e) => {
+                  e.preventDefault();
                   if (selecting) {
-                    e.preventDefault();
                     if (a.status !== "locked") toggle(a.id);
-                  }
+                  } else setPreview(a);
                 }}
               >
                 {/* 资产画面与真实的加载状态 */}
-                <div className="relative aspect-[4/3] overflow-hidden bg-elevated">
-                  <MediaImage
-                    src={a.representative_blob_hash ? blobUrl(projectId!, a.representative_blob_hash) : null}
-                    alt={a.name}
-                  />
+                <div
+                  className={`relative overflow-hidden ${a.representative_blob_hash ? "aspect-[4/3] bg-elevated" : "h-20 bg-primary/5"}`}
+                >
+                  {a.representative_blob_hash ? (
+                    <MediaImage
+                      src={
+                        a.representative_blob_hash
+                          ? blobUrl(projectId!, a.representative_blob_hash)
+                          : null
+                      }
+                      alt={a.name}
+                    />
+                  ) : (
+                    <div className="h-full px-4 flex items-center gap-3 text-primary/70">
+                      <span className="text-3xl font-medium">
+                        {a.name.slice(0, 1)}
+                      </span>
+                      <span className="text-xs">
+                        {tr(`asset.${a.type}`)} ·{" "}
+                        {zh ? "待创作画面" : "Awaiting artwork"}
+                      </span>
+                    </div>
+                  )}
                   {selecting && a.status !== "locked" && (
                     <span
                       className={`absolute top-2.5 right-2.5 grid h-7 w-7 place-items-center rounded-lg  transition-colors ${
@@ -373,7 +633,8 @@ export default function Assets() {
                 <div className="px-4 pt-3">
                   <div className="truncate text-sm font-semibold">{a.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {tr(`asset.${a.type}`)} · <span className="font-code">{a.code}</span>
+                    {tr(`asset.${a.type}`)} ·{" "}
+                    <span className="font-code">{a.code}</span>
                   </div>
                 </div>
               </Link>
@@ -392,7 +653,10 @@ export default function Assets() {
                   <Sparkles className="h-3.5 w-3.5" /> {a.gen_count ?? 0}
                 </span>
                 {a.tags?.slice(0, 2).map((tg) => (
-                  <span key={tg} className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  <span
+                    key={tg}
+                    className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground"
+                  >
                     #{tg}
                   </span>
                 ))}
@@ -405,30 +669,14 @@ export default function Assets() {
                 </p>
               )}
 
-              {/* 卡底操作:两颗独立按钮 */}
               {!selecting && (
-                <div className="mt-auto flex gap-2 px-4 pb-4 pt-3">
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      navigate(`${base}/assets/${a.id}?tab=gen`);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border py-1.5 text-xs text-foreground/85 transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
-                  >
-                    <Sparkles className="h-4 w-4" /> {tr("assets.genImage")}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      navigate(`${base}/assets/${a.id}`);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border py-1.5 text-xs text-foreground/85 transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
-                  >
-                    <Pencil className="h-4 w-4" /> {tr("assets.edit")}
-                  </button>
-                </div>
+                <button
+                  aria-label={`${zh ? "快速预览" : "Quick preview"} ${a.name}`}
+                  onClick={() => setPreview(a)}
+                  className="text-left px-4 py-4 text-sm text-primary hover:bg-primary/5"
+                >
+                  {zh ? "查看素材" : "View material"} →
+                </button>
               )}
             </article>
           ))}
@@ -437,6 +685,27 @@ export default function Assets() {
         <div className="text-center py-20 text-muted-foreground">
           <ImageOff className="h-10 w-10 mx-auto mb-3 opacity-50" />
           <p className="text-sm">{tr("assets.empty")}</p>
+        </div>
+      )}
+      {view !== "graph" && sortedAssets.length > 48 && (
+        <div className="flex justify-center items-center gap-4 py-4">
+          <Button
+            variant="outline"
+            disabled={page === 0}
+            onClick={() => setPage(page - 1)}
+          >
+            {zh ? "上一页" : "Previous"}
+          </Button>
+          <span className="text-sm">
+            {page + 1} / {Math.ceil(sortedAssets.length / 48)}
+          </span>
+          <Button
+            variant="outline"
+            disabled={(page + 1) * 48 >= sortedAssets.length}
+            onClick={() => setPage(page + 1)}
+          >
+            {zh ? "下一页" : "Next"}
+          </Button>
         </div>
       )}
     </div>
@@ -459,7 +728,9 @@ function ListView({
   projectId: string;
   sortKey: string;
   sortDir: "asc" | "desc";
-  onSort: (k: "name" | "type" | "ref_count" | "gen_count" | "shot_count") => void;
+  onSort: (
+    k: "name" | "type" | "ref_count" | "gen_count" | "shot_count",
+  ) => void;
   selecting: boolean;
   selected: Set<string>;
   onToggle: (id: string) => void;
@@ -477,7 +748,13 @@ function ListView({
   }) => (
     <th
       tabIndex={k ? 0 : undefined}
-      aria-sort={k && sortKey === k ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+      aria-sort={
+        k && sortKey === k
+          ? sortDir === "asc"
+            ? "ascending"
+            : "descending"
+          : undefined
+      }
       onKeyDown={(e) => {
         if (k && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
@@ -489,17 +766,27 @@ function ListView({
         k ? "cursor-pointer select-none hover:text-foreground" : ""
       }`}
     >
-      <span className={`inline-flex items-center gap-0.5 ${right ? "justify-end" : ""}`}>
+      <span
+        className={`inline-flex items-center gap-0.5 ${right ? "justify-end" : ""}`}
+      >
         {children}
         {k &&
           sortKey === k &&
-          (sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+          (sortDir === "asc" ? (
+            <ChevronUp className="h-3 w-3" />
+          ) : (
+            <ChevronDown className="h-3 w-3" />
+          ))}
       </span>
     </th>
   );
 
   if (assets.length === 0) {
-    return <p className="py-16 text-center text-sm text-muted-foreground">{tr("assets.empty")}</p>;
+    return (
+      <p className="py-16 text-center text-sm text-muted-foreground">
+        {tr("assets.empty")}
+      </p>
+    );
   }
 
   return (
@@ -535,7 +822,9 @@ function ListView({
                     selecting ? !locked && onToggle(a.id) : onOpen(a.id);
                   }
                 }}
-                onClick={() => (selecting ? !locked && onToggle(a.id) : onOpen(a.id))}
+                onClick={() =>
+                  selecting ? !locked && onToggle(a.id) : onOpen(a.id)
+                }
                 className={`cursor-pointer transition-colors hover:bg-muted/60 ${
                   selecting && selected.has(a.id) ? "bg-primary/10" : ""
                 } ${selecting && locked ? "opacity-50" : ""}`}
@@ -568,13 +857,19 @@ function ListView({
                     <span className="min-w-0">
                       <span className="flex items-center gap-1.5 font-medium">
                         <span className="truncate">{a.name}</span>
-                        {locked && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                        {locked && (
+                          <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        )}
                       </span>
-                      <span className="font-code text-[11px] text-faint">{a.code}</span>
+                      <span className="font-code text-[11px] text-faint">
+                        {a.code}
+                      </span>
                     </span>
                   </span>
                 </td>
-                <td className="px-3 py-2 text-muted-foreground">{tr(`asset.${a.type}`)}</td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {tr(`asset.${a.type}`)}
+                </td>
                 <td className="px-3 py-2">
                   <span className="flex flex-wrap gap-1">
                     {a.tags?.slice(0, 3).map((tg) => (
@@ -587,9 +882,15 @@ function ListView({
                     ))}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right font-code text-muted-foreground">{a.ref_count ?? 0}</td>
-                <td className="px-3 py-2 text-right font-code text-muted-foreground">{a.gen_count ?? 0}</td>
-                <td className="px-3 py-2 text-right font-code">{a.shot_count ?? 0}</td>
+                <td className="px-3 py-2 text-right font-code text-muted-foreground">
+                  {a.ref_count ?? 0}
+                </td>
+                <td className="px-3 py-2 text-right font-code text-muted-foreground">
+                  {a.gen_count ?? 0}
+                </td>
+                <td className="px-3 py-2 text-right font-code">
+                  {a.shot_count ?? 0}
+                </td>
               </tr>
             );
           })}

@@ -4,12 +4,13 @@ Revision ID: 0001_initial
 Revises:
 Create Date: 2026-06-05
 """
+
+import re
 from collections.abc import Sequence
+from pathlib import Path
 
 from alembic import op
-
 from app.core.config import settings
-from app.models import Base
 
 revision: str = "0001_initial"
 down_revision: str | None = None
@@ -18,14 +19,19 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
     op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')  # gen_random_uuid()
     if settings.enable_pgvector:  # EXT-01:相似检索预留,未启用则不依赖该扩展
         op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    # 由模型元数据一次性建全部表
-    Base.metadata.create_all(bind=bind)
+    # Frozen DDL prevents later model additions from being created twice on fresh installs.
+    schema = Path(__file__).resolve().parents[1] / "initial_schema.sql"
+    for statement in schema.read_text(encoding="utf-8").split("-- statement"):
+        op.execute(statement.strip())
+    if settings.enable_pgvector:
+        op.execute("ALTER TABLE asset ADD COLUMN embedding vector(512)")
+        op.execute("ALTER TABLE generation ADD COLUMN embedding vector(512)")
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind)
+    schema = Path(__file__).resolve().parents[1] / "initial_schema.sql"
+    for name in reversed(re.findall(r"CREATE TABLE (\S+) \(", schema.read_text(encoding="utf-8"))):
+        op.drop_table(name.strip('"'))

@@ -1,0 +1,420 @@
+/* Shared screenplay library and writing workspace. */
+.writing-library {
+  max-width: 1440px;
+  margin: auto;
+  padding: 38px 40px 60px;
+}
+.writing-eyebrow {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: hsl(var(--muted));
+}
+.writing-library-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+.writing-library-header h1 {
+  margin: 8px 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.writing-library-header p {
+  color: hsl(var(--muted));
+  font-size: 13px;
+}
+.writing-library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  margin-bottom: 16px;
+  border-top: 1px solid hsl(var(--border));
+}
+.writing-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  max-width: 420px;
+  min-width: 180px;
+  color: hsl(var(--muted));
+  padding: 10px 13px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+}
+.writing-search input {
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  color: hsl(var(--fg));
+  font-size: 13px;
+}
+.writing-library-toolbar select {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 12px;
+}
+.writing-result-count {
+  margin-left: auto;
+  color: hsl(var(--muted));
+  font-size: 12px;
+}
+.writing-script-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+}
+.writing-script-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  background: hsl(var(--card));
+  transition: border-color 0.15s;
+}
+.writing-script-card:hover,
+.writing-script-card:focus-within {
+  border-color: hsl(var(--primary) / 0.65);
+}
+.writing-script-link {
+  display: block;
+}
+.writing-script-cover {
+  min-height: 235px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: linear-gradient(
+    140deg,
+    hsl(var(--primary) / 0.08),
+    transparent 65%
+  );
+}
+.writing-script-cover > svg {
+  margin: 25px 0 15px;
+  color: hsl(var(--primary));
+}
+.writing-script-cover h2 {
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.writing-script-cover > span:last-child {
+  font-size: 12px;
+  color: hsl(var(--muted));
+  margin-top: 8px;
+}
+.writing-script-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  font-size: 12px;
+  border-top: 1px solid hsl(var(--border));
+  color: hsl(var(--muted));
+}
+.writing-script-meta span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.writing-script-meta > svg {
+  margin-left: auto;
+}
+.writing-script-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 14px 20px;
+  color: hsl(var(--faint));
+  font-size: 11px;
+}
+.writing-script-card footer button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+.writing-script-card footer button:hover {
+  background: hsl(var(--danger) / 0.1);
+  color: hsl(var(--danger));
+}
+.writing-empty {
+  min-height: 330px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  color: hsl(var(--muted));
+  border: 1px dashed hsl(var(--border));
+  border-radius: 14px;
+  padding: 24px;
+}
+.writing-empty h2 {
+  font-size: 19px;
+  color: hsl(var(--fg));
+}
+.writing-workspace {
+  height: 100%;
+  min-height: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px;
+}
+.writing-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.writing-editor-header h1 {
+  margin: 6px 0 8px;
+}
+.writing-editor-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.writing-editor-layout.has-assistant {
+  grid-template-columns: minmax(0, 1fr) 290px;
+}
+.writing-editor-panel {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  overflow: hidden;
+  background: hsl(var(--surface));
+}
+.writing-block-toolbar {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 9px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+.writing-editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.writing-outline {
+  width: 180px;
+  flex-shrink: 0;
+  overflow: auto;
+  padding: 16px 10px;
+  border-right: 1px solid hsl(var(--border));
+}
+.writing-outline-search {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  background: hsl(var(--elevated));
+  font-size: 11px;
+}
+.writing-outline button[aria-current] {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+}
+.writing-paper-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 24px;
+}
+.writing-paper {
+  max-width: 780px;
+  min-height: 100%;
+  margin: auto;
+  padding: 32px 32px 60px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 3px;
+  box-shadow: 0 8px 30px #0000000a;
+}
+.writing-paper-title {
+  padding: 4px 0 28px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid hsl(var(--border));
+  text-align: center;
+}
+.writing-paper-title span {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: hsl(var(--muted));
+}
+.writing-paper-title h2 {
+  margin-top: 10px;
+  font-size: 23px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.writing-block {
+  margin-bottom: 6px;
+}
+.writing-block[data-block-type="scene_heading"] {
+  margin-top: 20px;
+  border-left: 2px solid hsl(var(--primary) / 0.5);
+}
+.writing-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 26px;
+  opacity: 1;
+  transition: opacity 0.15s;
+}
+.writing-block:hover .writing-block-actions,
+.writing-block:focus-within .writing-block-actions {
+  opacity: 1;
+}
+.writing-block-actions select {
+  max-width: 100px;
+}
+.writing-assistant {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+.writing-assistant > :last-child {
+  min-height: 320px;
+  flex: 1;
+}
+.is-writing-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: hsl(var(--bg));
+}
+.is-writing-focus .writing-editor-panel {
+  width: 100%;
+  max-width: 1100px;
+  margin: auto;
+  height: 100%;
+}
+@media (max-width: 1200px) {
+  .writing-editor-layout.has-assistant {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+  .writing-outline {
+    width: 150px;
+  }
+  .writing-paper-scroll {
+    padding: 16px;
+  }
+  .writing-paper {
+    padding: 24px 20px 40px;
+  }
+}
+@media (max-width: 1000px) {
+  .writing-workspace {
+    height: auto;
+    min-height: 100%;
+  }
+  .writing-editor-layout.has-assistant {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .writing-editor-panel {
+    min-height: 65vh;
+  }
+  .writing-assistant {
+    min-height: 480px;
+  }
+  .is-writing-focus {
+    overflow: auto;
+    height: 100dvh;
+  }
+  .writing-paper-scroll {
+    overflow: visible;
+  }
+  .writing-outline {
+    max-height: 65vh;
+  }
+}
+@media (max-width: 600px) {
+  .writing-library {
+    padding: 24px 16px;
+  }
+  .writing-library-header {
+    margin-bottom: 20px;
+  }
+  .writing-library-header h1 {
+    font-size: 26px;
+  }
+  .writing-result-count {
+    width: 100%;
+    margin: 0;
+  }
+  .writing-workspace {
+    padding: 16px 12px;
+  }
+  .writing-editor-body {
+    flex-direction: column;
+  }
+  .writing-outline {
+    width: 100%;
+    max-height: 160px;
+    border-right: 0;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .writing-paper-scroll {
+    padding: 12px 8px;
+  }
+  .writing-paper {
+    padding: 20px 12px 32px;
+  }
+  .writing-block-toolbar {
+    gap: 0;
+    padding: 6px 0;
+  }
+  .writing-block-toolbar button {
+    padding: 4px 9px;
+  }
+  .writing-block-actions {
+    opacity: 1;
+  }
+  .writing-paper-title h2 {
+    font-size: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .writing-script-card,
+  .writing-block-actions {
+    transition: none;
+  }
+}
+
+.writing-assistant[hidden] {
+  display: none;
+}
+
+.studio-shell:has(.is-writing-focus) > .studio-sidebar,
+.studio-shell:has(.is-writing-focus) > div > header {
+  display: none;
+}

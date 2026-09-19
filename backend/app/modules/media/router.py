@@ -7,9 +7,10 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.core.database import get_db
 from app.core.errors import Forbidden, NotFound, Unauthorized
@@ -17,6 +18,8 @@ from app.core.security import decode_access_token
 from app.models.asset import Asset, AssetReferenceImage
 from app.models.generation import Generation
 from app.models.identity import Membership, Project, User
+from app.models.library import LibraryMedia, MediaVersion
+from app.models.media_index import MediaIndex, MediaSegment
 from app.models.narrative import Novel
 from app.models.storage import Blob
 from app.models.timeline import AudioTrack, Timeline
@@ -45,7 +48,7 @@ def get_blob(
     authorization: str | None = Header(None),
     range: str | None = Header(None),
     download: bool = Query(False),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     user_id = _media_user_id(token, authorization)
     is_member = db.scalar(
@@ -64,6 +67,26 @@ def get_blob(
     owned = db.scalar(
         select(
             or_(
+                select(Project.id)
+                .where(Project.id == project_id, Project.cover_blob_hash == blob_hash)
+                .exists(),
+                select(MediaSegment.id)
+                .join(MediaIndex).join(MediaVersion).join(LibraryMedia)
+                .where(LibraryMedia.project_id == project_id,
+                       LibraryMedia.deleted_at.is_(None),
+                       MediaSegment.frames.contains([{"hash": blob_hash}])).exists(),
+                select(MediaVersion.id)
+                .join(LibraryMedia)
+                .where(
+                    LibraryMedia.project_id == project_id,
+                    LibraryMedia.deleted_at.is_(None),
+                    or_(
+                        MediaVersion.original_hash == blob_hash,
+                        MediaVersion.proxy_hash == blob_hash,
+                        MediaVersion.poster_hash == blob_hash,
+                    ),
+                )
+                .exists(),
                 select(Generation.id)
                 .where(
                     Generation.project_id == project_id,
@@ -95,15 +118,22 @@ def get_blob(
     blob = db.get(Blob, blob_hash)
     if blob is None:
         raise NotFound("资源不存在")
-    try:
-        data = cas.read_bytes(blob)
-    except Exception as exc:  # noqa: BLE001
-        raise NotFound("资源数据不可读(可能存储后端已切换或对象缺失)") from exc
+    # Streaming must not hold a DB pool connection for the duration of a long video.
+    db.expunge(blob)
+    db.commit()
+    size = blob.size_bytes
     headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=300"}
     if download:
         ext = {
             "video/mp4": "mp4",
+            "video/quicktime": "mov",
+            "video/x-matroska": "mkv",
+            "video/webm": "webm",
             "audio/mp4": "m4a",
+            "audio/wav": "wav",
+            "audio/mpeg": "mp3",
+            "audio/ogg": "ogg",
+            "audio/flac": "flac",
             "image/png": "png",
             "image/jpeg": "jpg",
             "text/plain": "txt",
@@ -111,19 +141,50 @@ def get_blob(
         headers["Content-Disposition"] = (
             f'attachment; filename="inspiration-{blob_hash[:12]}.{ext}"'
         )
+    start, end = 0, size - 1
     if range:
         import re
 
         match = re.fullmatch(r"bytes=(\d*)-(\d*)", range)
         if not match or not any(match.groups()):
-            return Response(status_code=416, headers={"Content-Range": f"bytes */{len(data)}"})
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
         left, right = match.groups()
-        start = int(left) if left else max(0, len(data) - int(right))
-        end = min(int(right), len(data) - 1) if left and right else len(data) - 1
-        if start > end or start >= len(data):
-            return Response(status_code=416, headers={"Content-Range": f"bytes */{len(data)}"})
-        headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
-        return Response(
-            content=data[start : end + 1], status_code=206, media_type=blob.mime, headers=headers
-        )
-    return Response(content=data, media_type=blob.mime, headers=headers)
+        start = int(left) if left else max(0, size - int(right))
+        end = min(int(right), size - 1) if left and right else size - 1
+        if start > end or start >= size:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    length = end - start + 1
+    manager = cas.open_range(blob, start, length)
+    try:
+        stream = manager.__enter__()
+    except Exception as exc:
+        raise NotFound("资源数据不可读(可能存储后端已切换或对象缺失)") from exc
+    closed = False
+
+    def close():
+        nonlocal closed
+        if not closed:
+            closed = True
+            manager.__exit__(None, None, None)
+
+    def chunks():
+        remaining = length
+        try:
+            while remaining > 0:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+        finally:
+            close()
+
+    headers["Content-Length"] = str(length)
+    return StreamingResponse(
+        chunks(),
+        status_code=206 if range else 200,
+        media_type=blob.mime,
+        headers=headers,
+        background=BackgroundTask(close),
+    )

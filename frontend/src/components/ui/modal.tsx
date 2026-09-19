@@ -9,19 +9,24 @@ export function Modal({
   title,
   children,
   width = 760,
+  keepMounted = false,
 }: {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
   children: ReactNode;
   width?: number;
+  keepMounted?: boolean;
 }) {
   const [big, setBig] = useState(false);
   const titleId = useId();
   const dialogRef = useDialogFocus(open, onClose);
-  if (!open) return null;
+  if (!open && !keepMounted) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8">
+    <div
+      hidden={!open}
+      className={`fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8 ${!open ? "!hidden" : ""}`}
+    >
       {/* 不透明底:完全遮住背景,随主题变色 */}
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div
@@ -48,7 +53,11 @@ export function Modal({
               className="h-8 w-8 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
               title={big ? "还原" : "最大化"}
             >
-              {big ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              {big ? (
+                <Minimize2 className="h-4 w-4" />
+              ) : (
+                <Maximize2 className="h-4 w-4" />
+              )}
             </button>
             <button
               onClick={onClose}

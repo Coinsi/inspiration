@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Inspiration —— 影视/动漫 AIGC 资产管理与生产平台 (后端)"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.110",
+    "fastapi>=0.121,<1",
     "uvicorn[standard]>=0.29",
     "sqlalchemy>=2.0.29",
     "alembic>=1.13",
@@ -19,6 +19,7 @@ dependencies = [
     "minio>=7.2",
     "pgvector>=0.2.5",
     "pillow>=11.0",
+    "PyYAML>=6.0,<7",
     "imageio-ffmpeg>=0.6.0",
 ]
 

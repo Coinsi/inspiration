@@ -1,327 +1,418 @@
-import { MediaImage } from "@/components/MediaImage";
+import { LoadState } from "@/components/workbench/LoadState";
+import { WorkbenchGallery } from "@/components/workbench/WorkbenchGallery";
+import { WorkbenchActivity } from "@/components/workbench/WorkbenchActivity";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Clapperboard, Film, Images, ScrollText } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  BookOpen,
+  Check,
+  Clapperboard,
+  FileText,
+  Film,
+  Images,
+  RefreshCw,
+} from "lucide-react";
 import { Link, useParams } from "react-router-dom";
-import { Panel } from "@/components/ui/panel";
-import { Badge } from "@/components/ui/badge";
+import { MediaImage } from "@/components/MediaImage";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ShotMedia } from "@/components/ShotMedia";
-import { usePersistentState } from "@/lib/usePersistentState";
 import {
   api,
   blobUrl,
   type Asset,
-  type NovelDetail,
   type Novel,
   type Project,
-  type Quota,
+  type Script,
   type Shot,
+  type Timeline,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { StudioScenes } from "@/components/StudioScenes";
+import { CreativeLaunch } from "@/components/CreativeLaunch";
 
 export default function Workbench() {
   const { projectId } = useParams();
-  const { t, lang } = useI18n();
+  return <ProjectWorkbench key={projectId} projectId={projectId!} />;
+}
+
+function ProjectWorkbench({ projectId }: { projectId: string }) {
+  const { lang } = useI18n();
   const zh = lang === "zh";
   const base = `/projects/${projectId}`;
-  const { data: projects } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => api.get<Project[]>("/projects"),
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => api.get<Project>(base),
   });
-  const project = projects?.find((p) => p.id === projectId);
-  const { data: novels } = useQuery({
+  const novels = useQuery({
     queryKey: ["novels", projectId],
     queryFn: () => api.get<Novel[]>(`${base}/novels`),
   });
-  const [novelId, setNovelId] = usePersistentState<string | null>(`wb.novel.${projectId}`, null);
-  const [chapterId, setChapterId] = usePersistentState(`wb.chapter.${projectId}`, "");
-  const effNovelId = novels?.find((n) => n.id === novelId)?.id ?? novels?.[0]?.id;
-  const { data: detail } = useQuery({
-    queryKey: ["novel", projectId, effNovelId],
-    queryFn: () => api.get<NovelDetail>(`${base}/novels/${effNovelId}`),
-    enabled: !!effNovelId,
+  const scripts = useQuery({
+    queryKey: ["scripts", projectId],
+    queryFn: () => api.get<Script[]>(`${base}/scripts`),
   });
-  const chapters = detail?.chapters ?? [];
-  const chapter = chapters.find((c) => c.id === chapterId) ?? chapters[0];
-  const {
-    data: assets,
-    isLoading: assetsLoading,
-    isError: assetsError,
-  } = useQuery({
-    queryKey: ["assets", projectId, "workbench", chapterId],
-    queryFn: () => api.get<Asset[]>(`${base}/assets${chapterId ? `?chapter_id=${chapterId}` : ""}`),
+  const assets = useQuery({
+    queryKey: ["assets", projectId, "workbench"],
+    queryFn: () => api.get<Asset[]>(`${base}/assets`),
   });
-  const {
-    data: shots,
-    isLoading: shotsLoading,
-    isError: shotsError,
-  } = useQuery({
-    queryKey: ["all-shots", projectId, "workbench", chapterId],
-    queryFn: () => api.get<Shot[]>(`${base}/shots${chapterId ? `?chapter_id=${chapterId}` : ""}`),
+  const shots = useQuery({
+    queryKey: ["all-shots", projectId, "workbench"],
+    queryFn: () => api.get<Shot[]>(`${base}/shots`),
   });
-  const { data: quota, isLoading: quotaLoading, isError: quotaError } = useQuery({
-    queryKey: ["quota", projectId],
-    queryFn: () => api.get<Quota | null>(`${base}/quota`),
+  const timelines = useQuery({
+    queryKey: ["timelines", projectId],
+    queryFn: () => api.get<Timeline[]>(`${base}/timelines`),
   });
-  const approved = shots?.filter((s) => ["approved", "in_cut"].includes(s.production_status)).length ?? 0;
-  const progress = shots?.length ? Math.round((approved / shots.length) * 100) : 0;
-  const usedPct =
-    quota && quota.limit_cost > 0
-      ? Math.min(100, Math.round((quota.used_cost / quota.limit_cost) * 100))
-      : null;
-  const characters = assets?.filter((a) => a.type === "character") ?? [];
-  const locations = assets?.filter((a) => a.type === "location") ?? [];
-  const next = !chapters.length ? "narrative" : !assets?.length ? "assets" : "storyboard";
-  const nextLabel =
-    next === "narrative"
+  const selected =
+    shots.data?.filter((s) => s.selected_generation_id).length ?? 0;
+  const approved =
+    shots.data?.filter((s) =>
+      ["approved", "in_cut"].includes(s.production_status),
+    ).length ?? 0;
+  const withoutOutput = shots.data?.find((s) => !s.selected_generation_id);
+  const cover =
+    assets.data?.find(
+      (a) => a.representative_blob_hash && a.type === "character",
+    ) ?? assets.data?.find((a) => a.representative_blob_hash);
+  const core = [novels, scripts, assets, shots, timelines];
+  const ready = core.every((q) => q.isSuccess && !q.isError);
+  const coreError = core.some((q) => q.isError);
+  const stages = [
+    {
+      to: "narrative",
+      label: zh ? "故事章节" : "Story",
+      detail: zh ? "导入小说，整理创作起点" : "Import and develop your story",
+      icon: BookOpen,
+      query: novels,
+      count: novels.data?.length,
+      unit: zh ? "部作品" : "stories",
+    },
+    {
+      to: "scripts",
+      label: zh ? "剧本正文" : "Script",
+      detail: zh ? "改编内容，打磨动作与对白" : "Shape action and dialogue",
+      icon: FileText,
+      query: scripts,
+      count: scripts.data?.length,
+      unit: zh ? "份剧本" : "scripts",
+    },
+    {
+      to: "assets",
+      label: zh ? "角色与资产" : "Assets",
+      detail: zh
+        ? "确定人物、场景与视觉参考"
+        : "Develop characters and references",
+      icon: Images,
+      query: assets,
+      count: assets.data?.length,
+      unit: zh ? "项资产" : "assets",
+    },
+    {
+      to: "storyboard",
+      label: zh ? "分镜与画面" : "Storyboard",
+      detail: zh
+        ? "组织镜头，生成并选择画面"
+        : "Compose shots and select media",
+      icon: Clapperboard,
+      query: shots,
+      count: shots.data?.length,
+      unit: zh ? "个镜头" : "shots",
+    },
+    {
+      to: "cuts",
+      label: zh ? "剪辑成片" : "Edit & export",
+      detail: zh
+        ? "编排片段，预览并导出成片"
+        : "Arrange clips and export a film",
+      icon: Film,
+      query: timelines,
+      count: timelines.data?.length,
+      unit: zh ? "条时间线" : "timelines",
+    },
+  ];
+  const next =
+    !novels.data?.length && !scripts.data?.length && !shots.data?.length
+      ? stages[0]
+      : !scripts.data?.length && !shots.data?.length
+        ? stages[1]
+        : !assets.data?.length
+          ? stages[2]
+          : !shots.data?.length || withoutOutput
+            ? stages[3]
+            : stages[4];
+  const nextHref =
+    withoutOutput && next.to === "storyboard"
+      ? `${base}/shots?shot=${withoutOutput.id}`
+      : `${base}/${next.to}`;
+  const retryAll = () => {
+    for (const q of core) void q.refetch();
+    void project.refetch();
+  };
+  const countText = (
+    q: { isError: boolean; isPending: boolean },
+    count: number | undefined,
+    unit: string,
+  ) =>
+    q.isError
       ? zh
-        ? "从一个故事开始"
-        : "Start with a story"
-      : next === "assets"
-        ? zh
-          ? "让故事中的角色与场景成形"
-          : "Develop your characters and locations"
-        : zh
-          ? "继续打磨下一个镜头"
-          : "Shape your next shot";
-  const viewAll = (to: string) => (
-    <Link
-      to={`${base}/${to}`}
-      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-    >
-      {zh ? "查看全部" : "View all"}
-      <ArrowRight className="h-3.5 w-3.5" />
-    </Link>
-  );
+        ? "加载失败"
+        : "Unavailable"
+      : q.isPending
+        ? "…"
+        : `${count ?? 0} ${unit}`;
+  const progress = shots.data?.length
+    ? Math.round((selected / shots.data.length) * 100)
+    : 0;
 
   return (
-    <div className="studio-page">
-      <header className="page-heading">
-        <div>
-          <p className="!mt-0 !mb-1 text-xs text-faint">INSPIRATION / {zh ? "创作工作台" : "WORKSPACE"}</p>
-          <h1>{project?.name ?? t("wb.title")}</h1>
+    <div className="studio-page workbench-page">
+      <section className="home-hero workbench-hero">
+        <StudioScenes />
+        <p className="studio-eyebrow">
+          INSPIRATION · {zh ? "你的创作现场" : "YOUR CREATIVE STUDIO"}
+        </p>
+        <h1>
+          {zh ? (
+            <>
+              今天，想讲一个<span>怎样的故事？</span>
+            </>
+          ) : (
+            <>
+              What story<span>will you tell today?</span>
+            </>
+          )}
+        </h1>
+        <CreativeLaunch projectId={projectId} />
+      </section>
+      <header className="page-heading items-center">
+        <div className="min-w-0">
+          <p className="!mb-2 !mt-0 text-[11px] font-medium uppercase tracking-[.18em] text-faint">
+            INSPIRATION STUDIO
+          </p>
+          <h2 className="text-xl font-semibold tracking-tight">
+            {project.data?.name ?? (zh ? "创作工作台" : "Creative workspace")}
+          </h2>
           <p>
-            {zh ? "从故事到画面，专注每一步创作。" : "From story to screen, one thoughtful step at a time."}
+            {project.data?.description ||
+              (zh
+                ? "让故事、参考与画面，在这里连起来。"
+                : "Bring your story, references and shots together.")}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {novels && novels.length > 1 && (
-            <select
-              aria-label={t("wb.novel")}
-              className="h-9 rounded-md border bg-card px-3 text-sm"
-              value={effNovelId ?? ""}
-              onChange={(e) => {
-                setNovelId(e.target.value);
-                setChapterId("");
-              }}
-            >
-              {novels.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.title}
-                </option>
-              ))}
-            </select>
-          )}
-          {!!chapters.length && (
-            <select
-              aria-label={t("wb.chapterFilter")}
-              className="h-9 rounded-md border bg-card px-3 text-sm"
-              value={chapterId}
-              onChange={(e) => setChapterId(e.target.value)}
-            >
-              <option value="">{t("wb.allChapters")}</option>
-              {chapters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.ordinal}. {c.title ?? t("wb.chapter")}
-                </option>
-              ))}
-            </select>
-          )}
-          <Link className="studio-link" to={`${base}/cuts`}>
-            <Film className="h-4 w-4" />
-            {t("nav.cuts")}
+        <div className="flex items-center gap-2">
+          <Link className="studio-primary" to={`${base}/storyboard`}>
+            <Clapperboard className="h-4 w-4" />
+            {zh ? "进入分镜" : "Open storyboard"}
           </Link>
         </div>
       </header>
-
-      <section className="grid overflow-hidden rounded-lg border bg-card lg:grid-cols-[1fr_320px]">
-        <div className="flex flex-col items-start p-6 lg:p-8">
-          <span className="mb-3 text-xs text-muted-foreground">{zh ? "继续创作" : "CONTINUE CREATING"}</span>
-          <h2 className="text-2xl font-semibold tracking-tight">{nextLabel}</h2>
-          <p className="mt-3 max-w-xl text-sm leading-7 text-muted-foreground">
-            {chapter
-              ? `${chapter.title ?? t("wb.chapter")} · ${(chapter.content ?? "").slice(0, 90)}${(chapter.content?.length ?? 0) > 90 ? "…" : ""}`
-              : zh
-                ? "导入小说、整理设定，再把故事拆解成可制作的分镜。"
-                : "Import a narrative, develop your story bible, then turn scenes into shots."}
-          </p>
-          <Link to={`${base}/${next}`} className="studio-primary mt-6">
-            {zh ? "继续处理" : "Continue"}
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-        <div className="border-t bg-surface p-6 lg:border-l lg:border-t-0">
-          <p className="mb-3 text-xs text-muted-foreground">
-            {zh ? "镜头制作进度 · 当前范围" : "SHOT PROGRESS · CURRENT SCOPE"}
-          </p>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-medium tabular-nums">
-              {shots ? approved : "—"}
-              <span className="text-base text-muted-foreground"> / {shots?.length ?? "—"}</span>
-            </span>
-            <span className="text-xs text-muted-foreground">{shots ? `${progress}%` : "—"}</span>
-          </div>
-          <div className="my-4 h-1.5 overflow-hidden rounded-full bg-elevated">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
-          </div>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground">{t("wb.roster")}</p>
-              <p className="mt-1">{assets ? characters.length : "—"}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{t("wb.scenes")}</p>
-              <p className="mt-1">{assets ? locations.length : "—"}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <nav
-        aria-label={zh ? "创作流程" : "Creative workflow"}
-        className="grid grid-cols-2 gap-2 lg:grid-cols-4"
+      <section
+        className="workbench-focus"
+        aria-label={zh ? "继续创作" : "Continue creating"}
       >
-        {[
-          { to: "narrative", label: t("nav.narrative"), icon: ScrollText },
-          { to: "assets", label: t("nav.assetLibrary"), icon: Images },
-          { to: "storyboard", label: t("nav.storyboard"), icon: Clapperboard },
-          { to: "shots", label: t("nav.shots"), icon: Film },
-        ].map((step, i) => (
-          <Link
-            key={step.to}
-            to={`${base}/${step.to}`}
-            className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-surface p-3 text-sm transition-colors hover:bg-elevated"
-          >
-            <span className="font-code text-xs text-faint">0{i + 1}</span>
-            <step.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">{step.label}</span>
-            <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 text-faint" />
-          </Link>
-        ))}
-      </nav>
-
-      <Panel
-        title={zh ? "分镜预览" : "Shot previews"}
-        icon={<Clapperboard className="h-4 w-4" />}
-        action={viewAll("storyboard")}
-      >
-        {shotsLoading ? (
-          <Skeleton className="h-40" />
-        ) : shotsError ? (
-          <div role="alert" className="studio-empty">
-            {zh ? "镜头暂时无法加载，请稍后重试。" : "Unable to load shots. Please try again."}
-          </div>
-        ) : shots?.length ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {shots.slice(0, 4).map((shot, i) => (
-              <article key={shot.id} className="min-w-0">
-                <div className="aspect-video overflow-hidden rounded-md border">
-                  <ShotMedia projectId={projectId!} shot={shot} />
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <Link
-                    to={`${base}/shots?shot=${shot.id}`}
-                    className="truncate text-sm font-medium hover:text-primary"
-                  >
-                    {String(i + 1).padStart(2, "0")} · {shot.title ?? shot.code}
-                  </Link>
-                  <Badge variant={shot.production_status === "approved" ? "success" : "outline"}>
-                    {t(`status.${shot.production_status}`)}
-                  </Badge>
-                </div>
-                <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
-                  {shot.description || shot.code}
-                </p>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="studio-empty">
-            <Clapperboard className="h-6 w-6" />
-            <p>{t("wb.empty.shots")}</p>
-            <Link to={`${base}/storyboard`} className="text-primary">
-              {t("nav.storyboard")} →
+        <div className="relative z-10 flex min-w-0 flex-col items-start justify-center p-6 md:p-8">
+          <span className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-primary">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            {zh ? "继续你的创作" : "CONTINUE YOUR STORY"}
+          </span>
+          <h2 className="max-w-lg text-xl font-semibold leading-relaxed tracking-tight md:text-2xl">
+            {!ready
+              ? coreError
+                ? zh
+                  ? "项目进度暂时无法获取"
+                  : "Project progress is unavailable"
+                : zh
+                  ? "正在整理项目进度…"
+                  : "Loading your project…"
+              : `${zh ? "下一步 · " : "Next · "}${next.label}`}
+          </h2>
+          <p className="mt-3 max-w-lg text-sm leading-7 text-muted-foreground">
+            {!ready
+              ? zh
+                ? "你仍可以通过导航进入已有的创作工具。"
+                : "You can still open your tools from the navigation."
+              : withoutOutput && next.to === "storyboard"
+                ? zh
+                  ? `「${withoutOutput.title || withoutOutput.code}」还没有选定画面，继续生成或上传参考。`
+                  : `Select an output for “${withoutOutput.title || withoutOutput.code}”.`
+                : next.detail}
+          </p>
+          <div className="mt-6 flex flex-wrap items-center gap-4">
+            {ready ? (
+              <Link className="studio-primary" to={nextHref}>
+                {zh ? "继续创作" : "Continue creating"}
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            ) : coreError ? (
+              <button className="studio-link" onClick={retryAll}>
+                <RefreshCw className="h-4 w-4" />
+                {zh ? "重新加载进度" : "Reload progress"}
+              </button>
+            ) : (
+              <Skeleton className="h-9 w-32" />
+            )}
+            <Link
+              to={`${base}/assets`}
+              className="text-sm text-muted-foreground hover:text-primary"
+            >
+              {zh ? "浏览角色与参考" : "Browse references"}
+              <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" />
             </Link>
           </div>
-        )}
-      </Panel>
-
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-        <Panel title={t("nav.assetLibrary")} icon={<Images className="h-4 w-4" />} action={viewAll("assets")}>
-          {assetsLoading ? (
-            <Skeleton className="h-44" />
-          ) : assetsError ? (
-            <div role="alert" className="studio-empty">
-              {zh ? "资产暂时无法加载。" : "Unable to load assets."}
-            </div>
-          ) : assets?.length ? (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {[
-                ...characters,
-                ...locations,
-                ...assets.filter((a) => !["character", "location"].includes(a.type)),
-              ]
-                .slice(0, 4)
-                .map((a) => (
-                  <Link key={a.id} to={`${base}/assets/${a.id}`} className="group min-w-0">
-                    <div className="aspect-[4/3] overflow-hidden rounded-md border bg-elevated">
-                      <MediaImage
-                        src={
-                          a.representative_blob_hash ? blobUrl(projectId!, a.representative_blob_hash) : null
-                        }
-                        alt={a.name}
-                      />
-                    </div>
-                    <p className="mt-2 truncate text-sm font-medium group-hover:text-primary">{a.name}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{t(`asset.${a.type}`)}</p>
-                  </Link>
-                ))}
-            </div>
+        </div>
+        <div className="workbench-cover relative hidden min-h-[240px] overflow-hidden md:block">
+          {cover ? (
+            <>
+              <MediaImage
+                src={blobUrl(projectId, cover.representative_blob_hash!)}
+                alt={cover.name}
+              />
+              <div className="absolute bottom-4 right-4 rounded-lg bg-black/70 px-3 py-1.5 text-xs text-white">
+                {zh ? "项目资产 · " : "Project asset · "}
+                {cover.name}
+              </div>
+            </>
           ) : (
-            <div className="studio-empty">
-              <Images className="h-6 w-6" />
-              <p>{t("assets.empty")}</p>
-              <Link className="text-primary" to={`${base}/assets`}>
-                {t("common.new")} →
-              </Link>
+            <div className="flex h-full items-center justify-center text-primary/40">
+              <Clapperboard className="h-24 w-24" strokeWidth={0.7} />
             </div>
           )}
-        </Panel>
-        <Panel title={zh ? "项目信息" : "Project information"}>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{zh ? "章节" : "Chapters"}</span>
-              <span>{detail ? chapters.length : "—"}</span>
+        </div>
+      </section>
+      <section aria-labelledby="workflow-heading">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="workflow-heading" className="text-sm font-semibold">
+            {zh ? "制作流程" : "Production workflow"}
+          </h2>
+          <span className="text-xs text-faint">
+            {zh
+              ? "全项目概览 · 可从任一步开始"
+              : "Project overview · start at any stage"}
+          </span>
+        </div>
+        <div className="grid auto-cols-[176px] grid-flow-col gap-3 overflow-x-auto pb-2 sm:auto-cols-auto sm:grid-flow-row sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">
+          {stages.map((stage, index) => (
+            <Link
+              key={stage.to}
+              to={`${base}/${stage.to}`}
+              className={cn(
+                "workbench-stage group",
+                ready &&
+                  next.to === stage.to &&
+                  "border-primary/50 bg-primary/[.04]",
+              )}
+            >
+              <div className="mb-5 flex items-center justify-between">
+                <stage.icon
+                  className="h-5 w-5 text-muted-foreground group-hover:text-primary"
+                  strokeWidth={1.6}
+                />
+                <span className="font-code text-[11px] text-faint">
+                  0{index + 1}
+                </span>
+              </div>
+              <h3 className="font-medium">{stage.label}</h3>
+              <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">
+                {stage.detail}
+              </p>
+              <div className="mt-4 flex items-center justify-between border-t pt-3 text-xs">
+                <span
+                  className={
+                    stage.query.isError
+                      ? "text-danger"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {countText(stage.query, stage.count, stage.unit)}
+                </span>
+                <ArrowRight className="h-3.5 w-3.5 text-faint group-hover:text-primary" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <WorkbenchGallery
+          projectId={projectId}
+          assets={assets}
+          shots={shots}
+          novels={novels}
+        />
+        <aside className="min-w-0 space-y-5">
+          <section
+            className="rounded-xl border bg-card p-5"
+            aria-labelledby="attention-heading"
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <h2 id="attention-heading" className="text-sm font-semibold">
+                {zh ? "镜头准备情况" : "Shot readiness"}
+              </h2>
+              <span className="text-[11px] text-faint">
+                {zh ? "全项目" : "Project"}
+              </span>
             </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{zh ? "项目用量" : "Project usage"}</span>
-              <span>{quotaLoading ? "…" : quotaError ? (zh ? "暂不可用" : "Unavailable") : usedPct === null ? (zh ? "未设置限额" : "No limit set") : `${usedPct}%`}</span>
-            </div>
-            <div className="flex flex-wrap gap-3 border-t pt-3">
-              <Link className="text-xs text-muted-foreground hover:text-foreground" to={`${base}/settings`}>
-                {t("nav.settings")} →
-              </Link>
-              <Link className="text-xs text-muted-foreground hover:text-foreground" to={`${base}/cuts`}>
-                {zh ? "时间线与定剪基线" : "Timelines & baselines"} →
-              </Link>
-            </div>
-            <p className="text-xs leading-6 text-faint">
-              {zh
-                ? "成片播放暂不可用；可继续管理时间线、冻结与比较定剪基线。"
-                : "Film playback is not available yet. You can manage timelines, freeze cuts and compare baselines."}
-            </p>
-          </div>
-        </Panel>
+            <LoadState
+              loading={shots.isPending}
+              error={shots.isError}
+              retry={() => void shots.refetch()}
+            >
+              <div className="flex items-baseline gap-2">
+                <strong className="text-3xl font-medium tabular-nums">
+                  {selected}
+                  <span className="ml-1 text-base text-faint">
+                    / {shots.data?.length ?? 0}
+                  </span>
+                </strong>
+                <span className="text-xs text-muted-foreground">
+                  {zh ? "已选画面" : "outputs selected"}
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label={zh ? "已选画面比例" : "Selected output progress"}
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="my-4 h-1.5 overflow-hidden rounded-full bg-elevated"
+              >
+                <div
+                  className="h-full rounded-full bg-primary"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-xs leading-6 text-muted-foreground">
+                {zh
+                  ? `${approved} 个镜头已通过审阅或进入成片。选定画面不代表已完成审阅。`
+                  : `${approved} shots approved or in a cut. Selecting an output does not approve a shot.`}
+              </p>
+              {withoutOutput ? (
+                <Link
+                  to={`${base}/shots?shot=${withoutOutput.id}`}
+                  className="mt-4 flex items-center justify-between gap-3 border-t pt-4 text-xs"
+                >
+                  <span className="min-w-0 truncate">
+                    {zh ? "待选画面 · " : "Needs output · "}
+                    {withoutOutput.title || withoutOutput.code}
+                  </span>
+                  <ArrowUpRight className="h-4 w-4 shrink-0 text-primary" />
+                </Link>
+              ) : (
+                !!shots.data?.length && (
+                  <Link
+                    to={`${base}/cuts`}
+                    className="mt-4 flex items-center gap-2 text-xs text-primary"
+                  >
+                    <Check className="h-4 w-4" />
+                    {zh ? "前往编排成片" : "Arrange your film"}
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                )
+              )}
+            </LoadState>
+          </section>
+          <WorkbenchActivity projectId={projectId} />
+        </aside>
       </div>
     </div>
   );

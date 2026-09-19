@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 
 export type Lang = "zh" | "en";
 const KEY = "inspiration_lang";
@@ -15,12 +21,20 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nav.admin": "管理",
     "nav.narrative": "拆解工作台",
     "nav.assetLibrary": "资产库",
+    "nav.videoLibrary": "视频素材",
     "nav.prompts": "提示词",
+    "nav.skills": "技能库",
+    "nav.director": "导演台",
+    "nav.evidence": "身份与证据",
+    "nav.transcriptions": "转写与字幕",
+    "nav.agent": "创作助理",
+    "nav.canvas": "自由画布",
     "nav.shots": "镜头看板",
     "nav.cuts": "成片 / 基线",
     "nav.tasks": "任务中心",
     "nav.members": "成员",
     "nav.settings": "设置",
+    "nav.trash": "素材回收站",
     "shell.currentProject": "当前项目",
     "shell.selectProject": "选择项目",
     "shell.logout": "退出登录",
@@ -110,7 +124,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "assets.selectAll": "全选",
     "assets.unselectAll": "取消全选",
     "assets.deleteSelected": "删除所选",
-    "assets.batchDeleteConfirm": "将删除所选 {n} 个资产(进回收站,可恢复;锁定资产自动跳过),确认?",
+    "assets.batchDeleteConfirm":
+      "将删除所选 {n} 个资产(进回收站,可恢复;锁定资产自动跳过),确认?",
     "assets.batchDeleted": "已删除 {n} 个资产",
     "assets.genImage": "生成形象",
     "assets.edit": "编辑",
@@ -142,7 +157,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "detail.lock": "锁定",
     "detail.del": "删除",
     "detail.delConfirm": "确定删除资产「{name}」?该操作会将其移入回收站。",
-    "detail.lockConfirm": "确定锁定资产「{name}」?锁定后将无法再编辑或提交新版本。",
+    "detail.lockConfirm":
+      "确定锁定资产「{name}」?锁定后将无法再编辑或提交新版本。",
     "detail.rollbackConfirm": "确定回滚到版本 v{n}?当前未提交的修改可能丢失。",
     "detail.uploadRef": "上传参考图(首张设为头像)",
     "detail.noRef": "还没有参考图。",
@@ -190,9 +206,11 @@ const DICT: Record<Lang, Record<string, string>> = {
     "sb.addShot": "新建镜头",
     "sb.aiBreakdown": "AI 拆分镜",
     "sb.breakingDown": "拆分镜中…",
-    "sb.aiBreakdownConfirm": "AI 将基于本场景剧情(及来源章节)重新拆分镜,并清空该场景现有的 {n} 个镜头(可在镜头看板回收/不影响别处)。继续?",
+    "sb.aiBreakdownConfirm":
+      "AI 将基于本场景剧情(及来源章节)重新拆分镜,并清空该场景现有的 {n} 个镜头(可在镜头看板回收/不影响别处)。继续?",
     "sb.breakdownDone": "已生成 {n} 个镜头",
-    "sb.breakingDownBanner": "AI 正在拆分镜…… 已用时 {n}s(通常 10–40 秒,完成后镜头会自动出现)",
+    "sb.breakingDownBanner":
+      "AI 正在拆分镜…… 已用时 {n}s(通常 10–40 秒,完成后镜头会自动出现)",
     "bg.view": "查看",
     "bg.failed": "分镜生成失败",
     "sb.shotTitle": "镜头标题",
@@ -219,7 +237,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "shot.overridden": "(已被覆写)",
     "shot.empty": "(空)",
     "shot.computing": "计算中…",
-    "shot.refsHint": "在上方「引用资产」加入角色 / 场景后,会自动拼入它们的提示词片段与风格。",
+    "shot.refsHint":
+      "在上方「引用资产」加入角色 / 场景后,会自动拼入它们的提示词片段与风格。",
     // 成片 / 时间线 / 基线
     "cuts.title": "成片 / 基线",
     "cuts.subtitle": "时间线组装 · 定剪冻结 · 基线对比",
@@ -261,7 +280,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "trash.back": "返回资产库",
     "trash.empty": "回收站为空。",
     // 设置
-    "set.hint": "模型密钥按项目加密存储,仅管理员可配置。未配置时系统使用内置 mock,可先体验流程。",
+    "set.hint":
+      "模型密钥按项目加密存储,仅管理员可配置。未配置时系统使用内置 mock,可先体验流程。",
     "set.genProvider": "生成供应商(出图 / 出片)",
     "set.mockOpt": "Mock(占位)",
     "set.endpointPh": "端点 endpoint(如即梦 / 火山引擎 API 地址)",
@@ -329,7 +349,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nar.scriptsPanel": "剧本",
     "nar.deleteScript": "删除剧本",
     "nar.scriptDeleted": "剧本已删除",
-    "nar.deleteScriptConfirm": "将删除剧本「{name}」(其下已落库的场次/镜头保留),确认?",
+    "nar.deleteScriptConfirm":
+      "将删除剧本「{name}」(其下已落库的场次/镜头保留),确认?",
     "nar.noScripts": "暂无剧本 —— 选中章节后点「AI 生成剧本」",
     "nav.scripts": "剧本",
     "nav.bible": "设定",
@@ -346,7 +367,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "bible.chFilter": "章节筛选",
     "bible.chFilterHint": "只看出现在某章/区间的设定,如 5 或 5-8",
     "bible.concurrency": "并发 {n}",
-    "bible.concurrencyHint": "同时阅读的章节数:越大越快;并行章节的同名设定会由 AI 在每波结束时融合",
+    "bible.concurrencyHint":
+      "同时阅读的章节数:越大越快;并行章节的同名设定会由 AI 在每波结束时融合",
     "bible.started": "提取任务已启动,后台逐章进行中",
     "bible.extracting": "提取中 {d}/{t} 章",
     "bible.all": "全部",
@@ -357,7 +379,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "bible.toAsset": "转为资产",
     "bible.assetCreated": "已转为资产",
     "bible.deleteConfirm": "删除设定「{name}」?",
-    "bible.empty": "暂无设定 —— 选择小说后点「AI 通读提取」,AI 会逐章阅读并把世界观、人物、地点等设定沉淀到这里",
+    "bible.empty":
+      "暂无设定 —— 选择小说后点「AI 通读提取」,AI 会逐章阅读并把世界观、人物、地点等设定沉淀到这里",
     "bible.cat.world": "世界观",
     "bible.cat.power_system": "力量体系",
     "bible.cat.faction": "势力组织",
@@ -372,7 +395,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "scripts.untitled": "未命名剧本",
     "scripts.fromChapter": "从章节生成",
     "scripts.sceneUnit": "场",
-    "scripts.empty": "还没有剧本 —— 新建一个空白剧本,或去拆解工作台从章节 AI 生成",
+    "scripts.empty":
+      "还没有剧本 —— 新建一个空白剧本,或去拆解工作台从章节 AI 生成",
     "se.insertBlock": "插入",
     "se.outline": "大纲",
     "se.noScenesYet": "暂无场景头",
@@ -414,7 +438,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "assist.placeholder": "告诉 AI 你想怎么改…(Enter 发送,Shift+Enter 换行)",
     "assist.send": "发送",
     "assist.thinking": "思考中…",
-    "assist.empty": "对当前对象下达修改指令,AI 给出修改提议;确认应用后落库并产生版本快照,可回退。",
+    "assist.empty":
+      "对当前对象下达修改指令,AI 给出修改提议;确认应用后落库并产生版本快照,可回退。",
     "assist.proposal": "修改提议",
     "assist.apply": "应用",
     "assist.applied": "已应用",
@@ -468,12 +493,20 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nav.admin": "Admin",
     "nav.narrative": "Breakdown",
     "nav.assetLibrary": "Asset Library",
+    "nav.videoLibrary": "Video library",
     "nav.prompts": "Prompts",
+    "nav.skills": "Skills & Sources",
+    "nav.director": "Director Studio",
+    "nav.evidence": "Identity & Evidence",
+    "nav.transcriptions": "Transcripts & Captions",
+    "nav.agent": "Creative Assistant",
+    "nav.canvas": "Creative Canvas",
     "nav.shots": "Shot Board",
     "nav.cuts": "Cut / Baseline",
     "nav.tasks": "Task center",
     "nav.members": "Members",
     "nav.settings": "Settings",
+    "nav.trash": "Material trash",
     "shell.currentProject": "Current project",
     "shell.selectProject": "Select project",
     "shell.logout": "Sign out",
@@ -561,7 +594,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "assets.selectAll": "Select all",
     "assets.unselectAll": "Unselect all",
     "assets.deleteSelected": "Delete selected",
-    "assets.batchDeleteConfirm": "Delete {n} selected assets? They go to trash (recoverable); locked assets are skipped.",
+    "assets.batchDeleteConfirm":
+      "Delete {n} selected assets? They go to trash (recoverable); locked assets are skipped.",
     "assets.batchDeleted": "{n} assets deleted",
     "assets.genImage": "Generate",
     "assets.edit": "Edit",
@@ -585,7 +619,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "detail.ver": "Versions",
     "detail.name": "Name",
     "detail.summary": "Summary",
-    "detail.summaryPh": "Character / scene notes — multi-line long text welcome…",
+    "detail.summaryPh":
+      "Character / scene notes — multi-line long text welcome…",
     "detail.tags": "Tags (free-form, unlimited)",
     "detail.tagsPh": "Type and press Enter",
     "detail.save": "Save",
@@ -593,8 +628,10 @@ const DICT: Record<Lang, Record<string, string>> = {
     "detail.lock": "Lock",
     "detail.del": "Delete",
     "detail.delConfirm": "Delete asset “{name}”? It will be moved to trash.",
-    "detail.lockConfirm": "Lock asset “{name}”? It can no longer be edited or re-versioned.",
-    "detail.rollbackConfirm": "Roll back to version v{n}? Uncommitted changes may be lost.",
+    "detail.lockConfirm":
+      "Lock asset “{name}”? It can no longer be edited or re-versioned.",
+    "detail.rollbackConfirm":
+      "Roll back to version v{n}? Uncommitted changes may be lost.",
     "detail.uploadRef": "Upload reference (first becomes avatar)",
     "detail.noRef": "No reference images yet.",
     "detail.rollback": "Roll back",
@@ -615,7 +652,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "set.gptQualityLow": "Quality: low (fast)",
     "set.gptQualityMedium": "Quality: medium",
     "set.gptQualityHigh": "Quality: high (slow)",
-    "set.gptQualityHint": "Low quality is faster and can avoid proxy gateway timeouts (504)",
+    "set.gptQualityHint":
+      "Low quality is faster and can avoid proxy gateway timeouts (504)",
     "gen.points": "pts",
     "gen.quota": "Quota",
     "gen.setAvatar": "Set as avatar",
@@ -633,7 +671,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "shots.clearFilter": "Clear",
     "nav.storyboard": "Storyboard",
     "sb.title": "Storyboard",
-    "sb.subtitle": "Design the shot sequence per scene (size / angle / move / duration…)",
+    "sb.subtitle":
+      "Design the shot sequence per scene (size / angle / move / duration…)",
     "sb.scenes": "Scenes",
     "sb.noScenes": "No scenes yet — commit some in Breakdown first",
     "sb.selectScene": "Select a scene on the left to start",
@@ -641,9 +680,11 @@ const DICT: Record<Lang, Record<string, string>> = {
     "sb.addShot": "Add shot",
     "sb.aiBreakdown": "AI breakdown",
     "sb.breakingDown": "Breaking down…",
-    "sb.aiBreakdownConfirm": "AI will re-break this scene (using its source chapter) into shots, replacing the {n} existing shots in this scene. Continue?",
+    "sb.aiBreakdownConfirm":
+      "AI will re-break this scene (using its source chapter) into shots, replacing the {n} existing shots in this scene. Continue?",
     "sb.breakdownDone": "Generated {n} shots",
-    "sb.breakingDownBanner": "AI is breaking down the scene… {n}s elapsed (usually 10–40s; shots appear when done)",
+    "sb.breakingDownBanner":
+      "AI is breaking down the scene… {n}s elapsed (usually 10–40s; shots appear when done)",
     "bg.view": "View",
     "bg.failed": "Breakdown failed",
     "sb.shotTitle": "Shot title",
@@ -670,12 +711,14 @@ const DICT: Record<Lang, Record<string, string>> = {
     "shot.overridden": "(overridden)",
     "shot.empty": "(empty)",
     "shot.computing": "Computing…",
-    "shot.refsHint": "Add cast / scenes under “Referenced assets” and their prompt fragments & styles are composed in automatically.",
+    "shot.refsHint":
+      "Add cast / scenes under “Referenced assets” and their prompt fragments & styles are composed in automatically.",
     // Cuts / Timeline / Baseline
     "cuts.title": "Cut / Baseline",
     "cuts.subtitle": "Timeline assembly · Final-cut freeze · Baseline diff",
     "cuts.preview": "Film Preview",
-    "cuts.previewHint": "Preview the film here after final cut; the in-cut shot timeline is below.",
+    "cuts.previewHint":
+      "Preview the film here after final cut; the in-cut shot timeline is below.",
     "cuts.timeline": "Timeline",
     "cuts.tlName": "Timeline name",
     "cuts.baselineFreeze": "Freeze final-cut baseline",
@@ -685,13 +728,15 @@ const DICT: Record<Lang, Record<string, string>> = {
     "cuts.fine": "Fine",
     "cuts.final": "Final",
     "cuts.finalize": "Final-cut & freeze baseline",
-    "cuts.finalizeConfirm": "Final-cut and freeze the baseline? This cut version becomes immutable.",
+    "cuts.finalizeConfirm":
+      "Final-cut and freeze the baseline? This cut version becomes immutable.",
     "cuts.baselines": "Baselines",
     "cuts.setA": "Set A",
     "cuts.setB": "Set B",
     "cuts.compare": "Compare",
     "cuts.shotsInCut": "In-cut shots",
-    "cuts.noShots": "No in-cut shots yet — advance shots to “Approved / In-cut” on the Shot Board first.",
+    "cuts.noShots":
+      "No in-cut shots yet — advance shots to “Approved / In-cut” on the Shot Board first.",
     "common.create": "Create",
     "common.restore": "Restore",
     // Projects
@@ -712,7 +757,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "trash.back": "Back to library",
     "trash.empty": "Trash is empty.",
     // Settings
-    "set.hint": "Model keys are encrypted per project and admin-only. Without config the system uses a built-in mock so you can try the flow.",
+    "set.hint":
+      "Model keys are encrypted per project and admin-only. Without config the system uses a built-in mock so you can try the flow.",
     "set.genProvider": "Generation provider (images / video)",
     "set.mockOpt": "Mock (placeholder)",
     "set.endpointPh": "Endpoint (e.g. Jimeng / Volcengine API URL)",
@@ -724,7 +770,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "set.enabled": "(on)",
     "set.disabled": "(off)",
     "set.llm": "AI breakdown LLM",
-    "set.baseUrlPh": "Base URL (OpenAI-compatible, e.g. https://api.openai.com/v1)",
+    "set.baseUrlPh":
+      "Base URL (OpenAI-compatible, e.g. https://api.openai.com/v1)",
     "set.modelPh": "Model name (e.g. gpt-4o-mini)",
     "set.apiKeyKeep": "API Key (leave blank to keep)",
     "set.saveLlm": "Save LLM",
@@ -753,10 +800,12 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nar.selectChapter": "Select a chapter on the left to read",
     "nar.decompose": "AI breakdown",
     "nar.decomposing": "Breaking down…",
-    "nar.decomposingBanner": "AI is breaking down this chapter… {n}s elapsed (usually 10–40s)",
+    "nar.decomposingBanner":
+      "AI is breaking down this chapter… {n}s elapsed (usually 10–40s)",
     "nar.decomposeDone": "Breakdown done: {n} scenes",
     "nar.suggest": "Suggestions",
-    "nar.suggestEmpty": "Select a chapter and click \"AI Script\", then derive scenes & shots in the script editor",
+    "nar.suggestEmpty":
+      'Select a chapter and click "AI Script", then derive scenes & shots in the script editor',
     "nar.selectScript": "Select a script…",
     "nar.newScript": "New script",
     "nar.applyScenes": "Commit as scenes / shots",
@@ -766,7 +815,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nar.renameNovel": "Rename (or double-click the title)",
     "nar.novelRenamed": "Renamed",
     "nar.deleteNovel": "Delete novel",
-    "nar.deleteConfirm": "Delete novel “{name}”? (chapters and committed scenes are unaffected)",
+    "nar.deleteConfirm":
+      "Delete novel “{name}”? (chapters and committed scenes are unaffected)",
     "nar.novelDeleted": "Novel deleted",
     "nar.trash": "Novel trash",
     "nar.viewTrash": "View trash",
@@ -780,8 +830,9 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nar.scriptsPanel": "Scripts",
     "nar.deleteScript": "Delete script",
     "nar.scriptDeleted": "Script deleted",
-    "nar.deleteScriptConfirm": "Delete script \"{name}\"? Applied scenes/shots are kept.",
-    "nar.noScripts": "No scripts yet — select a chapter and click \"AI Script\"",
+    "nar.deleteScriptConfirm":
+      'Delete script "{name}"? Applied scenes/shots are kept.',
+    "nar.noScripts": 'No scripts yet — select a chapter and click "AI Script"',
     "nav.scripts": "Scripts",
     "nav.bible": "Story Bible",
     "bible.title": "Story Bible",
@@ -794,9 +845,11 @@ const DICT: Record<Lang, Record<string, string>> = {
     "bible.rangeHint": "Chapter range (empty = whole book), e.g. 1~50",
     "bible.search": "Search name / content",
     "bible.chFilter": "Chapter filter",
-    "bible.chFilterHint": "Only settings appearing in chapter/range, e.g. 5 or 5-8",
+    "bible.chFilterHint":
+      "Only settings appearing in chapter/range, e.g. 5 or 5-8",
     "bible.concurrency": "Parallel {n}",
-    "bible.concurrencyHint": "Chapters read in parallel; same-name settings are AI-merged at the end of each wave",
+    "bible.concurrencyHint":
+      "Chapters read in parallel; same-name settings are AI-merged at the end of each wave",
     "bible.started": "Extraction started, running chapter by chapter",
     "bible.extracting": "Extracting {d}/{t} chapters",
     "bible.all": "All",
@@ -806,8 +859,9 @@ const DICT: Record<Lang, Record<string, string>> = {
     "bible.sourceCh": "From chapters",
     "bible.toAsset": "To asset",
     "bible.assetCreated": "Asset created",
-    "bible.deleteConfirm": "Delete setting \"{name}\"?",
-    "bible.empty": "No settings yet — pick a novel and click \"AI full-read extract\"",
+    "bible.deleteConfirm": 'Delete setting "{name}"?',
+    "bible.empty":
+      'No settings yet — pick a novel and click "AI full-read extract"',
     "bible.cat.world": "World",
     "bible.cat.power_system": "Power system",
     "bible.cat.faction": "Factions",
@@ -822,7 +876,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "scripts.untitled": "Untitled script",
     "scripts.fromChapter": "From chapter",
     "scripts.sceneUnit": "scenes",
-    "scripts.empty": "No scripts yet — create a blank one, or generate from a chapter in the Narrative workbench",
+    "scripts.empty":
+      "No scripts yet — create a blank one, or generate from a chapter in the Narrative workbench",
     "se.insertBlock": "Insert",
     "se.outline": "Outline",
     "se.noScenesYet": "No scene headings yet",
@@ -839,7 +894,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "se.blocks": "blocks",
     "se.dirty": "Unsaved",
     "se.savedToast": "Script saved",
-    "se.empty": "No content yet — ask the AI assistant on the right, or add a block manually",
+    "se.empty":
+      "No content yet — ask the AI assistant on the right, or add a block manually",
     "se.addBlock": "Add block",
     "se.blockType": "Block type",
     "se.bt.scene_heading": "Scene",
@@ -851,7 +907,8 @@ const DICT: Record<Lang, Record<string, string>> = {
     "se.decompose": "Derive scenes/shots",
     "se.deriveScenes": "Derived scenes",
     "se.applyScenes": "Apply scenes/shots",
-    "se.applyScenesConfirm": "Append suggested scenes and shots to this script?",
+    "se.applyScenesConfirm":
+      "Append suggested scenes and shots to this script?",
     "se.scenesApplied": "Scenes/shots applied",
     "se.noScenes": "No scenes derived (script may be empty)",
     "se.extract": "Extract entities",
@@ -861,10 +918,12 @@ const DICT: Record<Lang, Record<string, string>> = {
     "se.noEntities": "No entities found (cloud LLM gives better results)",
     // AI assistant
     "assist.title": "AI Assistant",
-    "assist.placeholder": "Tell the AI what to change… (Enter to send, Shift+Enter for newline)",
+    "assist.placeholder":
+      "Tell the AI what to change… (Enter to send, Shift+Enter for newline)",
     "assist.send": "Send",
     "assist.thinking": "Thinking…",
-    "assist.empty": "Give instructions about the current object. The AI proposes edits; apply to commit with a version snapshot you can roll back.",
+    "assist.empty":
+      "Give instructions about the current object. The AI proposes edits; apply to commit with a version snapshot you can roll back.",
     "assist.proposal": "Proposal",
     "assist.apply": "Apply",
     "assist.applied": "Applied",
@@ -909,18 +968,26 @@ const DICT: Record<Lang, Record<string, string>> = {
   },
 };
 
-const I18nContext = createContext<{ lang: Lang; setLang: (l: Lang) => void; t: (k: string) => string } | null>(
-  null,
-);
+const I18nContext = createContext<{
+  lang: Lang;
+  setLang: (l: Lang) => void;
+  t: (k: string) => string;
+} | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>(() => (localStorage.getItem(KEY) as Lang) || "zh");
+  const [lang, setLang] = useState<Lang>(
+    () => (localStorage.getItem(KEY) as Lang) || "zh",
+  );
   useEffect(() => {
     localStorage.setItem(KEY, lang);
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   }, [lang]);
   const t = (k: string) => DICT[lang][k] ?? k;
-  return <I18nContext.Provider value={{ lang, setLang, t }}>{children}</I18nContext.Provider>;
+  return (
+    <I18nContext.Provider value={{ lang, setLang, t }}>
+      {children}
+    </I18nContext.Provider>
+  );
 }
 
 export function useI18n() {

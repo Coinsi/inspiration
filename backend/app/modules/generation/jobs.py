@@ -4,7 +4,7 @@ import copy
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -27,7 +27,7 @@ def event(job, status, message):
     raw = dict(job.cost_raw or {})
     raw["events"] = [
         *raw.get("events", []),
-        {"at": datetime.now(timezone.utc).isoformat(), "status": status, "message": message},
+        {"at": datetime.now(UTC).isoformat(), "status": status, "message": message},
     ][-100:]
     job.cost_raw = raw
 
@@ -196,7 +196,12 @@ def refine(db, ctx, gen_id, options):
 
 
 def render_timeline(db, ctx, timeline_id, options):
+    from app.modules.timeline import editing
     from app.modules.timeline.service import list_items
+
+    timeline = editing.lock(db, ctx.project.id, timeline_id)
+    if options.revision is not None and options.revision != timeline.revision:
+        raise Conflict("时间线已修改，请重新载入后再导出")
 
     items = list_items(db, ctx.project.id, timeline_id)
     clips = []
@@ -213,8 +218,6 @@ def render_timeline(db, ctx, timeline_id, options):
         duration = (item.out_point_ms - item.in_point_ms) if item.out_point_ms else item.duration_ms
         if duration <= 0:
             raise CapabilityUnsupported("请为每个片段设置正数时长或有效的出点")
-        if item.transition:
-            raise CapabilityUnsupported("当前导出支持直切，请清除转场设置后导出")
         clips.append(
             {
                 "shot_id": str(shot.id),
@@ -223,9 +226,16 @@ def render_timeline(db, ctx, timeline_id, options):
                 "output_type": g.output_type,
                 "in_point_ms": item.in_point_ms,
                 "duration_ms": duration,
+                "transition": item.transition,
             }
         )
-    if not clips or len(clips) > 100 or sum(c["duration_ms"] for c in clips) > 1_800_000:
+    from app.modules.media.timing import duration as timeline_duration
+
+    try:
+        total = timeline_duration(clips)
+    except ValueError as exc:
+        raise CapabilityUnsupported(str(exc)) from exc
+    if not clips or len(clips) > 100 or total > 1_800_000:
         raise CapabilityUnsupported("请选择 1–100 段素材，总时长不超过 30 分钟")
     return local_job(
         db,
@@ -233,7 +243,10 @@ def render_timeline(db, ctx, timeline_id, options):
         "timeline",
         timeline_id,
         "render",
-        {"clips": clips, "options": options.model_dump()},
+        {
+            "clips": clips,
+            "options": {**options.model_dump(), **editing.render_tracks(db, ctx, timeline_id)},
+        },
         "video",
     )
 
@@ -291,6 +304,13 @@ def retry(db, ctx, job_id):
     validate_target(db, ctx.project.id, job.target_type, job.target_id)
     reserve_check(db, ctx.project.id, float(job.estimated_cost or 0))
     snapshot = copy.deepcopy(job.input_snapshot)
+    if snapshot.get("library_origin"):
+        from app.modules.library.materialization import validate_snapshot
+
+        validate_snapshot(db, ctx.project.id, snapshot)
+        target = validate_target(db, ctx.project.id, job.target_type, job.target_id)
+        if target.status == "locked":
+            raise Conflict("镜头已锁定，请先解锁")
     snapshot["retry_of"] = str(job.id)
     new = GenerationJob(
         project_id=ctx.project.id,
@@ -359,7 +379,7 @@ def execute(db, job_id):
             materialized = _materialize_references(
                 db, [ReferenceImage(**r) for r in snap.get("references", [])]
             )
-            provider = _provider_instance(db, project_id, provider_name)
+            provider = _provider_instance(db, project_id, provider_name, snap)
             if snap.get("mask"):
                 materialized_mask = _materialize_references(db, [ReferenceImage(**snap["mask"])])[0]
                 if "inpaint" not in provider.capabilities().features:
@@ -383,6 +403,7 @@ def execute(db, job_id):
                 "video_frames": "正在提取视频帧",
                 "video_audio": "正在提取音轨",
                 "video_trim": "正在导出视频片段",
+                "library_materialize": "正在从原视频制作创作素材",
                 "character": "正在根据参考图生成角色素材",
             }.get(operation, "正在向供应商提交并等待结果"),
         )
@@ -401,6 +422,12 @@ def execute(db, job_id):
             outputs = [
                 (media_engine.render(snap["clips"], read_blob, snap["options"], canceled), "video")
             ]
+        elif operation == "library_materialize":
+            from app.modules.library.materialization import process
+
+            data, typ, details = process(db, snap, canceled)
+            outputs = [(data, typ)]
+            media_details = [details]
         elif operation in ("video_frames", "video_audio", "video_trim"):
             from app.modules.generation.video_tools import process
 
@@ -457,7 +484,8 @@ def execute(db, job_id):
                     actual_size = f"{dimensions['width']}x{dimensions['height']}"
                     if requested_size != actual_size:
                         warnings.append(
-                            f"供应商未遵守请求尺寸 {requested_size}，实际返回 {actual_size}；请核对网关支持的参数"
+                            f"供应商未遵守请求尺寸 {requested_size}，实际返回 {actual_size}；"
+                            "请核对网关支持的参数"
                         )
                 outputs.append((data, out.type))
             cost_raw = result.cost_raw or {}
@@ -470,10 +498,15 @@ def execute(db, job_id):
                     db,
                     data,
                     {"video": "video/mp4", "image": "image/png", "audio": "audio/mp4"}[typ],
+                    **{
+                        name: media_details[index][name]
+                        for name in ("width", "height", "duration_ms")
+                        if index < len(media_details) and name in media_details[index]
+                    },
                 ),
                 typ,
             )
-            for data, typ in outputs
+            for index, (data, typ) in enumerate(outputs)
         ]
         job = db.scalar(
             select(GenerationJob)
@@ -493,13 +526,35 @@ def execute(db, job_id):
                     target_type=job.target_type,
                     target_id=job.target_id,
                     provider=job.provider,
+                    model=snap.get("model_profile", {}).get("model"),
                     output_type=typ,
                     output_blob_hash=blob.hash,
                     prompt_snapshot=snap.get("prompt", ""),
                     params=snap.get("params", {}),
                     input_refs={
+                        "variant_index": index,
+                        "skills": snap.get("skills", []),
+                        "original_prompt": snap.get("original_prompt", snap.get("prompt", "")),
+                        **(
+                            {"agent_origin": snap["agent_origin"]}
+                            if snap.get("agent_origin")
+                            else {}
+                        ),
+                        **(
+                            {"canvas_origin": snap["canvas_origin"]}
+                            if snap.get("canvas_origin")
+                            else {}
+                        ),
                         "operation": operation,
+                        **(
+                            {"library_origin": snap["library_origin"]}
+                            if snap.get("library_origin")
+                            else {}
+                        ),
                         "source_generation_id": snap.get("source_generation_id"),
+                        "first_frame_id": snap.get("first_frame_id"),
+                        "last_frame_id": snap.get("last_frame_id"),
+                        "reference_sources": snap.get("reference_sources", []),
                         "character_preset": snap.get("character_preset"),
                         "clips": snap.get("clips", []),
                         "options": snap.get("options", {}),

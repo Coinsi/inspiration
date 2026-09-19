@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Generation panel regression fixture</title>
+  </head>
+  <body>
+    <div id="fixture"></div>
+    <script type="module">
+      import React from "react";
+      import { createRoot } from "react-dom/client";
+      import { BrowserRouter } from "react-router-dom";
+      import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+      import { I18nProvider } from "/src/lib/i18n.tsx";
+      import { ToastProvider } from "/src/components/ui/toast.tsx";
+      import { AuthProvider } from "/src/lib/auth.tsx";
+      import { ConfirmProvider } from "/src/components/ui/confirm.tsx";
+      import GenerationPanel from "/src/components/GenerationPanel.tsx";
+      import "/src/index.css";
+      const h = React.createElement;
+      createRoot(document.getElementById("fixture")).render(
+        h(
+          React.StrictMode,
+          null,
+          h(
+            QueryClientProvider,
+            {
+              client: new QueryClient({
+                defaultOptions: { queries: { retry: false } },
+              }),
+            },
+            h(
+              BrowserRouter,
+              null,
+              h(
+                I18nProvider,
+                null,
+                h(
+                  ToastProvider,
+                  null,
+                  h(
+                    "div",
+                    { className: "p-6 max-w-5xl mx-auto" },
+                    h(
+                      AuthProvider,
+                      null,
+                      h(
+                        ConfirmProvider,
+                        null,
+                        h(GenerationPanel, {
+                          projectId: "p",
+                          targetType: "asset",
+                          targetId:
+                            new URLSearchParams(location.search).get(
+                              "target",
+                            ) || "a",
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

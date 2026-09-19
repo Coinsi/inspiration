@@ -12,9 +12,20 @@ from app.storage import cas
 MAX_BYTES = 256 * 1024 * 1024
 
 
-def probe_file(path, canceled=lambda: False):
+def probe_file(path, canceled=lambda: False, *, max_duration_ms=1_800_000, input_format=None):
     log = media_engine.run(
-        ["-protocol_whitelist", "file,pipe", "-i", str(path), "-t", "0.05", "-f", "null", "-"],
+        [
+            "-protocol_whitelist",
+            "file,pipe",
+            *(["-f", input_format] if input_format else []),
+            "-i",
+            str(path),
+            "-t",
+            "0.05",
+            "-f",
+            "null",
+            "-",
+        ],
         canceled,
         timeout=30,
     ).split("Output #", 1)[0]
@@ -23,8 +34,8 @@ def probe_file(path, canceled=lambda: False):
         raise ValueError("无法读取素材时长，请使用时长完整的视频文件")
     h, m, s = map(float, duration.groups())
     duration_ms = round((h * 3600 + m * 60 + s) * 1000)
-    if not 0 < duration_ms <= 1_800_000:
-        raise ValueError("视频时长须在 30 分钟以内")
+    if not 0 < duration_ms <= max_duration_ms:
+        raise ValueError(f"视频时长须在 {max_duration_ms // 60000} 分钟以内")
     video = re.search(r"Video: [^\n]*?\b(\d{2,5})x(\d{2,5})\b", log)
     dimensions = {}
     if video:

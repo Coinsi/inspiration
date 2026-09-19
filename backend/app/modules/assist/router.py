@@ -24,7 +24,7 @@ def list_supported_targets(ctx: ProjectContext = Depends(get_project_context)):
 
 @router.post("/chats", response_model=schemas.ChatDetailOut)
 def create_chat(
-    data: schemas.CreateChatIn, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)
+    data: schemas.CreateChatIn, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")
 ):
     chat = service.create_chat(db, ctx, data)
     out = schemas.ChatDetailOut.model_validate(chat)
@@ -37,14 +37,14 @@ def list_chats(
     target_type: str | None = Query(None),
     target_id: uuid.UUID | None = Query(None),
     ctx: ProjectContext = Depends(get_project_context),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     return [_chat_out(c) for c in service.list_chats(db, ctx.project.id, target_type, target_id)]
 
 
 @router.get("/chats/{chat_id}", response_model=schemas.ChatDetailOut)
 def get_chat(
-    chat_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db)
+    chat_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")
 ):
     chat = service._get_chat(db, ctx.project.id, chat_id)
     out = schemas.ChatDetailOut.model_validate(chat)
@@ -55,7 +55,7 @@ def get_chat(
 @router.post("/chats/{chat_id}/messages", response_model=schemas.SendMessageOut)
 def post_message(
     chat_id: uuid.UUID, data: schemas.PostMessageIn,
-    ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function"),
 ):
     return service.post_message(db, ctx, chat_id, data)
 
@@ -63,6 +63,6 @@ def post_message(
 @router.post("/chats/{chat_id}/messages/{message_id}/apply", response_model=schemas.ApplyOut)
 def apply_message(
     chat_id: uuid.UUID, message_id: str,
-    ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db),
+    ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function"),
 ):
     return service.apply_message(db, ctx, chat_id, message_id)

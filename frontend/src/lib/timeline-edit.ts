@@ -7,6 +7,99 @@ export interface Clip {
   transition?: Record<string, unknown> | null;
   note?: string | null;
 }
+export interface SubtitleCue {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  source?: {
+    kind: "reviewed_transcription";
+    version_id: string;
+    annotation_id: string;
+    generation_id: string;
+    start_ms: number;
+    end_ms: number;
+  };
+}
+export interface AudioClip {
+  generation_id: string;
+  name: string;
+  kind: "dialogue" | "music" | "effect";
+  start_ms: number;
+  in_point_ms: number;
+  duration_ms: number;
+  gain_db: number;
+  fade_in_ms: number;
+  fade_out_ms: number;
+  muted: boolean;
+}
+export interface VisualClip {
+  id: string;
+  generation_id: string;
+  name: string;
+  track: number;
+  start_ms: number;
+  in_point_ms: number;
+  duration_ms: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opacity: number;
+  fit: "contain" | "cover";
+  hidden: boolean;
+}
+export function visualIssue(visuals: VisualClip[], total: number): boolean {
+  return (
+    visuals.length > 12 ||
+    visuals.some(
+      (v) =>
+        !v.generation_id ||
+        v.start_ms < 0 ||
+        v.in_point_ms < 0 ||
+        v.duration_ms < 100 ||
+        v.start_ms + v.duration_ms > total ||
+        v.x < 0 ||
+        v.y < 0 ||
+        v.width < 0.05 ||
+        v.height < 0.05 ||
+        v.x + v.width > 1.000001 ||
+        v.y + v.height > 1.000001 ||
+        [
+          v.x,
+          v.y,
+          v.width,
+          v.height,
+          v.opacity,
+          v.start_ms,
+          v.in_point_ms,
+          v.duration_ms,
+        ].some((n) => !Number.isFinite(n)) ||
+        visuals.some(
+          (o) =>
+            o.id !== v.id &&
+            o.track === v.track &&
+            Math.max(o.start_ms, v.start_ms) <
+              Math.min(o.start_ms + o.duration_ms, v.start_ms + v.duration_ms),
+        ),
+    )
+  );
+}
+export interface TimelineContent {
+  items: Clip[];
+  audio: AudioClip[];
+  subtitles: SubtitleCue[];
+  visuals: VisualClip[];
+}
+export interface TimelineDocument extends TimelineContent {
+  revision: number;
+}
+export function timelineDuration(clips: Clip[]): number {
+  return clips.reduce(
+    (total, c) =>
+      total + c.duration_ms - Number(c.transition?.duration_ms || 0),
+    0,
+  );
+}
 export type History<T> = { past: T[]; present: T; future: T[] };
 export function edit<T>(history: History<T>, next: T): History<T> {
   if (JSON.stringify(next) === JSON.stringify(history.present)) return history;

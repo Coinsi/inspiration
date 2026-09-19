@@ -26,6 +26,7 @@ class Project(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    cover_blob_hash: Mapped[str | None] = mapped_column(String(64), ForeignKey("blob.hash"))
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"))
     # settings: 编码规则覆盖 / 默认策略等
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)

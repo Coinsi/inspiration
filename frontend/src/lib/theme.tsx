@@ -1,9 +1,17 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 
 type Theme = "dark" | "light";
 const KEY = "inspiration_theme";
 
-const ThemeContext = createContext<{ theme: Theme; toggle: () => void } | null>(null);
+const ThemeContext = createContext<{ theme: Theme; toggle: () => void } | null>(
+  null,
+);
 
 function apply(theme: Theme) {
   const el = document.documentElement;
@@ -12,13 +20,28 @@ function apply(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem(KEY) as Theme) || "dark");
-  useEffect(() => {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      return localStorage.getItem(KEY) === "light" ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  });
+  useLayoutEffect(() => {
     apply(theme);
-    localStorage.setItem(KEY, theme);
+    try {
+      localStorage.setItem(KEY, theme);
+    } catch {
+      /* Theme remains usable without storage. */
+    }
   }, [theme]);
   return (
-    <ThemeContext.Provider value={{ theme, toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")) }}>
+    <ThemeContext.Provider
+      value={{
+        theme,
+        toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );
