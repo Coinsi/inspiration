@@ -1,0 +1,224 @@
+.account-settings {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 30px;
+  min-height: 470px;
+}
+.account-settings-nav {
+  border-right: 1px solid hsl(var(--border));
+  padding-right: 18px;
+}
+.account-settings-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 26px;
+  min-width: 0;
+}
+.account-settings-person > div:last-child {
+  min-width: 0;
+}
+.account-settings-person strong,
+.account-settings-person span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.account-settings-person span {
+  font-size: 11px;
+  opacity: 0.55;
+  margin-top: 4px;
+}
+.account-settings-nav > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 9px;
+  text-align: left;
+  font-size: 13px;
+  margin-bottom: 5px;
+  color: hsl(var(--muted));
+}
+.account-settings-nav > button:hover,
+.account-settings-nav > button[aria-current] {
+  background: hsl(var(--elevated));
+  color: hsl(var(--fg));
+}
+.account-settings-content {
+  min-width: 0;
+  padding: 8px 6px 12px 0;
+}
+.account-settings-content h2 {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.account-settings-content h3 {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 12px 0;
+}
+.account-description {
+  font-size: 13px;
+  color: hsl(var(--muted));
+  line-height: 1.8;
+  margin: 8px 0 25px;
+}
+.account-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin: 24px 0;
+}
+.account-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.account-upload:focus-within {
+  outline: 2px solid hsl(var(--ring));
+}
+.account-hint {
+  font-size: 12px;
+  line-height: 1.7;
+  color: hsl(var(--muted));
+  margin-top: 8px;
+}
+.account-form {
+  display: grid;
+  gap: 18px;
+}
+.account-form label,
+.account-language {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.account-form input,
+.account-form textarea,
+.account-language select {
+  width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--bg));
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.account-form input:focus,
+.account-form textarea:focus,
+.account-language select:focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.account-form textarea {
+  resize: vertical;
+}
+.account-readonly {
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 15px;
+  display: grid;
+  gap: 14px;
+}
+.account-readonly > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12px;
+}
+.account-readonly span {
+  flex-shrink: 0;
+  color: hsl(var(--muted));
+}
+.account-readonly strong {
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.account-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 5px;
+}
+.account-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  margin-bottom: 15px;
+}
+.account-message.error {
+  color: hsl(var(--danger));
+}
+.account-connections {
+  margin-top: 28px;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 14px;
+}
+.account-theme-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 15px 0 28px;
+}
+.account-theme-options button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 15px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+}
+.account-theme-options button[aria-pressed="true"] {
+  border-color: hsl(var(--fg));
+  background: hsl(var(--elevated));
+}
+@media (max-width: 640px) {
+  .account-settings {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .account-settings-nav {
+    display: flex;
+    gap: 4px;
+    border-right: 0;
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 0 0 10px;
+  }
+  .account-settings-person {
+    display: none;
+  }
+  .account-settings-nav > button {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    gap: 6px;
+    padding: 10px 5px;
+    justify-content: center;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .account-settings-nav > button svg {
+    width: 15px;
+    flex-shrink: 0;
+  }
+  .account-settings-content {
+    padding: 0;
+  }
+  .account-avatar-row {
+    gap: 12px;
+  }
+  .account-theme-options button {
+    padding: 16px 10px;
+  }
+}

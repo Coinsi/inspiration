@@ -4,6 +4,8 @@ import copy
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
+from pathlib import Path
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -357,6 +359,17 @@ def execute(db, job_id):
                 == "canceled"
             )
 
+    files = ExitStack()
+    cached_files = {}
+
+    def disk_blob(key):
+        if key not in cached_files:
+            blob = db.get(Blob, key)
+            if not blob:
+                raise ValueError("源文件不存在")
+            cached_files[key] = files.enter_context(cas.local_file(blob, canceled))
+        return cached_files[key]
+
     def read_blob(key):
         blob = db.get(Blob, key)
         if not blob:
@@ -420,7 +433,14 @@ def execute(db, job_id):
             ]
         elif operation == "render":
             outputs = [
-                (media_engine.render(snap["clips"], read_blob, snap["options"], canceled), "video")
+                (
+                    files.enter_context(
+                        media_engine.render_file(
+                            snap["clips"], disk_blob, snap["options"], canceled
+                        )
+                    ),
+                    "video",
+                )
             ]
         elif operation == "library_materialize":
             from app.modules.library.materialization import process
@@ -429,9 +449,11 @@ def execute(db, job_id):
             outputs = [(data, typ)]
             media_details = [details]
         elif operation in ("video_frames", "video_audio", "video_trim"):
-            from app.modules.generation.video_tools import process
+            from app.modules.generation.video_tools import process_files
 
-            processed = process(read_blob(snap["source_blob"]), snap["options"], canceled)
+            processed = files.enter_context(
+                process_files(disk_blob(snap["source_blob"]), snap["options"], canceled)
+            )
             outputs = [(data, typ) for data, typ, _ in processed]
             media_details = [details for _, _, details in processed]
         else:
@@ -494,7 +516,7 @@ def execute(db, job_id):
         # Store bytes before the final row lock so cancel is still responsive during I/O.
         blobs = [
             (
-                cas.put_bytes(
+                (cas.put_file if isinstance(data, Path) else cas.put_bytes)(
                     db,
                     data,
                     {"video": "video/mp4", "image": "image/png", "audio": "audio/mp4"}[typ],
@@ -594,3 +616,5 @@ def execute(db, job_id):
             job.error = str(exc)[:2000]
             event(job, "failed", job.error)
             db.commit()
+    finally:
+        files.close()

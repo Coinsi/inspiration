@@ -5,9 +5,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.errors import AppError, app_error_handler
+from app.modules.website.router import router as website_router
+from app.modules.website.blog import router as blog_router
 from app.modules.skill.router import router as skill_router
 from app.modules.director.router import router as director_router
 from app.modules.evidence.router import router as evidence_router
@@ -88,6 +91,8 @@ app.add_exception_handler(AppError, app_error_handler)
 
 # 路由(API v1)
 app.include_router(identity_router, prefix="/api/v1")
+app.include_router(website_router, prefix="/api/v1")
+app.include_router(blog_router, prefix="/api/v1")
 app.include_router(skill_router, prefix="/api/v1")
 app.include_router(director_router, prefix="/api/v1")
 app.include_router(evidence_router, prefix="/api/v1")
@@ -112,3 +117,11 @@ app.include_router(setting_router, prefix="/api/v1")
 @app.get("/health", tags=["system"])
 def health() -> dict:
     return {"status": "ok", "app": settings.app_name, "env": settings.app_env}
+
+
+@app.get("/health/ready", tags=["system"])
+def ready():
+    from app.core.health import readiness
+
+    result = readiness()
+    return JSONResponse(result, status_code=200 if result["status"] == "ok" else 503)

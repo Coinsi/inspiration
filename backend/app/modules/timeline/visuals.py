@@ -2,7 +2,7 @@
 
 
 def compose(source, root, read_blob, visuals, width, height, duration_ms, canceled):
-    from app.modules.generation.media_engine import Canceled, run
+    from app.modules.generation.media_engine import Canceled, run, source_file
     from app.modules.timeline.schemas import VisualIn
 
     if len(visuals) > 12:
@@ -22,7 +22,7 @@ def compose(source, root, read_blob, visuals, width, height, duration_ms, cancel
         if canceled():
             raise Canceled()
         path = root / f"visual{i}"
-        path.write_bytes(read_blob(raw["blob_hash"]))
+        path = source_file(read_blob, raw["blob_hash"], path)
         args += (
             ["-loop", "1"] if raw["output_type"] == "image" else ["-ss", str(v.in_point_ms / 1000)]
         )

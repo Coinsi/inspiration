@@ -48,5 +48,6 @@ class Locked(AppError):
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.http_status,
+        headers={"Retry-After": str(exc.detail["retry_after"])} if exc.http_status == 429 else None,
         content={"error": {"code": exc.code, "message": exc.message, "detail": exc.detail}},
     )

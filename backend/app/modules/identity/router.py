@@ -2,17 +2,18 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_current_user, get_project_context, require_action
 from app.models.identity import AuditLog, User
-from app.modules.identity import schemas, service
-from app.modules.identity import preferences
+from app.modules.identity import preferences, schemas, service
+from app.modules.identity.account import router as account_router
 
 router = APIRouter()
+router.include_router(account_router)
 
 
 @router.get("/projects/{project_id}/creative-preferences", tags=["project"])
@@ -21,23 +22,47 @@ def creative_preferences(ctx: ProjectContext = Depends(get_project_context)):
 
 
 @router.put("/projects/{project_id}/creative-preferences", tags=["project"])
-def save_creative_preferences(data: preferences.CreativePreferences,
+def save_creative_preferences(
+    data: preferences.CreativePreferences,
     ctx: ProjectContext = Depends(require_action("project.manage")),
-    db: Session = Depends(get_db, scope="function")):
+    db: Session = Depends(get_db, scope="function"),
+):
     return preferences.save(db, ctx, data)
 
 
 # ── 认证 ──
 @router.post("/auth/register", response_model=schemas.UserOut, tags=["auth"])
-def register(data: schemas.RegisterIn, db: Session = Depends(get_db, scope="function")) -> User:
+def register(
+    data: schemas.RegisterIn, request: Request, db: Session = Depends(get_db, scope="function")
+) -> User:
+    from app.core.auth_controls import limit_auth
+
+    limit_auth(db, request, "register")
     return service.register_user(db, data)
 
 
 @router.post("/auth/login", response_model=schemas.TokenOut, tags=["auth"])
 def login(
-    data: schemas.LoginIn, db: Session = Depends(get_db, scope="function")
+    data: schemas.LoginIn, request: Request, db: Session = Depends(get_db, scope="function")
 ) -> schemas.TokenOut:
+    from app.core.auth_controls import limit_auth
+
+    limit_auth(db, request, "login")
     return schemas.TokenOut(access_token=service.login(db, data))
+
+
+@router.post("/auth/logout", status_code=204, tags=["auth"])
+def logout(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.core.auth_controls import revoke
+    from app.core.security import decode_access_token
+
+    token = request.headers["authorization"].split()[1]
+    revoke(db, token, decode_access_token(token))
+    return Response(status_code=204)
 
 
 @router.get("/me", response_model=schemas.MeOut, tags=["auth"])
@@ -147,7 +172,33 @@ def list_members(
     ctx: ProjectContext = Depends(get_project_context),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return service.list_members(db, ctx.project.id)
+    return [
+        service.member_out(m, db.get(User, m.user_id), ctx.project)
+        for m in service.list_members(db, ctx.project.id)
+    ]
+
+
+@router.patch(
+    "/projects/{project_id}/members/{user_id}", response_model=schemas.MemberOut, tags=["member"]
+)
+def update_member(
+    user_id: uuid.UUID,
+    data: schemas.MemberRoleIn,
+    ctx: ProjectContext = Depends(require_action("member.manage")),
+    db: Session = Depends(get_db, scope="function"),
+):
+    member = service.change_member(db, ctx.project, ctx.user, user_id, data.role)
+    return service.member_out(member, db.get(User, user_id), ctx.project)
+
+
+@router.delete("/projects/{project_id}/members/{user_id}", status_code=204, tags=["member"])
+def remove_member(
+    user_id: uuid.UUID,
+    ctx: ProjectContext = Depends(require_action("member.manage")),
+    db: Session = Depends(get_db, scope="function"),
+):
+    service.change_member(db, ctx.project, ctx.user, user_id)
+    return Response(status_code=204)
 
 
 # ── 审计 ──

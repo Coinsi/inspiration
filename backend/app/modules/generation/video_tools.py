@@ -2,6 +2,7 @@
 
 import re
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.core.errors import CapabilityUnsupported
@@ -69,11 +70,13 @@ def source_bytes(db, ctx, gen_id):
 
 
 def metadata(db, ctx, gen_id):
-    data = source_bytes(db, ctx, gen_id)
+    g = jobs.source(db, ctx.project.id, gen_id)
+    jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
+    blob = db.get(Blob, g.output_blob_hash)
+    if g.output_type != "video" or not blob or blob.size_bytes > MAX_BYTES:
+        raise CapabilityUnsupported("请选择 256 MB 以内的视频素材")
     try:
-        with tempfile.TemporaryDirectory(prefix="video-info-") as tmp:
-            path = Path(tmp) / "source.mp4"
-            path.write_bytes(data)
+        with cas.local_file(blob) as path:
             info = probe_file(path)
             if not info["has_video"]:
                 raise ValueError("素材中没有可读取的视频画面")
@@ -124,12 +127,20 @@ def submit(db, ctx, gen_id, data):
 
 
 def process(data, options, canceled=lambda: False):
-    if len(data) > MAX_BYTES:
+    with process_files(data, options, canceled) as outputs:
+        return [
+            (p.read_bytes() if isinstance(p, Path) else p, typ, meta) for p, typ, meta in outputs
+        ]
+
+
+@contextmanager
+def process_files(data, options, canceled=lambda: False):
+    if (data.stat().st_size if isinstance(data, Path) else len(data)) > MAX_BYTES:
         raise ValueError("视频文件超过 256 MB")
     with tempfile.TemporaryDirectory(prefix="video-tool-") as tmp:
         root = Path(tmp)
         src = root / "source.mp4"
-        src.write_bytes(data)
+        src = media_engine.source_file(lambda _: data, None, src)
         info = probe_file(src, canceled)
         if not info["has_video"]:
             raise ValueError("素材中没有可读取的视频画面")
@@ -161,7 +172,8 @@ def process(data, options, canceled=lambda: False):
                     raise ValueError("所选时间点没有可解码的画面，请将时间点稍微提前")
                 frame, dimensions = media_engine.validate_output(dest.read_bytes(), "image")
                 outputs.append((frame, "image", {**dimensions, "source_time_ms": time_ms}))
-            return outputs
+            yield outputs
+            return
         audio = options["operation"] == "audio"
         dest = root / ("audio.m4a" if audio else "segment.mp4")
         duration = options["end_ms"] - options["start_ms"]
@@ -202,4 +214,4 @@ def process(data, options, canceled=lambda: False):
             raise ValueError("导出时长与所选范围不符，请检查源文件是否完整")
         if dest.stat().st_size > MAX_BYTES:
             raise ValueError("导出文件超过 256 MB，请缩短所选范围")
-        return [(dest.read_bytes(), "audio" if audio else "video", result_info)]
+        yield [(dest, "audio" if audio else "video", result_info)]

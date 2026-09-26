@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
+import uuid
 
 from app.core.config import settings
 
@@ -27,6 +28,7 @@ def create_access_token(subject: str, extra: dict | None = None) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": subject,
+        "jti": uuid.uuid4().hex,
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
     }

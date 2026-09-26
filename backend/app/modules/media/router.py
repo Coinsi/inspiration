@@ -28,16 +28,22 @@ from app.storage import cas
 router = APIRouter(prefix="/projects/{project_id}", tags=["media"])
 
 
-def _media_user_id(token: str | None, authorization: str | None) -> uuid.UUID:
+def _media_user_id(token: str | None, authorization: str | None, db: Session) -> uuid.UUID:
     raw = token
     if raw is None and authorization and authorization.lower().startswith("bearer "):
         raw = authorization[7:]
     if not raw:
         raise Unauthorized("缺少令牌")
     try:
-        return uuid.UUID(decode_access_token(raw)["sub"])
+        payload = decode_access_token(raw)
+        user_id = uuid.UUID(payload["sub"])
     except Exception as exc:  # noqa: BLE001
         raise Unauthorized("令牌无效") from exc
+    from app.core.auth_controls import is_revoked, validate_user_session
+    if is_revoked(db, raw):
+        raise Unauthorized("登录已退出，请重新登录")
+    validate_user_session(db.get(User, user_id), payload)
+    return user_id
 
 
 @router.get("/blobs/{blob_hash}")
@@ -50,7 +56,7 @@ def get_blob(
     download: bool = Query(False),
     db: Session = Depends(get_db, scope="function"),
 ):
-    user_id = _media_user_id(token, authorization)
+    user_id = _media_user_id(token, authorization, db)
     is_member = db.scalar(
         select(Membership)
         .join(User, User.id == Membership.user_id)

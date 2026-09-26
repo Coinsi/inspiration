@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
@@ -131,6 +132,21 @@ def run(args: list[str], canceled=lambda: False, timeout=180, cwd=None) -> str:
 
 
 def render(clips: list[dict], read_blob, options: dict, canceled=lambda: False) -> bytes:
+    """Compatibility helper for small callers. Production jobs use render_file."""
+    with render_file(clips, read_blob, options, canceled) as path:
+        return path.read_bytes()
+
+
+def source_file(read_blob, key, destination):
+    source = read_blob(key)
+    if isinstance(source, Path):
+        return source
+    destination.write_bytes(source)
+    return destination
+
+
+@contextmanager
+def render_file(clips: list[dict], read_blob, options: dict, canceled=lambda: False):
     from app.modules.media.timing import duration
 
     duration_ms = duration(clips)
@@ -153,7 +169,7 @@ def render(clips: list[dict], read_blob, options: dict, canceled=lambda: False) 
             if canceled():
                 raise Canceled()
             src = root / f"source{i}.{'png' if clip['output_type'] == 'image' else 'mp4'}"
-            src.write_bytes(read_blob(clip["blob_hash"]))
+            src = source_file(read_blob, clip["blob_hash"], src)
             seconds = clip["duration_ms"] / 1000
             start = clip.get("in_point_ms", 0) / 1000
             image = clip["output_type"] == "image"
@@ -242,7 +258,7 @@ def render(clips: list[dict], read_blob, options: dict, canceled=lambda: False) 
             duration_ms,
             canceled,
         )
-        return finish_tracks(output, root, read_blob, options, duration_ms, canceled).read_bytes()
+        yield finish_tracks(output, root, read_blob, options, duration_ms, canceled)
 
 
 def join_transitions(paths, clips, output, duration_ms, canceled):
@@ -326,7 +342,7 @@ def finish_tracks(source, root, read_blob, options, duration_ms, canceled):
         if canceled():
             raise Canceled()
         path = root / f"audio{n}"
-        path.write_bytes(read_blob(track["blob_hash"]))
+        path = source_file(read_blob, track["blob_hash"], path)
         args += [
             "-ss",
             str(track["in_point_ms"] / 1000),

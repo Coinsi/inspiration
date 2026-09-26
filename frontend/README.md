@@ -1,6 +1,8 @@
 # Inspiration 前端
 
-> 影视 / 动漫 AIGC 生产平台的 Web 端:**Vite + React 18 + TypeScript + Tailwind CSS + TanStack Query + React Router**,影院级暗色金主题。
+> Inspiration 的 Web 端：**Vite + React 18 + TypeScript + Tailwind CSS + TanStack Query + React Router**。包含浅色官网与博客、支持明暗主题的创作工作区，以及独立的平台内容管理页。
+
+[项目介绍](../README.md) · [安装指南](../docs/GETTING_STARTED.md) · [官网管理](../docs/61-产品官网与内容管理.md) · [博客管理](../docs/62-博客与创作手记.md)
 
 ---
 

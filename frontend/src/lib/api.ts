@@ -133,6 +133,10 @@ export interface Member {
   user_id: string;
   role: string;
   project_id?: string;
+  username?: string;
+  display_name?: string;
+  avatar_data?: string | null;
+  is_owner?: boolean;
 }
 export interface Me {
   user: {
@@ -141,6 +145,9 @@ export interface Me {
     email: string;
     display_name: string;
     is_active: boolean;
+    is_platform_admin: boolean;
+    avatar_data?: string | null;
+    bio: string;
   };
   memberships: Member[];
 }

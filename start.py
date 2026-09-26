@@ -39,8 +39,12 @@ print(json.dumps({
     'compose_database': d.username == 'inspiration' and d.password == 'inspiration'
                         and d.path == '/inspiration',
     'redis': [r.hostname, r.port or 6379],
-    'eager': s.celery_eager,
+    'eager': s.celery_eager or s.generation_executor == 'local',
     'storage': s.storage_backend,
+    'transcriber_url': s.transcriber_url,
+    'library_indexer_url': s.library_indexer_url,
+    'transcriber_token': s.transcriber_token,
+    'library_indexer_token': s.library_indexer_token,
     'minio': [m.hostname, m.port or (443 if s.minio_secure else 80)],
 }))
 """
@@ -166,7 +170,11 @@ class Launcher:
             else:
                 with (self.runtime / "startup.log").open("ab") as log:
                     result = subprocess.run(
-                        args, check=False, stdout=log, stderr=subprocess.STDOUT, **options
+                        args,
+                        check=False,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        **options,
                     )
         except subprocess.TimeoutExpired as error:
             raise StartupError(
@@ -214,16 +222,7 @@ class Launcher:
             with env_file.open("x", encoding="utf-8") as handle:
                 handle.write(content)
             say("[准备] 已从示例创建本地 .env；已有 .env 始终保留。")
-        if not (self.frontend / "node_modules/vite/bin/vite.js").exists():
-            npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
-            if not npm:
-                raise StartupError("未找到 npm，请修复 Node.js 安装后再启动。")
-            say("[准备] 首次安装前端依赖，可能需要几分钟……")
-            npm_args = [
-                npm,
-                "ci" if (self.frontend / "package-lock.json").exists() else "install",
-            ]
-            self.command(npm_args, cwd=self.frontend, timeout=900)
+        self.prepare_frontend()
         result = self.command(
             [str(self.python), "-c", CONFIG_QUERY], capture=True, check=False
         )
@@ -232,6 +231,44 @@ class Launcher:
                 "无法读取 backend/.env，请检查配置格式；不会覆盖您的配置。"
             )
         return json.loads(result.stdout)
+
+    def prepare_frontend(self):
+        """代码更新后同步依赖；只存在 Vite 不代表所有懒加载页面都可用。"""
+        npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
+        if not npm:
+            raise StartupError("未找到 npm，请修复 Node.js 安装后再启动。")
+        manifest = self.frontend / "package.json"
+        lock = self.frontend / "package-lock.json"
+        fingerprint = hashlib.sha256(
+            manifest.read_bytes() + b"\0" + (lock.read_bytes() if lock.exists() else b"")
+        ).hexdigest()
+        stamp = self.frontend / "node_modules/.inspiration-dependencies"
+        if stamp.exists() and stamp.read_text(encoding="utf-8") == fingerprint:
+            result = self.command(
+                [npm, "ls", "--depth=0", "--include=dev"],
+                cwd=self.frontend, capture=True, check=False,
+            )
+            if result.returncode == 0:
+                return
+        # 不在运行中的 Vite 下替换依赖，也不关闭可能属于其他项目的服务。
+        if port_open("127.0.0.1", 5173):
+            raise StartupError(
+                "前端依赖需要同步。请先关闭端口 5173 的前端服务，再重新启动；后端和数据无需关闭。"
+            )
+        say("[准备] 正在同步前端依赖，可能需要几分钟……")
+        self.command(
+            [npm, "ci" if lock.exists() else "install", "--include=dev"],
+            cwd=self.frontend, timeout=900,
+        )
+        self.command(
+            [npm, "ls", "--depth=0", "--include=dev"],
+            cwd=self.frontend, capture=True,
+        )
+        # npm install 可能首次生成锁文件，记录安装完成后的输入。
+        fingerprint = hashlib.sha256(
+            manifest.read_bytes() + b"\0" + (lock.read_bytes() if lock.exists() else b"")
+        ).hexdigest()
+        stamp.write_text(fingerprint, encoding="utf-8")
 
     def ensure_docker(self):
         if self.docker:
@@ -417,11 +454,85 @@ class Launcher:
         )
         wait_for("Worker", ready, process=process)
 
+    def optional_services(self, config):
+        """Reuse preinstalled local inference environments; never download models at startup."""
+        for name, key, port, model, env_key, token_key in [
+            (
+                "transcriber",
+                "transcriber_url",
+                8012,
+                "faster-whisper-small",
+                "ASR_MODEL",
+                "transcriber_token",
+            ),
+            (
+                "media-indexer",
+                "library_indexer_url",
+                8011,
+                "qwen-embedding",
+                "INDEX_MODEL",
+                "library_indexer_token",
+            ),
+        ]:
+            if config.get(key) not in (
+                f"http://127.0.0.1:{port}",
+                f"http://localhost:{port}",
+            ):
+                continue
+            if port_open("127.0.0.1", port):
+                continue
+            python = (
+                self.runtime
+                / name
+                / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            )
+            model_dir = self.runtime / "models" / model
+            if not python.is_file() or not (model_dir / "config.json").is_file():
+                continue
+            service = self.root / "services" / name / "app.py"
+            token_env = "ASR_TOKEN" if name == "transcriber" else "INDEX_TOKEN"
+            # Use the backend's configured token without putting it in a command line or log.
+            code = (
+                "import os, sys, importlib.util; "
+                f"os.environ[{env_key!r}] = {str(model_dir)!r}; "
+                "os.environ['HF_HUB_OFFLINE'] = '1'; "
+                f"sys.path.insert(0, {str(service.parent)!r}); "
+                f"spec=importlib.util.spec_from_file_location('local_inference', {str(service)!r}); "
+                "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+                f"import uvicorn; uvicorn.run(module.app, host='127.0.0.1', port={port})"
+            )
+            say(f"[启动] 本地 {name} 服务（使用已有模型）……")
+            previous = self.env.get(token_env)
+            self.env[token_env] = config.get(token_key) or ""
+            try:
+                self.spawn([str(python), "-c", code], self.backend, name)
+            finally:
+                if previous is None:
+                    self.env.pop(token_env, None)
+                else:
+                    self.env[token_env] = previous
+
     def start(self):
         config = self.prepare()
         api_exists = self.existing(8000, "后端", lambda: api_ready(config["app_name"]))
         web_exists = self.existing(5173, "前端", web_ready)
         self.dependencies(config)
+        self.optional_services(config)
+        if api_exists:
+            checked = self.command(
+                [
+                    str(self.python),
+                    "-c",
+                    "from app.core.health import database_ready; "
+                    "import sys; sys.exit(0 if database_ready() else 1)",
+                ],
+                check=False,
+                capture=True,
+            )
+            if checked.returncode:
+                raise StartupError(
+                    "数据库版本与代码不一致。请先停止旧后端，再重新启动以完成迁移；不会修改正在运行的数据库结构。"
+                )
         if not api_exists:
             say("[准备] 检查数据库迁移和演示账号（不重置已有数据）……")
             self.command([str(self.python), "-m", "alembic", "upgrade", "head"])
@@ -474,6 +585,17 @@ class Launcher:
                 return False
 
         wait_for("前后端连接", proxy_ready, timeout=20)
+        # Optional services may be absent without blocking the creative workspace.
+        try:
+            with HTTP.open(API_URL + "/health/ready", timeout=45) as response:
+                diagnostic = json.load(response)
+        except (OSError, ValueError) as exc:
+            raise StartupError(
+                "后端已启动，但依赖检查未通过，请查看 /health/ready 和运行日志。"
+            ) from exc
+        for name, status in diagnostic.get("optional", {}).items():
+            if status != "ok":
+                say(f"[提示] {name} 服务未就绪，相关自动处理暂不可用。")
 
     def cleanup_failed_start(self):
         # 只处理本次新建的直接子进程，绝不按进程名称或端口批量终止。

@@ -11,9 +11,9 @@ import {
   UserRound,
 } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
@@ -21,23 +21,52 @@ import { LoginBackground } from "@/components/LoginBackground";
 
 export default function Login() {
   const { login } = useAuth();
+  const location = useLocation();
+  const registering = location.pathname === "/register";
+  const requestedPath = new URLSearchParams(location.search).get("next") || "";
+  // Only return to known protected routes on this site.
+  const returnPath =
+    /^\/(?:projects(?:\/|[?#]|$)|admin\/(?:website(?:[?#]|$)|blog(?:\/|[?#]|$)))/.test(
+      requestedPath,
+    ) && !/[\\\u0000-\u001f]/.test(requestedPath)
+      ? requestedPath
+      : "/projects";
+  const enteringAdmin = returnPath.startsWith("/admin/");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const { t, lang, setLang } = useI18n(),
     zh = lang === "zh";
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("demo");
-  const [password, setPassword] = useState("demo1234");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy || !username.trim() || !password) return;
+    if (registering && password !== confirmation) {
+      setError(zh ? "两次输入的密码不一致" : "Passwords do not match");
+      return;
+    }
+    if (registering && new TextEncoder().encode(password).length > 72) {
+      setError(zh ? "密码不能超过72字节" : "Password must not exceed 72 bytes");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
+      if (registering)
+        await api.post("/auth/register", {
+          username: username.trim(),
+          email: email.trim(),
+          display_name: displayName.trim(),
+          password,
+        });
       await login(username.trim(), password);
-      navigate("/projects");
+      navigate(returnPath, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("login.failed"));
     } finally {
@@ -99,6 +128,9 @@ export default function Login() {
       </section>
       <section className="login-pane">
         <div className="login-appearance">
+          <Link to="/" className="text-xs text-muted-foreground mr-3">
+            返回官网
+          </Link>
           <button
             onClick={() => setLang(zh ? "en" : "zh")}
             className="studio-icon-button"
@@ -118,11 +150,27 @@ export default function Login() {
           <p className="text-[11px] tracking-[.2em] text-faint">
             WELCOME TO INSPIRATION
           </p>
-          <h2>{zh ? "回到创作现场" : "Back to your studio"}</h2>
+          <h2>
+            {registering
+              ? zh
+                ? "开始你的创作之旅"
+                : "Create your account"
+              : enteringAdmin
+                ? zh
+                  ? "登录平台管理"
+                  : "Sign in to platform administration"
+                : zh
+                  ? "回到创作现场"
+                  : "Back to your studio"}
+          </h2>
           <p className="mt-3 text-sm text-muted-foreground">
-            {zh
-              ? "你的故事、素材与灵感，都在这里。"
-              : "Your stories, references and ideas are waiting."}
+            {enteringAdmin
+              ? zh
+                ? "请使用平台管理员账号登录，登录后会直接进入官网管理。"
+                : "Sign in with a platform administrator account to manage the website."
+              : zh
+                ? "你的故事、素材与灵感，都在这里。"
+                : "Your stories, references and ideas are waiting."}
           </p>
           <form onSubmit={onSubmit} className="mt-9 space-y-5">
             <div>
@@ -134,6 +182,9 @@ export default function Login() {
                 <input
                   id="login-username"
                   autoComplete="username"
+                  minLength={registering ? 3 : undefined}
+                  maxLength={64}
+                  pattern={registering ? "[A-Za-z0-9_.\\-]+" : undefined}
                   required
                   disabled={busy}
                   placeholder={t("login.username")}
@@ -142,6 +193,42 @@ export default function Login() {
                 />
               </div>
             </div>
+            {registering && (
+              <>
+                <div>
+                  <label htmlFor="register-name" className="login-label">
+                    {zh ? "昵称" : "Display name"}
+                  </label>
+                  <div className="login-field">
+                    <input
+                      id="register-name"
+                      required
+                      maxLength={128}
+                      autoComplete="nickname"
+                      value={displayName}
+                      disabled={busy}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="register-email" className="login-label">
+                    {zh ? "邮箱" : "Email"}
+                  </label>
+                  <div className="login-field">
+                    <input
+                      id="register-email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={email}
+                      disabled={busy}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
             <div>
               <label htmlFor="login-password" className="login-label">
                 {t("login.password")}
@@ -151,7 +238,11 @@ export default function Login() {
                 <input
                   id="login-password"
                   type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
+                  autoComplete={
+                    registering ? "new-password" : "current-password"
+                  }
+                  minLength={registering ? 8 : undefined}
+                  maxLength={registering ? 72 : undefined}
                   required
                   disabled={busy}
                   placeholder={t("login.password")}
@@ -177,6 +268,29 @@ export default function Login() {
                 </button>
               </div>
             </div>
+            {registering && (
+              <div>
+                <label htmlFor="register-confirm" className="login-label">
+                  {zh ? "确认密码" : "Confirm password"}
+                </label>
+                <div className="login-field">
+                  <input
+                    id="register-confirm"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    required
+                    value={confirmation}
+                    disabled={busy}
+                    onChange={(e) => setConfirmation(e.target.value)}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {zh
+                    ? "密码至少8位；用户名使用英文字母、数字、下划线、点或短横线。"
+                    : "At least 8 characters. Use letters, numbers, underscores, dots or hyphens for your username."}
+                </p>
+              </div>
+            )}
             {error && (
               <p
                 role="alert"
@@ -193,16 +307,52 @@ export default function Login() {
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {busy
                 ? t("login.submitting")
-                : zh
-                  ? "进入工作台"
-                  : "Enter your studio"}
+                : registering
+                  ? zh
+                    ? "创建账户并开始创作"
+                    : "Create account"
+                  : enteringAdmin
+                    ? zh
+                      ? "登录并进入管理端"
+                      : "Sign in to administration"
+                    : zh
+                      ? "进入工作台"
+                      : "Enter your studio"}
               {!busy && <ArrowRight size={17} />}
             </Button>
           </form>
-          <div className="login-demo">
-            <span>{zh ? "体验账号" : "DEMO ACCOUNT"}</span>
-            <p>{t("login.demo")}</p>
-          </div>
+          <p className="mt-6 text-sm text-muted-foreground">
+            {registering
+              ? zh
+                ? "已有账户？"
+                : "Already have an account? "
+              : zh
+                ? "还没有账户？"
+                : "New here? "}
+            <Link
+              className="ml-2 text-foreground underline underline-offset-4"
+              to={`${registering ? "/login" : "/register"}?next=${encodeURIComponent(returnPath)}`}
+              onClick={() => {
+                setError(null);
+                setPassword("");
+                setConfirmation("");
+              }}
+            >
+              {registering
+                ? zh
+                  ? "返回登录"
+                  : "Sign in"
+                : zh
+                  ? "创建账户"
+                  : "Create account"}
+            </Link>
+          </p>
+          {!registering && import.meta.env.DEV && (
+            <div className="login-demo">
+              <span>{zh ? "体验账号" : "DEMO ACCOUNT"}</span>
+              <p>{t("login.demo")}</p>
+            </div>
+          )}
         </div>
         <p className="login-footer">
           INSPIRATION <span>·</span>{" "}

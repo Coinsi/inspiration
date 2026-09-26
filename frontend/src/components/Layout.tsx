@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 
 export default function Layout() {
-  const { me, logout } = useAuth();
+  const { me, logout, logoutError } = useAuth();
   return (
     <div className="min-h-screen">
       <header className="border-b border-border">
@@ -12,6 +12,7 @@ export default function Layout() {
             Inspiration
           </Link>
           <div className="flex items-center gap-3">
+            {logoutError && <span role="alert">{logoutError}</span>}
             <span className="text-sm text-muted-foreground">{me?.user.display_name}</span>
             <Button variant="outline" size="sm" onClick={logout}>
               退出

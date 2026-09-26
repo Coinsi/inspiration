@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="360" viewBox="0 0 1440 360" role="img" aria-labelledby="title desc">
+  <title id="title">Inspiration — 让灵感成为作品</title>
+  <desc id="desc">深绿色品牌横幅，浅金色文字与象征光线的弧线。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#102d27"/><stop offset="1" stop-color="#071c18"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#86ab88" stop-opacity=".25"/><stop offset="1" stop-color="#86ab88" stop-opacity="0"/></radialGradient>
+    <linearGradient id="line"><stop stop-color="#dcca95" stop-opacity="0"/><stop offset=".55" stop-color="#dcca95" stop-opacity=".7"/><stop offset="1" stop-color="#dcca95" stop-opacity=".1"/></linearGradient>
+  </defs>
+  <rect width="1440" height="360" rx="18" fill="url(#bg)"/>
+  <ellipse cx="1090" cy="190" rx="420" ry="330" fill="url(#glow)"/>
+  <g fill="none" stroke="url(#line)" stroke-width="1">
+    <ellipse cx="1150" cy="170" rx="360" ry="113" transform="rotate(-28 1150 170)"/>
+    <ellipse cx="1150" cy="170" rx="360" ry="134" transform="rotate(-28 1150 170)"/>
+    <ellipse cx="1150" cy="170" rx="360" ry="155" transform="rotate(-28 1150 170)"/>
+    <ellipse cx="1150" cy="170" rx="360" ry="176" transform="rotate(-28 1150 170)"/>
+  </g>
+  <path d="M80 65h8v29h-8z" fill="#72a580"/><path d="M89 56h8v38h-8z" fill="#a5c1a1"/><path d="M98 76h8v18h-8z" fill="#e6d1a0"/>
+  <text x="123" y="82" fill="#bdcbbf" font-family="Arial,sans-serif" font-size="14" letter-spacing="4">A HOME FOR YOUR NEXT STORY</text>
+  <text x="76" y="190" fill="#f3eee0" font-family="Arial,sans-serif" font-size="80" font-weight="700" letter-spacing="-3">Inspiration</text>
+  <text x="81" y="248" fill="#e2d4af" font-family="Microsoft YaHei,PingFang SC,sans-serif" font-size="29" letter-spacing="5">让灵感成为作品。</text>
+  <path d="M81 295h540" stroke="#b5c5b5" stroke-opacity=".16"/>
+  <text x="81" y="324" fill="#aabfb0" font-family="Arial,sans-serif" font-size="12" letter-spacing="3">STORY / ASSETS / CANVAS / FILM</text>
+</svg>

@@ -8,4 +8,4 @@ echo "==> 写入开发种子数据(demo / demo1234)"
 python -m app.seed || true
 
 echo "==> 启动 API (uvicorn)"
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"

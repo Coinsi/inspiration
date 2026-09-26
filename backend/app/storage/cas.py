@@ -21,15 +21,45 @@ from app.models.storage import Blob
 _client = None
 
 
-def put_file(db, path: Path, mime: str, **metadata):
+@contextmanager
+def local_file(blob, canceled=lambda: False):
+    """Seek local objects directly; download remote objects with bounded RAM and cleanup."""
+    path = Path(blob.storage_uri)
+    if path.is_absolute() or path.is_file():
+        if not path.is_file():
+            raise FileNotFoundError("素材文件不存在")
+        yield path
+        return
+    with tempfile.TemporaryDirectory(prefix="inspiration-source-") as tmp:
+        path = Path(tmp) / "source"
+        digest = hashlib.sha256()
+        with open_range(blob) as source, path.open("wb") as target:
+            while chunk := source.read(1024 * 1024):
+                if canceled():
+                    from app.modules.generation.media_engine import Canceled
+
+                    raise Canceled()
+                target.write(chunk)
+                digest.update(chunk)
+        if path.stat().st_size != blob.size_bytes or digest.hexdigest() != blob.hash:
+            raise ValueError("素材文件不完整，请检查存储服务")
+        yield path
+
+
+def put_file(db, path: Path, mime: str, *, force_store=False, **metadata):
     """Hash and store a disk file with bounded memory on either storage backend."""
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     existing = db.get(Blob, digest)
     if existing:
+        for name, value in metadata.items():
+            if value is not None and getattr(existing, name, None) is None:
+                setattr(existing, name, value)
+    if existing and not force_store:
         try:
             with open_range(existing, 0, 1) as stream:
                 if stream.read(1):
+                    db.flush()
                     return existing
         except (OSError, ValueError):
             pass  # An exact re-upload may repair a missing object, preserving all references.

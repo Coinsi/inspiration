@@ -11,6 +11,10 @@ from app.models.identity import Membership, Project, User
 
 
 def run() -> None:
+    from app.core.config import settings
+    if not settings.is_dev:
+        print("生产环境不创建演示账号。")
+        return
     db = SessionLocal()
     try:
         user = db.scalar(select(User).where(User.username == "demo"))

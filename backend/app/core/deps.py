@@ -13,6 +13,7 @@ from app.core.permissions import require
 from app.core.security import decode_access_token
 from app.models.enums import Role
 from app.models.identity import Membership, Project, User
+from app.core.auth_controls import is_revoked, validate_user_session
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -28,9 +29,10 @@ def get_current_user(
         user_id = uuid.UUID(payload["sub"])
     except Exception as exc:  # noqa: BLE001
         raise Unauthorized("令牌无效或已过期") from exc
+    if is_revoked(db, cred.credentials):
+        raise Unauthorized("登录已退出，请重新登录")
     user = db.get(User, user_id)
-    if user is None or not user.is_active:
-        raise Unauthorized("用户不存在或已禁用")
+    validate_user_session(user, payload)
     return user
 
 
