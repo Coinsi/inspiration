@@ -20,6 +20,7 @@ from app.modules.canvas.router import router as canvas_router
 from app.modules.asset.router import router as asset_router
 from app.modules.assist.router import router as assist_router
 from app.modules.generation.router import router as generation_router
+from app.modules.generation.workbench import router as workbench_router
 from app.modules.identity.router import router as identity_router
 from app.modules.library.router import router as library_router
 from app.modules.media.router import router as media_router
@@ -29,11 +30,17 @@ from app.modules.review.router import router as review_router
 from app.modules.setting.router import router as setting_router
 from app.modules.shot.router import router as shot_router
 from app.modules.generation.channel_router import router as channel_router
+from app.modules.generation.model_router import router as creative_model_router
 from app.modules.timeline.router import router as timeline_router
 
 
 @asynccontextmanager
 async def lifespan(app):
+    processing_stop = None
+    if settings.library_processing_enabled:
+        from app.modules.library.processing_worker import start as start_processing
+
+        processing_stop = start_processing()
     library_stop = None
     if settings.library_worker_enabled:
         from app.modules.library.worker import start
@@ -58,6 +65,8 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if processing_stop:
+            await to_thread(processing_stop)
         if transcription_stop:
             await to_thread(transcription_stop)
         if agent_stop:
@@ -104,7 +113,9 @@ app.include_router(narrative_router, prefix="/api/v1")
 app.include_router(prompt_router, prefix="/api/v1")
 app.include_router(shot_router, prefix="/api/v1")
 app.include_router(generation_router, prefix="/api/v1")
+app.include_router(workbench_router, prefix="/api/v1")
 app.include_router(channel_router, prefix="/api/v1")
+app.include_router(creative_model_router, prefix="/api/v1")
 app.include_router(media_router, prefix="/api/v1")
 app.include_router(library_router, prefix="/api/v1")
 app.include_router(review_router, prefix="/api/v1")
@@ -125,3 +136,6 @@ def ready():
 
     result = readiness()
     return JSONResponse(result, status_code=200 if result["status"] == "ok" else 503)
+
+from app.modules.generation.personal import router as personal_model_router
+app.include_router(personal_model_router, prefix="/api/v1")

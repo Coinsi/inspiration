@@ -25,6 +25,7 @@ def configure_provider(
     db: Session, ctx: ProjectContext, data: schemas.ProviderConfigIn
 ) -> ProviderConfig:
     from app.core.errors import Conflict
+
     if any(k in data.config for k in ("channel_id", "protocol", "modality")):
         raise Conflict("渠道模型请通过模型管理保存")
     pc = db.scalar(
@@ -49,11 +50,45 @@ def configure_provider(
     return pc
 
 
-def list_providers(db: Session, project_id: uuid.UUID) -> list[ProviderConfig]:
+def list_providers(db: Session, project_id: uuid.UUID, user_id=None) -> list[ProviderConfig]:
+    from app.modules.generation import model_catalog as catalog
     from app.modules.generation.channels import provider_view
-    return [provider_view(db, p) for p in db.scalars(
-        select(ProviderConfig).where(ProviderConfig.project_id == project_id)
-    )]
+
+    creative = catalog.rows(db, project_id)
+    bound = {r["profile_id"] for m in creative for r in m.definition.get("routes", [])}
+    result = [
+        provider_view(db, p)
+        for p in db.scalars(select(ProviderConfig).where(ProviderConfig.project_id == project_id))
+    ]
+    for p in result:
+        if str(p["id"]) in bound:
+            p["config"] = {**p["config"], "hidden_from_catalog": True}
+    for row in creative:
+        info = catalog.public(db, row)
+        result.append(
+            schemas.ProviderConfigOut(
+                id=row.id,
+                provider_name=info["provider_name"],
+                kind="llm" if row.modality == "text" else "generation",
+                enabled=info["available"],
+                endpoint=None,
+                display_name=row.name,
+                channel_name="",
+                capabilities={},
+                config={
+                    "modality": row.modality,
+                    "protocol": "routed",
+                    "is_default": info["is_default"],
+                    "description": info["description"],
+                    "route_count": info["available_routes"],
+                },
+            )
+        )
+        if row.modality != "text":
+            result[-1].config["param_schema"] = catalog.aggregate(db, row).param_schema
+    from app.modules.generation.personal import providers
+    result.extend(providers(db, user_id))
+    return result
 
 
 # ── 配额 ──
@@ -169,7 +204,16 @@ def get_project_quota(db: Session, project_id: uuid.UUID) -> Quota | None:
 
 
 # ── 供应商实例 ──
-def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=None):
+def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=None, user_id=None):
+    from app.modules.generation.personal import PREFIX as PERSONAL, PersonalProvider
+    if name.startswith(PERSONAL):
+        return PersonalProvider(db, name, user_id, snapshot)
+    from app.modules.generation.model_catalog import PREFIX
+
+    if name.startswith(PREFIX):
+        from app.modules.generation.model_routing import RoutedProvider
+
+        return RoutedProvider(db, project_id, name, snapshot)
     pc = db.scalar(
         select(ProviderConfig).where(
             ProviderConfig.project_id == project_id, ProviderConfig.provider_name == name
@@ -180,6 +224,7 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=N
     config = {}
     if pc is not None:
         from app.modules.generation.channels import resolved
+
         r = resolved(db, pc)
         if not r.enabled or pc.kind != "generation":
             raise CapabilityUnsupported("该生成供应商已停用")
@@ -198,9 +243,35 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=N
             caps = provider.capabilities()
             caps.strict_parameters = True
             caps.modalities &= {config["modality"]}
+            caps.max_reference_images = min(
+                caps.max_reference_images, config.get("max_reference_images", 0)
+            )
+            if config.get("param_schema") is not None:
+                caps.param_schema = config["param_schema"]
+            if caps.max_video_seconds is not None:
+                caps.max_video_seconds = min(
+                    caps.max_video_seconds, config.get("max_video_seconds", caps.max_video_seconds)
+                )
             if config.get("max_reference_images", 0) == 0:
                 caps.features -= {"reference", "img2img", "inpaint", "first_frame", "last_frame"}
             provider.capabilities = lambda: caps
+            if config.get("price", {}).get("mode") not in (None, "unconfigured"):
+                from app.adapters.contracts import CostEstimate
+                from app.modules.generation.model_catalog import Price
+
+                original_estimate = provider.estimate_cost
+
+                def configured_estimate(req):
+                    original_estimate(req)  # Retain protocol-specific request validation.
+                    return CostEstimate(
+                        points=Price(**config["price"]).quote(req),
+                        detail={
+                            "pricing": "configured",
+                            "message": "项目内部积分，实际费用以上游账单为准",
+                        },
+                    )
+
+                provider.estimate_cost = configured_estimate
         return provider
     except KeyError as exc:
         raise CapabilityUnsupported("该生成供应商尚未接入") from exc
@@ -333,11 +404,13 @@ def estimate(
     target_id: uuid.UUID,
     gen_in: schemas.GenerateIn,
 ) -> schemas.EstimateOut:
-    provider = _provider_instance(db, ctx.project.id, gen_in.provider)
+    provider = _provider_instance(db, ctx.project.id, gen_in.provider, user_id=ctx.user.id)
     prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
     from app.modules.identity.preferences import guide
+
     prompt = guide(db, ctx.project.id, prompt, "generation")
     from app.modules.skill.service import compose as compose_skills
+
     prompt, used_skills = compose_skills(db, ctx.project.id, gen_in.skills, prompt)
     caps = provider.capabilities()
     _validate_controls(gen_in, caps)
@@ -362,7 +435,7 @@ def submit(
     skill_snapshot: list | None = None,
     project_guidance: str | None = None,
 ) -> GenerationJob:
-    provider = _provider_instance(db, ctx.project.id, gen_in.provider)
+    provider = _provider_instance(db, ctx.project.id, gen_in.provider, user_id=ctx.user.id)
     caps = provider.capabilities()
     if mask and ("inpaint" not in caps.features or not gen_in.source_generation_id):
         raise CapabilityUnsupported("供应商未声明支持局部重绘，或未指定原图")
@@ -374,15 +447,18 @@ def submit(
     prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
     original_prompt = prompt
     from app.modules.identity.preferences import guide
+
     if project_guidance is None:
         prompt = guide(db, ctx.project.id, prompt, "generation")
     elif project_guidance:
         prompt = "【项目创作偏好】\n" + project_guidance + "\n\n【本次要求】\n" + (prompt or "")
     from app.modules.skill.service import compose as compose_skills
+
     if skill_snapshot is None:
         prompt, used_skills = compose_skills(db, ctx.project.id, gen_in.skills, prompt)
     else:
         from app.modules.skill.service import compose_documents
+
         prompt, used_skills = compose_documents(skill_snapshot, prompt)
 
     # 收集参考图(资产生图):按供应商能力上限截断
@@ -419,6 +495,7 @@ def submit(
         created_by=ctx.user.id,
         input_snapshot={
             **model_snapshot(db, ctx.project.id, gen_in.provider),
+            **(provider.snapshot() if hasattr(provider, "snapshot") else {}),
             **({"canvas_origin": execution_origin} if execution_origin else {}),
             "prompt": prompt,
             "skills": used_skills,

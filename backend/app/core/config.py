@@ -33,11 +33,27 @@ class Settings(BaseSettings):
     minio_secure: bool = False
     library_staging_dir: str = "./_library_staging"
     library_max_upload_bytes: int = 10 * 1024 * 1024 * 1024
+    library_staging_max_bytes: int = 100 * 1024 * 1024 * 1024
+    library_staging_reserve_bytes: int = 2 * 1024 * 1024 * 1024
     agent_worker_enabled: bool = True
     canvas_worker_enabled: bool = True
     library_worker_enabled: bool = True
     library_indexer_url: str = "http://127.0.0.1:8011"
     library_indexer_token: str | None = None
+    # Optional upstream media services. Only the business API exposes library access.
+    library_wise_url: str = ""
+    library_wise_token: str | None = None
+    library_wise_capabilities: list[str] = ["visual"]
+    library_mediacms_url: str = ""
+    library_mediacms_token: str | None = None
+    library_mediacms_transcription_enabled: bool = False
+    library_processing_enabled: bool = False
+    library_processing_auto: bool = False
+    library_processing_wise_auto_capabilities: list[str] = ["visual", "audio"]
+    library_processing_poll_seconds: int = 10
+    library_processing_temp_dir: str = "./_media_processing"
+    library_processing_reserve_bytes: int = 2 * 1024 * 1024 * 1024
+    library_processing_max_transfer_bytes: int = 50 * 1024 * 1024 * 1024
     transcription_worker_enabled: bool = True
     transcriber_url: str = ""
     transcriber_token: str | None = None

@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { PersonalModelServices } from "./PersonalModelServices";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -7,14 +8,17 @@ import {
   Film,
   MessageSquare,
   Pencil,
-  X,
   RefreshCw,
-  KeyRound,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import "./model-channels.css";
+import { EditorFrame } from "./ModelEditorFrame";
+import { CreativeModels, PriceFields, type ModelPrice } from "./CreativeModels";
+import { ConnectModelService } from "./ConnectModelService";
+import { DefaultModels } from "./DefaultModels";
+import "./model-settings.css";
 
 type Model = {
   id: string;
@@ -30,6 +34,7 @@ type Model = {
   mask_editing: boolean;
   max_video_seconds: number;
   parameters: Record<string, (string | number)[]>;
+  price: ModelPrice;
 };
 type Channel = {
   id: string;
@@ -59,7 +64,114 @@ const paramNames: Record<string, string> = {
 };
 const field = "h-10 w-full rounded-lg border border-border bg-bg px-3 text-sm";
 
-export function ModelChannels({ projectId }: { projectId: string }) {
+export function ModelChannels({
+  projectId,
+  initialTab: _initialTab = "defaults",
+}: {
+  projectId: string;
+  initialTab?: "defaults" | "services";
+}) {
+  const [tab, setTab] = useState<string>("personal");
+  const [connecting, setConnecting] = useState(false);
+  const [manualRequest, setManualRequest] = useState(false);
+  const [notice, setNotice] = useState("");
+  const qc = useQueryClient();
+  return (
+    <div className="model-config-workspace">
+      <nav className="model-settings-nav" aria-label="模型设置分区">
+        <button
+          aria-pressed={tab === "personal"}
+          onClick={() => setTab("personal")}
+        >
+          我的模型服务
+        </button>
+        <button
+          aria-pressed={tab === "defaults"}
+          onClick={() => setTab("defaults")}
+        >
+          项目默认模型
+        </button>
+        <button
+          aria-pressed={tab === "services"}
+          onClick={() => setTab("services")}
+        >
+          项目专用服务
+        </button>
+        <button
+          aria-pressed={tab === "advanced"}
+          onClick={() => setTab("advanced")}
+        >
+          高级路由
+        </button>
+      </nav>
+      {notice && (
+        <p role="status" className="model-settings-notice">
+          {notice}
+        </p>
+      )}
+      {tab === "personal" ? (
+        <PersonalModelServices projectId={projectId} />
+      ) : tab === "defaults" ? (
+        <DefaultModels
+          projectId={projectId}
+          connect={() => setTab("personal")}
+          services={() => setTab("services")}
+        />
+      ) : tab === "services" ? (
+        <ChannelsPane
+          projectId={projectId}
+          connectService={() => setConnecting(true)}
+          manualRequest={manualRequest}
+          manualHandled={() => setManualRequest(false)}
+        />
+      ) : (
+        <CreativeModels
+          projectId={projectId}
+          openChannels={() => setTab("services")}
+          connectService={() => setConnecting(true)}
+        />
+      )}
+      {connecting && (
+        <ConnectModelService
+          projectId={projectId}
+          close={() => setConnecting(false)}
+          custom={() => {
+            setConnecting(false);
+            setTab("services");
+            setManualRequest(true);
+          }}
+          saved={async (message) => {
+            await Promise.all(
+              [
+                "model-channels",
+                "creative-models",
+                "providers",
+                "capabilities",
+              ].map((key) =>
+                qc.invalidateQueries({ queryKey: [key, projectId] }),
+              ),
+            );
+            setNotice(message);
+            setConnecting(false);
+            setTab("defaults");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChannelsPane({
+  projectId,
+  connectService,
+  manualRequest,
+  manualHandled,
+}: {
+  projectId: string;
+  connectService: () => void;
+  manualRequest: boolean;
+  manualHandled: () => void;
+}) {
   const base = `/projects/${projectId}/model-channels`,
     qc = useQueryClient();
   const query = useQuery({
@@ -72,18 +184,26 @@ export function ModelChannels({ projectId }: { projectId: string }) {
     channel: Channel;
     model: Model | null;
   } | null>(null);
-  const [filter, setFilter] = useState("");
+  useEffect(() => {
+    if (manualRequest) {
+      setChannelEdit(null);
+      manualHandled();
+    }
+  }, [manualRequest, manualHandled]);
   const [notice, setNotice] = useState("");
   const [directory, setDirectory] = useState<{
     channel: string;
     models: string[];
     truncated: boolean;
   } | null>(null);
-  const active =
-    query.data?.channels.find((c) => c.id === selected) ||
-    query.data?.channels[0];
+
   const refresh = async () => {
-    for (const key of ["model-channels", "providers", "capabilities"])
+    for (const key of [
+      "model-channels",
+      "creative-models",
+      "providers",
+      "capabilities",
+    ])
       await qc.invalidateQueries({ queryKey: [key, projectId] });
   };
   const discover = useMutation({
@@ -118,218 +238,166 @@ export function ModelChannels({ projectId }: { projectId: string }) {
     );
   const data = query.data!;
   return (
-    <section className="model-center">
-      <header className="model-center-heading">
+    <section>
+      <header className="model-settings-heading">
         <div>
-          <span className="model-eyebrow">创作设置 / MODEL CONNECTIONS</span>
-          <h1>渠道与模型</h1>
-          <p>统一连接服务，为图片、视频和文字创作选择合适的模型。</p>
+          <h2>服务连接</h2>
+          <p>管理当前项目使用的模型服务。一份连接可以提供多个模型。</p>
         </div>
-        <Button onClick={() => setChannelEdit(null)}>
-          <Plus size={16} />
-          添加渠道
+        <Button onClick={connectService}>
+          <Plus size={15} />
+          添加服务
         </Button>
       </header>
       {(notice || migrate.error || discover.error) && (
-        <p
-          className={`model-notice ${migrate.error || discover.error ? "text-danger" : ""}`}
-          role="status"
-        >
+        <p role="status" className="model-settings-notice">
           {migrate.error?.message || discover.error?.message || notice}
         </p>
       )}
       {data.legacy_count > 0 && (
         <div className="model-legacy">
           <div>
-            <strong>发现 {data.legacy_count} 套原有配置</strong>
-            <p>迁移后可按渠道管理；已有生成记录、密钥和模型标识都会保留。</p>
+            <strong>已有连接可以沿用</strong>
+            <p>
+              将 {data.legacy_count}{" "}
+              套旧配置整理到此处，密钥和历史任务保持不变。
+            </p>
           </div>
           <Button
             variant="outline"
             disabled={migrate.isPending}
             onClick={() => migrate.mutate()}
           >
-            {migrate.isPending ? "迁移中…" : "迁移原配置"}
+            整理已有连接
           </Button>
         </div>
       )}
-      <div className="model-layout">
-        <aside className="model-channel-list" aria-label="模型渠道">
-          <div className="model-section-title">
-            服务渠道 <span>{data.channels.length}</span>
-          </div>
-          {data.channels.map((c) => (
-            <button
-              key={c.id}
-              className={`model-channel ${active?.id === c.id ? "is-selected" : ""}`}
-              onClick={() => {
-                setSelected(c.id);
-                setFilter("");
-              }}
-            >
+      <div className="service-list">
+        {data.channels.map((channel) => (
+          <article className="service-item" key={channel.id}>
+            <header className="service-item-header">
               <Server size={18} />
-              <span>
-                <strong>{c.name}</strong>
+              <div className="service-item-copy">
+                <strong>{channel.name}</strong>
                 <small>
-                  {c.models.length} 个模型 · {c.enabled ? "已启用" : "已停用"}
+                  {channel.models.length} 个模型 ·{" "}
+                  {!channel.enabled
+                    ? "已停用"
+                    : channel.has_token ||
+                        (channel.models.every((m) => m.protocol === "mock") &&
+                          channel.models.length)
+                      ? "已保存连接"
+                      : "待填写密钥"}
                 </small>
-              </span>
-              <i className={c.enabled ? "is-on" : ""} />
-            </button>
-          ))}
-          {!data.channels.length && (
-            <p className="model-empty-small">
-              添加第一个渠道，或迁移原有配置。
-            </p>
-          )}
-          <p className="model-channel-help">
-            <KeyRound size={14} />
-            密钥仅在服务端保存，编辑时留空即保留。
-          </p>
-        </aside>
-        <div className="model-content">
-          {active ? (
-            <>
-              <header className="model-active-heading">
-                <div>
-                  <h2>{active.name}</h2>
-                  <p>{active.endpoint || "本地离线测试，无服务地址"}</p>
-                  <small>
-                    {active.has_token ? "已保存密钥" : "未设置密钥"} ·{" "}
-                    {active.enabled
-                      ? "渠道已启用"
-                      : "渠道已停用，所有模型暂停使用"}
-                  </small>
-                </div>
+              </div>
+              <div className="service-item-actions">
                 <Button
                   variant="outline"
-                  onClick={() => setChannelEdit(active)}
+                  onClick={() => setChannelEdit(channel)}
                 >
-                  <Pencil size={14} />
-                  编辑渠道
+                  <Pencil size={13} />
+                  编辑连接
                 </Button>
-              </header>
-              <div className="model-toolbar">
-                <div className="model-filters">
-                  {["", "image", "video", "text"].map((k) => (
+                <Button
+                  variant="ghost"
+                  aria-expanded={selected === channel.id}
+                  onClick={() =>
+                    setSelected(selected === channel.id ? "" : channel.id)
+                  }
+                >
+                  管理模型
+                </Button>
+              </div>
+            </header>
+            {selected !== channel.id && (
+              <div className="service-model-chips">
+                {channel.models.length ? (
+                  channel.models
+                    .slice(0, 8)
+                    .map((m) => <span key={m.id}>{m.name}</span>)
+                ) : (
+                  <span>添加模型后即可用于创作</span>
+                )}
+                {channel.models.length > 8 && (
+                  <span>+{channel.models.length - 8}</span>
+                )}
+              </div>
+            )}
+            {selected === channel.id && (
+              <div className="service-expanded">
+                <div className="service-tools">
+                  <h3>此服务提供的模型</h3>
+                  <div>
+                    <Button
+                      variant="outline"
+                      disabled={
+                        discover.isPending ||
+                        !channel.has_token ||
+                        !channel.endpoint
+                      }
+                      onClick={() => discover.mutate(channel.id)}
+                    >
+                      <RefreshCw size={13} />
+                      {discover.isPending ? "读取中…" : "读取模型"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setModelEdit({ channel, model: null })}
+                    >
+                      <Plus size={13} />
+                      添加模型
+                    </Button>
+                  </div>
+                </div>
+                {directory?.channel === channel.id && (
+                  <p className="model-settings-footnote">
+                    已读取 {directory.models.length}{" "}
+                    个模型。点击“添加模型”选择需要的模型与类型。
+                  </p>
+                )}
+                {channel.models.map((model) => (
+                  <div className="service-model-row" key={model.id}>
+                    {model.modality === "image" ? (
+                      <Image size={17} />
+                    ) : model.modality === "video" ? (
+                      <Film size={17} />
+                    ) : (
+                      <MessageSquare size={17} />
+                    )}
+                    <div>
+                      <strong>{model.name}</strong>
+                      <p>{model.model}</p>
+                    </div>
+                    <span>
+                      {model.enabled ? kinds[model.modality] : "已停用"}
+                    </span>
                     <button
-                      key={k}
-                      className={filter === k ? "is-selected" : ""}
-                      onClick={() => setFilter(k)}
+                      onClick={() => setModelEdit({ channel, model })}
+                      aria-label={`编辑模型 ${model.name}`}
                     >
-                      {kinds[k] || "全部"}
+                      编辑
                     </button>
-                  ))}
-                </div>
-                <div className="flex gap-2 flex-wrap">
-                  <Button
-                    variant="outline"
-                    disabled={
-                      discover.isPending ||
-                      !active.has_token ||
-                      !active.endpoint
-                    }
-                    onClick={() => discover.mutate(active.id)}
-                  >
-                    <RefreshCw size={14} />
-                    {discover.isPending ? "读取中…" : "读取模型目录"}
-                  </Button>
-                  <Button
-                    onClick={() =>
-                      setModelEdit({ channel: active, model: null })
-                    }
-                  >
-                    <Plus size={14} />
-                    添加模型
-                  </Button>
-                </div>
-              </div>
-              {directory?.channel === active.id && (
-                <div className="model-directory">
-                  <strong>
-                    目录已读取 · {directory.models.length} 个模型
-                    {directory.truncated ? "（仅显示前1000个）" : ""}
-                  </strong>
-                  <p>
-                    添加模型时可从编号列表选择，再确认模型类型与协议。读取目录不会发起生成。
+                  </div>
+                ))}
+                {!channel.models.length && (
+                  <p className="model-settings-footnote">
+                    从服务读取模型编号，或手动添加你已开通的模型。
                   </p>
-                </div>
-              )}
-              <div className="model-cards">
-                {active.models
-                  .filter((m) => !filter || m.modality === filter)
-                  .map((m) => (
-                    <article
-                      key={m.id}
-                      className={`model-card ${!m.enabled || !active.enabled ? "is-disabled" : ""}`}
-                    >
-                      <div className="model-card-top">
-                        <span className="model-type-icon">
-                          {m.modality === "image" ? (
-                            <Image size={20} />
-                          ) : m.modality === "video" ? (
-                            <Film size={20} />
-                          ) : (
-                            <MessageSquare size={20} />
-                          )}
-                        </span>
-                        <span className="model-tag">{kinds[m.modality]}</span>
-                        {m.is_default && (
-                          <span className="model-tag is-default">默认</span>
-                        )}
-                        <button
-                          aria-label={`编辑模型 ${m.name}`}
-                          onClick={() =>
-                            setModelEdit({ channel: active, model: m })
-                          }
-                        >
-                          <Pencil size={15} />
-                        </button>
-                      </div>
-                      <h3>{m.name}</h3>
-                      <p className="model-id">
-                        {m.model || "沿用原配置默认模型"}
-                      </p>
-                      <p>{data.protocols[m.protocol]?.name || m.protocol}</p>
-                      <footer>
-                        <span>
-                          {m.enabled && active.enabled
-                            ? "可供创作选择"
-                            : "已停用"}
-                        </span>
-                        <span>
-                          {m.max_reference_images
-                            ? `最多 ${m.max_reference_images} 张参考图`
-                            : ""}
-                        </span>
-                      </footer>
-                    </article>
-                  ))}
+                )}
               </div>
-              {!active.models.some((m) => !filter || m.modality === filter) && (
-                <div className="model-empty">
-                  <Plus size={28} />
-                  <h3>在这个渠道添加模型</h3>
-                  <p>
-                    同一地址和密钥可以连接多个模型；每个模型独立配置类型与能力。
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="model-empty">
-              <Server size={32} />
-              <h2>连接你的创作服务</h2>
-              <p>准备服务地址与 API Key，再添加需要使用的模型。</p>
-              <Button onClick={() => setChannelEdit(null)}>
-                添加第一个渠道
-              </Button>
-            </div>
-          )}
-        </div>
+            )}
+          </article>
+        ))}
       </div>
-      <p className="model-footnote">
-        支持兼容协议不代表所有厂商原生接口都可直接使用。目录测试只验证连接；时长、画幅和参考图能力请以渠道说明为准。
+      {!data.channels.length && (
+        <div className="model-settings-empty">
+          <Server size={28} />
+          <p>还没有连接模型服务</p>
+          <Button onClick={connectService}>添加第一个服务</Button>
+        </div>
+      )}
+      <p className="model-settings-footnote">
+        连接对当前项目共享。密钥仅保存在服务端；修改连接不会改写已有作品。
       </p>
       {channelEdit !== undefined && (
         <ChannelEditor
@@ -341,7 +409,7 @@ export function ModelChannels({ projectId }: { projectId: string }) {
             setSelected(id);
             await refresh();
             setChannelEdit(undefined);
-            setNotice("渠道已保存");
+            setNotice("连接已保存");
           }}
         />
       )}
@@ -366,77 +434,6 @@ export function ModelChannels({ projectId }: { projectId: string }) {
         />
       )}
     </section>
-  );
-}
-
-function EditorFrame({
-  title,
-  children,
-  close,
-  dirty,
-  busy,
-}: {
-  title: string;
-  children: React.ReactNode;
-  close: () => void;
-  dirty: boolean;
-  busy: boolean;
-}) {
-  const dialog = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = overflow;
-      previous?.focus();
-    };
-  }, []);
-  const dismiss = () => {
-    if (!busy && (!dirty || window.confirm("放弃尚未保存的修改？"))) close();
-  };
-  return (
-    <div
-      className="model-overlay"
-      onKeyDown={(e) => {
-        if (e.key === "Tab") {
-          const elements = [
-            ...(dialog.current?.querySelectorAll<HTMLElement>(
-              'button:not(:disabled),input:not(:disabled),select:not(:disabled),[tabindex="0"]',
-            ) || []),
-          ];
-          const first = elements[0],
-            last = elements[elements.length - 1];
-          if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            last?.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            first?.focus();
-          }
-        }
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          dismiss();
-        }
-      }}
-    >
-      <section
-        className="model-dialog"
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <header>
-          <h2>{title}</h2>
-          <button aria-label="关闭编辑" disabled={busy} onClick={dismiss}>
-            <X size={20} />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
   );
 }
 
@@ -485,7 +482,7 @@ function ChannelEditor({
   });
   return (
     <EditorFrame
-      title={channel ? "编辑渠道" : "添加渠道"}
+      title={channel ? "编辑服务连接" : "添加自定义服务"}
       close={close}
       dirty={dirty}
       busy={save.isPending}
@@ -499,7 +496,7 @@ function ChannelEditor({
       >
         <fieldset disabled={save.isPending} className="model-form">
           <label>
-            渠道名称
+            服务名称
             <Input
               autoFocus
               required
@@ -529,7 +526,7 @@ function ChannelEditor({
               disabled={clear}
               onChange={(e) => setToken(e.target.value)}
               placeholder={
-                channel?.has_token ? "已保存，留空保留" : "输入渠道密钥"
+                channel?.has_token ? "已保存，留空保留" : "输入服务密钥"
               }
             />
           </label>
@@ -552,16 +549,16 @@ function ChannelEditor({
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
-            启用渠道
+            启用服务
           </label>
-          <small>停用渠道会暂停旗下模型的新调用，已有结果仍保留。</small>
+          <small>停用服务会暂停旗下模型的新调用，已有结果仍保留。</small>
           {save.error && (
             <p role="alert" className="text-danger">
               {save.error.message}
             </p>
           )}
           <Button type="submit" disabled={!name.trim()}>
-            {save.isPending ? "保存中…" : "保存渠道"}
+            {save.isPending ? "保存中…" : "保存连接"}
           </Button>
         </fieldset>
       </form>
@@ -587,6 +584,9 @@ function ModelEditor({
   saved: () => Promise<void>;
 }) {
   const qc = useQueryClient();
+  const [price, setPrice] = useState<ModelPrice>(
+    model?.price || { mode: "unconfigured", amount: "0" },
+  );
   const [name, setName] = useState(model?.name || ""),
     [code, setCode] = useState(model?.model || ""),
     [protocol, setProtocol] = useState(model?.protocol || "gpt_image"),
@@ -610,10 +610,14 @@ function ModelEditor({
     modality === "text"
       ? []
       : modality === "image"
-        ? ["size", "quality"]
+        ? protocol === "ark_image"
+          ? ["size"]
+          : ["size", "quality"]
         : protocol === "openai_video"
           ? ["duration", "size"]
-          : ["duration", "aspect_ratio", "resolution"];
+          : protocol === "minimax_video"
+            ? ["duration", "resolution"]
+            : ["duration", "aspect_ratio", "resolution"];
   const save = useMutation({
     mutationFn: () => {
       const params = Object.fromEntries(
@@ -640,6 +644,8 @@ function ModelEditor({
         mask_editing: protocol === "gpt_image" && mask,
         max_video_seconds: seconds,
         parameters: params,
+        price:
+          modality === "text" ? { mode: "unconfigured", amount: "0" } : price,
       };
       return model
         ? api.put(`${base}/${channel.id}/models/${model.id}`, body)
@@ -712,6 +718,7 @@ function ModelEditor({
                 setRefs(0);
                 setMask(false);
                 setDefault(false);
+                setPrice({ mode: "unconfigured", amount: "0" });
               }}
             >
               {Object.entries(protocols).map(([id, p]) => (
@@ -730,6 +737,7 @@ function ModelEditor({
               onChange={(e) => {
                 setModality(e.target.value);
                 setParameters({});
+                setPrice({ mode: "unconfigured", amount: "0" });
               }}
             >
               {protocols[protocol].types.map((k) => (
@@ -748,17 +756,31 @@ function ModelEditor({
           {protocol === "openai_video" && (
             <p className="model-notice">
               使用 /videos
-              创建、查询和下载视频。每次一个视频；停止本地等待不保证上游停止计费。未配置价格，实际费用以上游账单为准。
+              创建、查询和下载视频。每次一个视频；停止本地等待不保证上游停止计费。
             </p>
           )}
           {modality !== "text" && (
             <>
+              <PriceFields
+                value={price}
+                onChange={setPrice}
+                video={modality === "video"}
+              />
               <label>
                 最多参考图片数
                 <Input
                   type="number"
                   min={0}
-                  max={protocol === "openai_video" ? 1 : 16}
+                  max={
+                    (
+                      {
+                        openai_video: 1,
+                        minimax_video: 1,
+                        ark_video: 2,
+                        ark_image: 14,
+                      } as Record<string, number>
+                    )[protocol] ?? 16
+                  }
                   value={refs}
                   onChange={(e) => {
                     setRefs(Number(e.target.value));

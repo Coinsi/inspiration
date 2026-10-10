@@ -17,6 +17,7 @@ class AgentRun(Base, TimestampMixin):
     request_key: Mapped[uuid.UUID] = mapped_column(UUID)
     goal: Mapped[str] = mapped_column(String(8000))
     engine: Mapped[str] = mapped_column(String(32))
+    model_provider: Mapped[str | None] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(32), default="queued")
     scope: Mapped[list] = mapped_column(JSONB)
     skill_snapshot: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")

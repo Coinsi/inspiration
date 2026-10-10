@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { api, apiUpload } from "@/lib/api";
 import {
   digest,
+  fileMediaType,
+  mediaAccept,
+  mediaTypeName,
+  type MediaType,
   fileFingerprint,
   mediaSize,
   type MediaVersion,
@@ -15,6 +19,7 @@ export function LibraryUpload({
   mediaId,
   resume,
   folderId,
+  mediaType,
   onClose,
   onChange,
 }: {
@@ -22,6 +27,7 @@ export function LibraryUpload({
   mediaId?: string;
   resume?: MediaVersion;
   folderId?: string | null;
+  mediaType?: MediaType;
   onClose: () => void;
   onChange: () => void;
 }) {
@@ -32,6 +38,7 @@ export function LibraryUpload({
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [error, setError] = useState("");
+  const expectedType = resume?.media_type || mediaType;
   const pause = useRef(false),
     running = useRef(false);
   useEffect(
@@ -47,6 +54,25 @@ export function LibraryUpload({
     setBusy(true);
     setError("");
     try {
+      const kind = fileMediaType(file.name);
+      if (!kind)
+        throw new Error(
+          zh
+            ? "暂不支持此文件格式，请选择视频、图片或音频。"
+            : "Choose a supported video, image or audio file.",
+        );
+      if (kind === "image" && file.size > 64 * 1024 * 1024)
+        throw new Error(
+          zh
+            ? "请选择64 MB以内的静态图片。"
+            : "Choose a still image under 64 MB.",
+        );
+      if (expectedType && kind !== expectedType)
+        throw new Error(
+          zh
+            ? `新版本必须仍为${mediaTypeName(expectedType, true)}。`
+            : `The new version must remain ${mediaTypeName(expectedType, false).toLowerCase()}.`,
+        );
       setMessage(zh ? "检查文件…" : "Checking file…");
       const fingerprint = await fileFingerprint(file);
       let current = version
@@ -173,11 +199,11 @@ export function LibraryUpload({
       title={
         zh
           ? resume
-            ? "继续上传视频"
+            ? "继续上传素材"
             : mediaId
               ? "上传新版本"
-              : "导入视频"
-          : "Upload video"
+              : "导入素材"
+          : "Import media"
       }
       onClose={() => {
         pause.current = true;
@@ -188,18 +214,29 @@ export function LibraryUpload({
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
           {zh
-            ? "支持 MP4 / MOV / MKV / WebM。默认最多10 GB、6小时。原片保留，预览单独生成；离开页面会暂停上传，重新选择原文件即可续传。"
-            : "MP4 / MOV / MKV / WebM. Up to 10 GB and 6 hours by default. Originals are retained separately from previews. Reselect the original file to resume after leaving."}
+            ? "支持视频、JPEG / PNG / WebP静态图片和音频。图片最多64 MB；视频与音频默认最多10 GB、6小时。保留原文件并另行生成预览；离开页面后可重新选择原文件续传。"
+            : "Import video, still JPEG / PNG / WebP images and audio. Images up to 64 MB; video and audio default to 10 GB and 6 hours. Originals and previews are separate. Reselect the original to resume."}
         </p>
+        {expectedType && (
+          <p className="text-xs text-muted-foreground">
+            {zh
+              ? `此素材为${mediaTypeName(expectedType, true)}，新版本需保持同一类型。`
+              : `This is ${mediaTypeName(expectedType, false).toLowerCase()} media. New versions keep the same type.`}
+          </p>
+        )}
         {version && (
           <p className="break-words text-sm">
             {version.filename} · v{version.ordinal}
           </p>
         )}
         <input
-          aria-label={zh ? "选择视频文件" : "Choose video file"}
+          aria-label={zh ? "选择素材文件" : "Choose media file"}
           type="file"
-          accept=".mp4,.mov,.mkv,.webm"
+          accept={
+            expectedType
+              ? mediaAccept[expectedType]
+              : Object.values(mediaAccept).join(",")
+          }
           disabled={busy || (!!version && version.status !== "uploading")}
           onChange={(e) => setFile(e.target.files?.[0] || null)}
           className="max-w-full text-sm"
@@ -207,7 +244,7 @@ export function LibraryUpload({
         {version && (
           <div>
             <progress
-              aria-label={zh ? "视频上传进度" : "Video upload progress"}
+              aria-label={zh ? "素材上传进度" : "Media upload progress"}
               className="h-2 w-full accent-primary"
               value={version.uploaded_bytes}
               max={version.size_bytes}

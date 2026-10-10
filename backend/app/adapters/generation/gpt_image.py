@@ -79,7 +79,13 @@ class GptImageProvider(GenerationProvider):
             raise ProviderError("局部重绘需要原图、蒙版和支持蒙版的模型")
         try:
             data = self._call_with_n_fallback(req, refs)
-        except ProviderError:
+        except ProviderError as exc:
+            if req.count == 1 and getattr(exc, "upstream_status", None) in (401, 403, 404, 429):
+                from app.modules.generation.model_routing import SubmissionRejected
+
+                raise SubmissionRejected(
+                    f"图片服务拒绝提交（HTTP {exc.upstream_status}），未生成结果"
+                ) from None
             raise
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"GPT Image 调用失败:{exc}") from exc
@@ -156,7 +162,9 @@ class GptImageProvider(GenerationProvider):
                 message = str(error.reason)
         except Exception:
             message = str(error.reason)
-        return ProviderError(f"GPT Image HTTP {error.code}: {message}", detail)
+        result = ProviderError(f"GPT Image HTTP {error.code}: {message}", detail)
+        result.upstream_status = error.code
+        return result
 
     def _generations_stream(self, req: GenerationRequest) -> dict:
         """只接收 completed 事件；partial 不能替代成功结果。"""

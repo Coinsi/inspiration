@@ -1,9 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
-import { mediaTime, type MediaVersion } from "@/lib/library";
+import {
+  mediaTime,
+  mediaTypeName,
+  type MediaVersion,
+  type MediaType,
+} from "@/lib/library";
 import { MediaImage } from "@/components/MediaImage";
-import { MediaSegmentPlayer } from "@/components/MediaSegmentPlayer";
+import { LibraryMediaPreview } from "@/components/LibraryMediaPreview";
+import { AudioLines } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Version = MediaVersion & { name: string };
@@ -15,6 +21,7 @@ export function ShotVideoPicker({
   shotId: string;
 }) {
   const [query, setQuery] = useState(""),
+    [mediaType, setMediaType] = useState<MediaType | "all">("all"),
     [offset, setOffset] = useState(0),
     [selected, setSelected] = useState<Version | null>(null);
   const [start, setStart] = useState("0"),
@@ -29,30 +36,32 @@ export function ShotVideoPicker({
       "shot-picker",
       query,
       offset,
+      mediaType,
     ],
     queryFn: () =>
       api.get<{ items: Version[]; total: number }>(
-        `${base}/version-catalog?query=${encodeURIComponent(query)}&offset=${offset}&limit=12`,
+        `${base}/version-catalog?query=${encodeURIComponent(query)}&offset=${offset}&limit=12${mediaType === "all" ? "" : `&media_type=${mediaType}`}`,
       ),
   });
   const startMs = Math.round(Number(start) * 1000),
     endMs = Math.round(Number(end) * 1000);
   const valid =
     !!selected &&
-    start !== "" &&
-    end !== "" &&
-    Number.isFinite(startMs) &&
-    Number.isFinite(endMs) &&
-    startMs >= 0 &&
-    endMs - startMs >= 100 &&
-    endMs <= (selected.duration_ms ?? 0);
+    (selected.media_type === "image" ||
+      (start !== "" &&
+        end !== "" &&
+        Number.isFinite(startMs) &&
+        Number.isFinite(endMs) &&
+        startMs >= 0 &&
+        endMs - startMs >= 100 &&
+        endMs <= (selected.duration_ms ?? 0)));
   const save = useMutation({
     mutationFn: () =>
       api.post(`${base}/usages`, {
         version_id: selected!.id,
         shot_id: shotId,
-        start_ms: startMs,
-        end_ms: endMs,
+        start_ms: selected?.media_type === "image" ? null : startMs,
+        end_ms: selected?.media_type === "image" ? null : endMs,
         purpose,
         note: "",
       }),
@@ -70,20 +79,33 @@ export function ShotVideoPicker({
           <div className="reference-tools">
             <input
               type="search"
-              aria-label="搜索参考视频"
-              placeholder="搜索视频素材…"
+              aria-label="搜索参考素材"
+              placeholder="搜索图片、音频或视频…"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
                 setOffset(0);
               }}
             />
+            <select
+              aria-label="引用素材类型"
+              value={mediaType}
+              onChange={(e) => {
+                setMediaType(e.target.value as MediaType | "all");
+                setOffset(0);
+              }}
+            >
+              <option value="all">全部类型</option>
+              <option value="video">视频</option>
+              <option value="image">图片</option>
+              <option value="audio">音频</option>
+            </select>
           </div>
           {catalog.isPending ? (
-            <p role="status">正在读取视频…</p>
+            <p role="status">正在读取素材…</p>
           ) : catalog.isError ? (
             <p role="alert">
-              视频读取失败{" "}
+              素材读取失败{" "}
               <Button onClick={() => void catalog.refetch()}>重试</Button>
             </p>
           ) : (
@@ -93,7 +115,7 @@ export function ShotVideoPicker({
                   <button
                     key={v.id}
                     className="reference-card"
-                    aria-label={`选择视频 ${v.name} 版本 ${v.ordinal}`}
+                    aria-label={`选择${mediaTypeName(v.media_type, true)} ${v.name} 版本 ${v.ordinal}`}
                     onClick={() => {
                       save.reset();
                       setSelected(v);
@@ -102,18 +124,27 @@ export function ShotVideoPicker({
                     }}
                   >
                     <div>
-                      <MediaImage
-                        src={
-                          v.poster_hash
-                            ? blobUrl(projectId, v.poster_hash)
-                            : null
-                        }
-                        alt={v.name}
-                      />
+                      {v.media_type === "audio" ? (
+                        <span className="flex aspect-video items-center justify-center bg-elevated text-muted-foreground">
+                          <AudioLines size={32} />
+                        </span>
+                      ) : (
+                        <MediaImage
+                          src={
+                            v.poster_hash
+                              ? blobUrl(projectId, v.poster_hash)
+                              : null
+                          }
+                          alt={v.name}
+                        />
+                      )}
                     </div>
                     <strong>{v.name}</strong>
                     <small>
-                      版本 {v.ordinal} · {mediaTime(v.duration_ms ?? 0)}
+                      版本 {v.ordinal} ·{" "}
+                      {v.media_type === "image"
+                        ? "完整图片"
+                        : mediaTime(v.duration_ms ?? 0)}
                     </small>
                   </button>
                 ))}
@@ -121,8 +152,8 @@ export function ShotVideoPicker({
               {!catalog.data.total && (
                 <p className="py-7 text-center text-sm text-muted-foreground">
                   {query
-                    ? "没有匹配的视频"
-                    : "还没有处理完成的视频，请先在视频素材库导入。"}
+                    ? "没有匹配的素材"
+                    : "还没有可用素材，请先在素材库导入。"}
                 </p>
               )}
               {catalog.data.total > 12 && (
@@ -157,13 +188,14 @@ export function ShotVideoPicker({
               disabled={save.isPending}
               onClick={() => setSelected(null)}
             >
-              重新选择视频
+              重新选择素材
             </Button>
           </div>
           <div className="max-w-xl mx-auto">
             {selected.proxy_hash && (
-              <MediaSegmentPlayer
+              <LibraryMediaPreview
                 key={selected.id}
+                mediaType={selected.media_type}
                 src={blobUrl(projectId, selected.proxy_hash)}
                 start={valid ? startMs : 0}
                 end={valid ? endMs : (selected.duration_ms ?? 0)}
@@ -172,30 +204,34 @@ export function ShotVideoPicker({
             )}
           </div>
           <fieldset disabled={save.isPending} className="reference-tools">
-            <label className="text-sm">
-              起点（秒）
-              <input
-                aria-label="引用起点秒"
-                type="number"
-                min="0"
-                step="0.1"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-                className="block w-32 mt-1"
-              />
-            </label>
-            <label className="text-sm">
-              终点（秒）
-              <input
-                aria-label="引用终点秒"
-                type="number"
-                min="0"
-                step="0.1"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-                className="block w-32 mt-1"
-              />
-            </label>
+            {selected.media_type !== "image" && (
+              <>
+                <label className="text-sm">
+                  起点（秒）
+                  <input
+                    aria-label="引用起点秒"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={start}
+                    onChange={(e) => setStart(e.target.value)}
+                    className="block w-32 mt-1"
+                  />
+                </label>
+                <label className="text-sm">
+                  终点（秒）
+                  <input
+                    aria-label="引用终点秒"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={end}
+                    onChange={(e) => setEnd(e.target.value)}
+                    className="block w-32 mt-1"
+                  />
+                </label>
+              </>
+            )}
             <label className="text-sm">
               用途
               <select
@@ -204,14 +240,14 @@ export function ShotVideoPicker({
                 value={purpose}
                 onChange={(e) => setPurpose(e.target.value)}
               >
-                <option value="visual_reference">画面参考</option>
+                <option value="visual_reference">创作参考</option>
                 <option value="editing_source">剪辑备选</option>
               </select>
             </label>
           </fieldset>
           {!valid && (
             <p className="text-sm text-danger">
-              请在视频时长内选择至少 0.1 秒的片段。
+              请在音视频时长内选择至少 0.1 秒的片段。
             </p>
           )}
           <Button
@@ -229,7 +265,7 @@ export function ShotVideoPicker({
       )}
       {save.isSuccess && (
         <p role="status" className="text-sm text-primary mt-3">
-          片段已加入当前镜头，原片版本与时间范围已保留。
+          素材已加入当前镜头，原版本与所选内容已保留。
         </p>
       )}
     </section>

@@ -33,6 +33,7 @@ const Trash = lazy(() => import("@/pages/Trash"));
 const Workbench = lazy(() => import("@/pages/Workbench"));
 const Tasks = lazy(() => import("@/pages/Tasks"));
 const MediaLibrary = lazy(() => import("@/pages/MediaLibrary"));
+const GeneratedLibrary = lazy(() => import("@/pages/GeneratedLibrary"));
 
 function Protected() {
   const { me, loading } = useAuth();
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="scripts/:scriptId" element={<ScriptEditor />} />
             <Route path="assets" element={<Assets />} />
             <Route path="library" element={<MediaLibrary />} />
+            <Route path="generated" element={<GeneratedLibrary />} />
             <Route path="assets/import" element={<AssetImport />} />
             <Route path="assets/trash" element={<Trash />} />
             <Route path="assets/:assetId" element={<AssetDetail />} />

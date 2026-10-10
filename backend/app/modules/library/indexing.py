@@ -12,6 +12,7 @@ from sqlalchemy import ARRAY, Float, bindparam, func, select, text
 from app.core import audit
 from app.core.config import settings
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
+from app.models.annotation_text_index import AnnotationBigrams
 from app.models.library import LibraryMedia, MediaVersion
 from app.models.media_index import MediaAnnotation, MediaIndex, MediaSegment
 from app.modules.library import service
@@ -64,6 +65,10 @@ def index_out(i):
 
 def submit(db, ctx, version_id):
     _, v = service.version(db, ctx.project.id, version_id, lock=True)
+    if v.media_type != "video":
+        raise CapabilityUnsupported(
+            "基础画面索引仅用于视频，图片与音频请使用素材处理中的对应检索能力"
+        )
     if v.status != "ready":
         raise Conflict("视频预览完成后才能建立索引")
     active = db.scalar(
@@ -125,6 +130,7 @@ def status(db, project_id):
                 LibraryMedia.project_id == project_id,
                 LibraryMedia.deleted_at.is_(None),
                 MediaVersion.status == "ready",
+                MediaVersion.media_type == "video",
             )
         )
     )
@@ -154,8 +160,15 @@ def status(db, project_id):
 
 def add_annotation(db, ctx, version_id, data):
     _, v = service.version(db, ctx.project.id, version_id, lock=True)
-    if v.status != "ready" or data.end_ms > v.duration_ms or data.end_ms - data.start_ms < 100:
-        raise CapabilityUnsupported("标注范围必须位于视频内，且至少0.1秒")
+    if (
+        v.status != "ready"
+        or not v.duration_ms
+        or data.end_ms > v.duration_ms
+        or data.end_ms - data.start_ms < 100
+    ):
+        raise CapabilityUnsupported("时间标注必须位于音视频内，且至少0.1秒")
+    if v.media_type == "audio" and data.kind == "visual":
+        raise CapabilityUnsupported("音频不含画面，请使用台词标注")
     if not data.text.strip():
         raise CapabilityUnsupported("标注内容不能为空")
     item = MediaAnnotation(
@@ -210,6 +223,8 @@ def import_subtitles(db, ctx, version_id, content):
     from app.modules.media.subtitles import parse_srt
 
     _, v = service.version(db, ctx.project.id, version_id, lock=True)
+    if v.media_type == "image" or not v.duration_ms:
+        raise CapabilityUnsupported("只有音视频素材可以导入时间字幕")
     if v.status != "ready":
         raise Conflict("视频处理完成后才能导入字幕")
     try:
@@ -264,6 +279,16 @@ def search(db, ctx, data):
     if data.mode == "annotated":
         where = [LibraryMedia.project_id == ctx.project.id, LibraryMedia.deleted_at.is_(None)]
         if data.query.strip():
+            query_text = data.query.strip()
+            if len(query_text) >= 2:
+                table = MediaAnnotation.__table__
+                where.append(
+                    AnnotationBigrams(MediaAnnotation.text, table=table).contains(
+                        AnnotationBigrams(query_text, table=table)
+                    )
+                )
+            # Bigrams only narrow candidates; order, adjacency, wildcard
+            # escaping and exact case-insensitive substring behavior stay here.
             where.append(MediaAnnotation.text.icontains(data.query.strip(), autoescape=True))
         if data.kind:
             where.append(MediaAnnotation.kind == data.kind)
@@ -393,6 +418,7 @@ def result(id, v, m, start, end, thumbnail, score, description, kind):
         "media_id": m.id,
         "version_id": v.id,
         "ordinal": v.ordinal,
+        "media_type": v.media_type,
         "name": m.name,
         "start_ms": start,
         "end_ms": end,

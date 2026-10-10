@@ -1,0 +1,27 @@
+.model-brand-logo {
+  display: inline-block;
+  flex: none;
+  object-fit: contain;
+  vertical-align: middle;
+}
+.model-brand-mono {
+  background: currentColor;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+}
+.model-brand-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: 7px;
+  color: hsl(var(--muted));
+  background: hsl(var(--elevated));
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}

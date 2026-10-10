@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-10-04",
+  "mediacms": {
+    "repository": "https://github.com/mediacms-io/mediacms",
+    "release": "v9.1.0",
+    "commit": "1ab99af4587bfc515582783c9ee19ae12e0fd065",
+    "license": "AGPL-3.0",
+    "build_target": "base plus CPU torch 2.8.0+cpu and openai-whisper 20250625",
+    "source_url": "https://github.com/mediacms-io/mediacms/tree/1ab99af4587bfc515582783c9ee19ae12e0fd065"
+  },
+  "wise": {
+    "repository": "https://github.com/ox-vgg/wise",
+    "canonical_repository": "https://gitlab.com/vgg/wise/wise",
+    "release": null,
+    "package_version": "2.1.0+dev",
+    "commit": "fcfa443fbb46eb361bb19151339338616838a5b5",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/ox-vgg/wise/tree/fcfa443fbb46eb361bb19151339338616838a5b5",
+    "runtime_compatibility": {
+      "implementation": "services/wise-bridge/src/wise_bridge/upstream_compat.py",
+      "target": "WiseProject.load_search_indices",
+      "source_function_sha256": "25df41f17ea2009162936238712075059eb57251e7fd59290b370a4166f7d370",
+      "correction": "Function-local audio index dictionary key uses ModalityType.AUDIO rather than MediaType.AUDIO; exact commit and source hash required; checkout is unchanged"
+    },
+    "incremental_compatibility": [
+      {
+        "target": "WiseProject._merge",
+        "source_function_sha256": "2c3e58a7dcbdd3a3b4535d1c361a8e5661ec3373152bc4c3058da70086be4220",
+        "correction": "Treat still-image timestamp None as None during exact pinned merge; retain video/audio timestamps"
+      },
+      {
+        "target": "prepare_filter_stmt",
+        "source_function_sha256": "ecc00f72a83c660e4927c7fdb3a3da8b1a07c2e6d3e19833b2cbc45738e1e634",
+        "correction": "Execute original typed SQLAlchemy Select instead of compiled SQLiteCompiler in private function globals"
+      }
+    ]
+  },
+  "reproducibility": {
+    "scope": "Upstream application sources are commit-pinned. Image digests and model artifact checksums must be captured after builds/downloads; source pins alone are not byte-for-byte build reproducibility.",
+    "runtime_images": {
+      "inspiration-mediacms:1ab99af4-base": "sha256:bffa170af639e8e6ad2f982c798a08783d794cf401fee0d651879a7fca542eba",
+      "inspiration-mediacms:1ab99af4-full": "sha256:5b3f86f1ac36b326b94242017792759dc884d5dce1e1861cf3f3c79a2d7c4eaa",
+      "inspiration-wise-upstream:fcfa443f-cpu": "sha256:eda2ec8c1d824e377d2f7f390701e8bf92932ed0a73228b1859e9fdc2797be67",
+      "inspiration-wise-bridge:fcfa443f-cpu": "sha256:11394de85cffed32628434c8619528e0faed8d675ab5821c0431b3f6f27f5f86",
+      "postgres:17.2-alpine": "sha256:7e5df973a74872482e320dcbdeb055e178d6f42de0558b083892c50cda833c96",
+      "redis:7.4.2-alpine": "sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
+      "inspiration-wise-upstream:fcfa443f-cu128": "sha256:c5d1e3262ca1151068bcababc82237cc1a1cd165d7b1a60d4b51b85ae65b7b68",
+      "inspiration-wise-bridge:fcfa443f-cu128": "sha256:3e6e29bc6d027e8942d9fb4cd4603698ae1d401aa5231a090c795a3587385f0e"
+    },
+    "model_artifacts": [
+      {
+        "name": "openai-whisper/base",
+        "url": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
+        "size_bytes": 145262807,
+        "sha256": "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e",
+        "cache": "mediacms-cache:/whisper/base.pt",
+        "inference_verified": true,
+        "verification": "Current capacity-guard bridge: real MediaCMS video speech and standalone audio preview/speech, 2 passed / 44.63s, 2026-10-04, .runtime/media-integration/mediacms-guard-asr-live.xml. Timed annotations, short Chinese transcript search and remote-copy cleanup; not an ASR-quality benchmark"
+      },
+      {
+        "name": "timm/ViT-B-16-SigLIP2-512",
+        "revision": "5e7f4f980e465036486ce78dfc721bbedf291939",
+        "cache": "wise-cache:/huggingface/hub/models--timm--ViT-B-16-SigLIP2-512",
+        "inference_verified": true,
+        "verification": "Historical standalone image/audio live on image sha256:17dfe159a21d6cc42aa64bc56f9667717930ef1f0c42b93dd35a0eec7d1625b1: 1 passed / 147.85s (.runtime/media-integration/wise-multimodal-live.xml). Historical image sha256:efed5582f05cc11e3f1b177caef4a614eb44c29619334751c1a2f72fc5625f03: video visual/delete/restore lifecycle and audio addition, 1 passed / 150.98s (.runtime/media-integration/wise-recovery-final-live.xml), 2026-10-04. Standalone-image full acceptance was not rerun in this final image; not a quality benchmark Historical GPU image 38639b95: standalone image/audio live 1 passed / 129.77s (.runtime/media-integration/wise-gpu-multimodal-live.xml).",
+        "files": [
+          {
+            "filename": "open_clip_config.json",
+            "size_bytes": 948,
+            "sha256": "fa306fd29f14e25686cbd61ac01d612a8d2a87b749a65c7ef1952fbee9997629"
+          },
+          {
+            "filename": "open_clip_model.safetensors",
+            "size_bytes": 1503330448,
+            "sha256": "c96b5b6ed1dee282ad4a4665caa1bd74cda97f46e1e3e80e1c022752bf054927"
+          },
+          {
+            "filename": "special_tokens_map.json",
+            "size_bytes": 327,
+            "sha256": "d4671afd8f9b1ccd170443bd5478c0cc40fdbddc9343034caf6984ffd388b2c4"
+          },
+          {
+            "filename": "tokenizer.json",
+            "size_bytes": 34362885,
+            "sha256": "220c63d496e0c14e63eb656c91e0215e926202e4c74b1f089e09f1920d779b04"
+          },
+          {
+            "filename": "tokenizer_config.json",
+            "size_bytes": 46382,
+            "sha256": "513e778583a9ac0b74ae47784216f9d654d5132eee62d777597f5e842701323c"
+          }
+        ]
+      },
+      {
+        "name": "WISE microsoft/clap/2023/four-datasets and GPT-2 dependency",
+        "manifest": "services/wise-bridge/audio-model.lock.json",
+        "total_size_bytes": 1240909773,
+        "cache": "wise-cache:/huggingface/hub",
+        "download_sha256_verified": true,
+        "inference_verified": true,
+        "verification": "Historical standalone audio and video soundtrack reference-audio live on image sha256:17dfe159a21d6cc42aa64bc56f9667717930ef1f0c42b93dd35a0eec7d1625b1: 1 passed / 147.85s (.runtime/media-integration/wise-multimodal-live.xml). Historical image sha256:efed5582f05cc11e3f1b177caef4a614eb44c29619334751c1a2f72fc5625f03: audio addition after restore inside video lifecycle, 1 passed / 150.98s (.runtime/media-integration/wise-recovery-final-live.xml), 2026-10-04. Standalone-audio full acceptance was not rerun in this final image; not a retrieval-quality benchmark Historical GPU image 38639b95: standalone image/audio live 1 passed / 129.77s (.runtime/media-integration/wise-gpu-multimodal-live.xml)."
+      },
+      {
+        "name": "google/owlv2-base-patch16-ensemble",
+        "revision": "cfd3195ba4ea9592eec887ded089f4c08eff231d",
+        "license": "Apache-2.0",
+        "manifest": "services/wise-bridge/scripts/object-model.lock.json",
+        "total_size_bytes": 621505532,
+        "download_sha256_verified": true,
+        "inference_verified": true,
+        "use": "development_evaluation",
+        "verification": "GPU offline probe and combined visual/object business acceptance passed on current_bridge_acceptance; real no-object/nonintersecting-reference API errors verified. All-zero object-only ingestion and broad retrieval quality remain unverified."
+      }
+    ],
+    "historical_runtime_evidence": [
+      {
+        "images": {
+          "inspiration-wise-bridge:fcfa443f-cpu": "sha256:b42c9aa9cf8fe2de8d0fa132e1745eb05dde9338b74127b62232ac7a064f37ad",
+          "inspiration-wise-bridge:fcfa443f-cu128": "sha256:38639b95b80b73c0d63d9ca16e7bd5d4fd7b0b741b92548f7456ac428412a18d"
+        },
+        "evidence": [
+          ".runtime/media-integration/wise-gpu-incremental-live.xml",
+          ".runtime/media-integration/wise-gpu-multimodal-live.xml",
+          ".runtime/media-integration/wise-incremental-lifecycle-live.xml"
+        ],
+        "scope": "Historical images: GPU incremental and image/audio live; CPU lifecycle. These tests are not rerun just because the tag changes."
+      },
+      {
+        "images": {
+          "inspiration-wise-bridge:fcfa443f-cpu": "sha256:0f8a702d9999f2cef2c3d7d70e2bb5b3ef3b28b6573f65dd045db4250a7ca220",
+          "inspiration-wise-bridge:fcfa443f-cu128": "sha256:1354efddb937c9127fc55b881c88d09d32c072ac230d0244511858f89f20335e"
+        },
+        "evidence": {
+          "gpu_image": "sha256:1354efddb937c9127fc55b881c88d09d32c072ac230d0244511858f89f20335e",
+          "tests": [
+            ".runtime/media-integration/wise-object-probe-evidence.json",
+            ".runtime/media-integration/wise-gpu-object-live.xml",
+            ".runtime/media-integration/wise-gpu-object-cleanup.json"
+          ],
+          "scope": "Real GPU OWLv2 probe plus combined visual/object image and four-second video business pipeline, region queries, IDs, incremental reuse and delete. CPU build only, no CPU object inference acceptance; not a quality or long-video benchmark."
+        },
+        "scope": "Prior object probe/UI and 900/3600s visual benchmark on image 1354. Preserved; not attributed to the new query-guard runtime."
+      }
+    ],
+    "current_bridge_acceptance": {
+      "gpu_image": "sha256:3e6e29bc6d027e8942d9fb4cd4603698ae1d401aa5231a090c795a3587385f0e",
+      "cpu_scope": "Build only; no CPU object inference rerun.",
+      "probe": ".runtime/media-integration/wise-queryguard-final-audit.json",
+      "business": {
+        "report": ".runtime/media-integration/wise-queryguard-object-live.xml",
+        "passed": 1,
+        "seconds": 135.14
+      },
+      "reference_errors": {
+        "report": ".runtime/media-integration/wise-queryguard-errors-corners-live.json",
+        "scope": "Actual bridge and main API no_object and region_no_match 422; successful query afterwards. PNG/JPEG normalization can change detections."
+      },
+      "limits": "Object acceptance remains short samples, not quality or long-video object capacity. Current visual runtime verified50 short sources and5x900s; prior single-source900/3600s results belong to historical image1354. No high-bitrate production or50-hour library capacity claim.",
+      "fault_recovery": {
+        "report": ".runtime/media-integration/fault-actual-live.xml",
+        "passed": 2,
+        "seconds": 288.86,
+        "scope": "Real running cancellation and SIGKILL of the same WISE container; owned processes and sources cleaned."
+      },
+      "automatic": {
+        "report": ".runtime/media-integration/auto-actual-live.xml",
+        "passed": 1,
+        "seconds": 193.68,
+        "scope": "Real isolated PostgreSQL and queue run_once for PNG/WAV/video/silent video: 7 WISE+CMS tasks, search and cleanup verified; not deployed daemon."
+      },
+      "daemon": {
+        "report": ".runtime/media-integration/daemon-auto-main.json",
+        "scope": "Actual browser upload and main API lifespan queues: 6 new tasks including old-media backfill; silent video visual+preview; immutable original hash and existing object results preserved."
+      },
+      "daily_resume": {
+        "report": ".runtime/media-integration/startup-optional-resume-live.json",
+        "seconds": 13.593,
+        "scope": "Same stopped optional-enabled container restored through production Launcher; fixed image, configuration, mounts and probe receipt unchanged."
+      },
+      "short_video_batches": {
+        "reports": [
+          ".runtime/media-benchmark/c042ffe96c5f4f4fa2bf6593202deb97/summary.json",
+          ".runtime/media-benchmark/7705dbe735c04e97bcb6109f12f848f4/summary.json"
+        ],
+        "counts": [
+          10,
+          50
+        ],
+        "seconds": [
+          622.122,
+          3107.845
+        ],
+        "scope": "Separate 10 and 50 six-second synthetic 3840x2160 H264 2Mbps/12fps video batches; CMS preview plus WISE visual serial pipeline, immutable original hashes, full proxy decode, typed audio flags and independent cleanup. 50-source run has 600 vectors and indexed coverage 50; top100 query hits cover only 25 versions. Main 8 retained versions unchanged. Not long-video, ASR, retrieval-quality or high-bitrate production acceptance."
+      },
+      "long_video_batch": {
+        "report": ".runtime/media-benchmark/e188b5b545a7469f97b03b98ea56d44c/summary.json",
+        "count": 5,
+        "duration_seconds_each": 900,
+        "visual_vectors": 9000,
+        "seconds": 2593.075,
+        "scope": "5 distinct synthetic 4K 2Mbps/12fps sources, serial MediaCMS preview and WISE visual. WISE input verified as CMS proxy hash; immutable originals, complete proxy decode, query coverage5/5 and independent cleanup. Main8 retained versions unchanged. No ASR, high-bitrate, WAN/MinIO, multiple hour-long sources or retrieval-quality claim."
+      },
+      "handoff": {
+        "report": ".runtime/media-integration/final-handoff-health.json",
+        "automatic_processing_restored": true,
+        "ui_proof": ".runtime/media-integration/final-handoff-ui.jpg",
+        "scope": "Main API reloaded from primary checkout; migration0031; unchanged8 retained versions, all core/provider health200 and idle queues; UI confirms automatic processing."
+      }
+    }
+  }
+}

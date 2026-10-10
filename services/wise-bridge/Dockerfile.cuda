@@ -1,0 +1,15 @@
+# Optional GPU runtime for the same pinned WISE checkout. Build the CPU upstream
+# image first; this layer keeps that checkout/model selection unchanged.
+# Version pairing: https://pytorch.org/get-started/previous-versions/#v280
+ARG WISE_CPU_BASE=inspiration-wise-upstream:fcfa443f-cpu
+FROM ${WISE_CPU_BASE}
+
+RUN --mount=type=cache,target=/home/mambauser/.cache/pip,uid=57439,gid=57439 \
+    micromamba run -n wise-env python -m pip install --upgrade \
+      torch==2.8.0+cu128 torchvision==0.23.0+cu128 torchaudio==2.8.0+cu128 \
+      --index-url https://download.pytorch.org/whl/cu128 \
+    && micromamba run -n wise-env python -c \
+      "import torch, torchvision, torchaudio; assert torch.__version__ == '2.8.0+cu128'; assert torch.version.cuda == '12.8'"
+
+# Building cannot prove GPU availability. Validate torch.cuda.is_available()
+# and a real extraction in a bounded --gpus container before service selection.

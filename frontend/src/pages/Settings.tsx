@@ -36,8 +36,8 @@ const sections = [
   },
   {
     id: "channels",
-    label: "渠道与模型",
-    description: "连接创作服务",
+    label: "模型服务",
+    description: "默认模型与连接",
     icon: Server,
     group: "当前项目",
   },

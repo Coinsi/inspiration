@@ -39,6 +39,7 @@ import GenerationPanel from "./GenerationPanel";
 import { CanvasMediaImport } from "./CanvasMediaImport";
 
 export const CanvasActions = createContext<{
+  providerLabel: (name: string) => string;
   projectId: string;
   editImage: (g: Generation) => void;
   reuse: boolean;
@@ -56,6 +57,7 @@ export const CanvasActions = createContext<{
   branch: (id: string, image: boolean, generation?: Generation) => void;
   split: (id: string, generation: Generation) => void;
 }>({
+  providerLabel: (name) => (name === "mock" ? "离线测试" : "创作模型"),
   projectId: "",
   editImage: () => {},
   reuse: false,
@@ -301,13 +303,15 @@ export function CanvasCard({ id, data, selected }: NodeProps<CanvasNode>) {
               <ImagePlus size={28} strokeWidth={1.2} />
             )}
             <span>
-              {versions.error
-                ? "素材读取失败，点击重试或选择版本"
-                : versionId
-                  ? "固定版本暂不可用，点击检查"
-                  : data.kind === "generate"
-                    ? "等待下一幅画面"
-                    : "选择一份创作素材"}
+              {versions.isFetching
+                ? "正在读取素材版本…"
+                : versions.error
+                  ? "素材读取失败，点击重试或选择版本"
+                  : versionId
+                    ? "固定版本暂不可用，点击检查"
+                    : data.kind === "generate"
+                      ? "等待下一幅画面"
+                      : "选择一份创作素材"}
             </span>
             <small>
               {data.kind === "generate"
@@ -376,10 +380,8 @@ export function CanvasCard({ id, data, selected }: NodeProps<CanvasNode>) {
           />
           <div>
             <span>
-              {data.generate.provider === "mock"
-                ? "离线测试"
-                : data.generate.provider}{" "}
-              · {data.generate.count} 个候选
+              {actions.providerLabel(data.generate.provider)} ·{" "}
+              {data.generate.count} 个候选
             </span>
             <Button
               size="sm"
@@ -528,7 +530,7 @@ export function CanvasMaterialPicker({
       width={980}
     >
       <p className="text-sm text-muted-foreground mb-4">
-        引用项目里已有的版本，原素材保持不变。视频素材库中的片段可先用于镜头，再从这里引用。
+        引用项目资产或镜头中已有的作品版本，原素材保持不变。
       </p>
       {loading && <p role="status">正在读取项目素材目录…</p>}
       {loadError && (

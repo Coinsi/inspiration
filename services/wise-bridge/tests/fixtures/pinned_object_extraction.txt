@@ -1,0 +1,85 @@
+    @torch.inference_mode()
+    def extract_image_features(
+        self,
+        images: torch.Tensor,
+    ) -> list[Features]:
+        """
+        Extract features/embeddings, objectness scores, and box coordinates for each patch in
+        a batch of input images
+
+        Parameters
+        ----------
+        images : torch.Tensor
+            A batch of preprocessed images with shape (B, H, W, C) where B denotes the
+            batch size and H, W, C denote the height, width, and number of channels respectively
+        return_augmented_features : bool, optional
+            Whether to return 'augmented' feature vectors or not (True by default)
+
+            In OWL-ViT and OWLv2, there is a learnable shift and scale value for each
+            patch token that is applied after computing the dot products between
+            the image patch tokens and the text embeddings (see link below):
+            https://github.com/huggingface/transformers/blob/174890280b340b89c5bfa092f6b4fb0e2dc2d7fc/src/transformers/models/owlv2/modeling_owlv2.py#L1269-L1273
+
+            This makes it difficult to implement fast lookups with vector databases
+            or approximate nearest neighbour search algorithms. Fortunately, there
+            is a solution to this which involves augmenting the vectors as described
+            in the links below:
+            https://github.com/google-research/scenic/issues/831
+
+            https://github.com/google-research/scenic/pull/891/files
+
+        Returns
+        -------
+        list of Features
+            A list of `Features` objects, one for each image in the input batch.
+            Each `Features` object contains these two attributes:
+
+            - vectors: the patch features/embeddings computed by OWLv2 for a
+              given image. This is a numpy array of shape (P, D) where P is the
+              number of image patches (3600 by default), and D is the embedding
+              dimension (default 513). If `return_augmented_features = False`
+              then the last dimension is 512.
+            - metadata: a list of `OWLv2FeatureMetadata` objects containing the
+              predicted bounding box coordinates and objectness score for each
+              patch in a given image.
+        """
+        if not isinstance(images, torch.Tensor):
+            raise ValueError(
+                "input to extract_features() must be an instance of torch.Tensor"
+            )
+
+        # Save original image sizes in a list before they get resized
+        orig_sizes = [
+            (image.shape[2], image.shape[1]) for image in images
+        ]  # list of (width, height) tuples
+        # Preprocess image (including resizing)
+        images = self.processor(images=images, return_tensors="pt")[
+            "pixel_values"
+        ]  # shape: (B, C, 960, 960)
+
+        outputs = self.model.get_image_features(images=images)
+        batch_objectness_scores = outputs["scores"]
+        batch_image_class_embeds = outputs["embeddings"]
+        batch_pred_boxes = outputs["boxes"]
+
+        # Having the feature for the "most object" first is important for
+        # searching with images since only the first feature is used.
+        batch_objectness_scores, batch_image_class_embeds, batch_pred_boxes = (
+            sort_by_objectness(
+                batch_objectness_scores,
+                batch_image_class_embeds,
+                batch_pred_boxes,
+            )
+        )
+
+        # Convert to numpy
+        batch_image_class_embeds = batch_image_class_embeds.cpu().numpy()
+        batch_objectness_scores = batch_objectness_scores.cpu().numpy()
+        batch_pred_boxes = batch_pred_boxes.cpu().numpy()
+
+        return self.construct_features(
+            batch_image_class_embeds,
+            batch_objectness_scores,
+            batch_pred_boxes,
+            orig_sizes,
+        )

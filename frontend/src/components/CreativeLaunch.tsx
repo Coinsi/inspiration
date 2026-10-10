@@ -9,8 +9,23 @@ const EmbeddedAgent = lazy(() =>
 import { type Project } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/usePersistentState";
+import { WorkbenchComposer } from "@/components/workbench/WorkbenchComposer";
 
 export function CreativeLaunch({
+  projectId,
+  projects,
+  onCreate,
+}: {
+  projectId?: string;
+  projects?: Project[];
+  onCreate?: () => void;
+}) {
+  if (projectId)
+    return <WorkbenchComposer key={projectId} projectId={projectId} />;
+  return <LegacyCreativeLaunch projects={projects} onCreate={onCreate} />;
+}
+
+function LegacyCreativeLaunch({
   projectId,
   projects,
   onCreate,

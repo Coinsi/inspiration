@@ -1,0 +1,4 @@
+    def extract_image_region_features(
+        self, image: torch.Tensor, region: BBoxXYWH
+    ) -> Features:
+        return self._extract_image_region_features_highest_iou(image, region)

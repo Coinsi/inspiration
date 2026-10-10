@@ -156,7 +156,7 @@ def advance(run_id):
                 return True
             config = {"engine": r.engine}
             if r.engine != "mock":
-                llm = _engine(db, r.project_id, "cloud_llm")
+                llm = _engine(db, r.project_id, "cloud_llm", r.model_provider, user_id=r.created_by)
                 config.update(base_url=llm.base_url, api_key=llm.api_key, model=llm.model)
             payload = {
                 "goal": r.goal,

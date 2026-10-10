@@ -1,0 +1,317 @@
+.model-center-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 24px;
+  padding: 5px;
+  width: fit-content;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  background: hsl(var(--card));
+}
+.model-center-tabs button,
+.creative-tabs button {
+  padding: 9px 16px;
+  border-radius: 10px;
+  color: hsl(var(--muted));
+  font-size: 13px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.model-center-tabs button[aria-pressed="true"],
+.creative-tabs button[aria-pressed="true"] {
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+  box-shadow: 0 1px 4px #00000012;
+}
+.creative-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin: 24px 0;
+}
+.creative-toolbar > input {
+  max-width: 280px;
+}
+.creative-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.creative-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+.creative-model-card {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 18px;
+  background: hsl(var(--card));
+  display: flex;
+  flex-direction: column;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+.creative-model-card:hover {
+  border-color: hsl(var(--muted));
+  transform: translateY(-2px);
+}
+.creative-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.creative-model-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  color: #8b78ed;
+  background: #8b78ed15;
+}
+.creative-model-icon.is-image {
+  color: #479883;
+  background: #47988315;
+}
+.creative-model-icon.is-text {
+  color: #c9974d;
+  background: #c9974d15;
+}
+.creative-status {
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 20px;
+  color: hsl(var(--muted));
+  background: hsl(var(--bg));
+}
+.creative-status.is-ready {
+  color: #479883;
+}
+.creative-model-card h2 {
+  font-weight: 600;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.creative-model-card h2 small {
+  font-size: 10px;
+  font-weight: 400;
+  color: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.creative-model-card > p {
+  color: hsl(var(--muted));
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 8px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+.creative-route-summary {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 12px;
+  color: hsl(var(--muted));
+  margin-top: 23px;
+}
+.creative-card-channels {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 12px 0 22px;
+}
+.creative-card-channels span {
+  font-size: 11px;
+  padding: 4px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.creative-model-card footer {
+  margin-top: auto;
+  padding-top: 15px;
+  border-top: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: hsl(var(--muted));
+  font-size: 11px;
+}
+.creative-model-card footer div {
+  display: flex;
+  gap: 6px;
+}
+.creative-model-card footer button {
+  padding: 7px;
+  border-radius: 8px;
+}
+.creative-model-card footer button:hover {
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+}
+.creative-empty {
+  padding: 60px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+  border: 1px dashed hsl(var(--border));
+  border-radius: 18px;
+}
+.creative-empty > svg {
+  color: hsl(var(--muted));
+}
+.creative-empty h2 {
+  font-size: 19px;
+}
+.creative-empty p,
+.creative-footnote,
+.creative-help {
+  font-size: 12px;
+  color: hsl(var(--muted));
+  line-height: 1.8;
+}
+.creative-footnote {
+  margin-top: 24px;
+}
+.creative-select {
+  width: 100%;
+  height: 40px;
+  background: hsl(var(--bg));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.creative-editor-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+}
+.creative-editor-heading h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.creative-editor-heading span {
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.creative-route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.creative-route {
+  border: 1px solid hsl(var(--border));
+  padding: 14px;
+  border-radius: 12px;
+}
+.creative-route.is-bound {
+  background: hsl(var(--bg));
+}
+.creative-route-pick {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.creative-route-pick span {
+  min-width: 0;
+}
+.creative-route-pick strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.creative-route-pick small {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.creative-route-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  margin-top: 15px;
+  align-items: end;
+}
+.creative-route-options > label {
+  min-width: 0;
+}
+.creative-route-options .model-check {
+  padding-bottom: 10px;
+}
+.creative-switches {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.creative-price-note {
+  grid-column: 1/-1;
+}
+.creative-probe {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.creative-probe > div {
+  padding: 12px;
+  background: hsl(var(--bg));
+  border-radius: 10px;
+}
+.creative-probe span {
+  display: block;
+  color: hsl(var(--muted));
+}
+@media (max-width: 640px) {
+  .creative-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .creative-toolbar > input {
+    max-width: none;
+  }
+  .creative-route-options {
+    grid-template-columns: 1fr 1fr;
+  }
+  .creative-route-options .model-check {
+    grid-column: 1/-1;
+  }
+  .creative-model-grid {
+    grid-template-columns: 1fr;
+  }
+  .model-center-tabs {
+    width: 100%;
+  }
+  .model-center-tabs button {
+    flex: 1;
+    padding-inline: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .creative-model-card {
+    transition: none;
+  }
+  .creative-model-card:hover {
+    transform: none;
+  }
+}

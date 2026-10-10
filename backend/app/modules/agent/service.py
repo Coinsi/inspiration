@@ -28,6 +28,8 @@ def get_run(db, ctx, run_id, lock=False):
 
 def owner(ctx, run):
     require(ctx.role, "agent.run")
+    if (run.model_provider or "").startswith("personal_") and ctx.user.id != run.created_by:
+        raise Forbidden("使用个人模型服务的任务只能由原提交者操作")
     if ctx.user.id != run.created_by and ctx.role.value not in ("admin", "director"):
         raise Forbidden("只能操作自己发起的 Agent 任务")
 
@@ -52,6 +54,7 @@ def out(r, detail=True):
         "id": r.id,
         "goal": r.goal,
         "engine": r.engine,
+        "model_provider": r.model_provider,
         "status": r.status,
         "scope": r.scope,
         "skills": [
@@ -79,6 +82,9 @@ def create(db, ctx, data):
     )
     if prior:
         return out(prior)
+    if data.model_provider:
+        from app.modules.generation.channels import selected_llm
+        selected_llm(db, ctx.project.id, data.model_provider, user_id=ctx.user.id)
     for target in data.scope:
         adapter = get_adapter(target.target_type)
         adapter.read(db, ctx.project.id, target.target_id)
@@ -98,6 +104,7 @@ def create(db, ctx, data):
         request_key=data.request_key,
         goal=data.goal,
         engine=data.engine,
+        model_provider=data.model_provider,
         scope=[t.model_dump(mode="json") for t in data.scope],
         skill_snapshot=selected_skills,
         max_turns=data.max_turns,

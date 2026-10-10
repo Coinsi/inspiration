@@ -1,0 +1,48 @@
+{
+  "repository": "google/owlv2-base-patch16-ensemble",
+  "revision": "cfd3195ba4ea9592eec887ded089f4c08eff231d",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "name": "added_tokens.json",
+      "bytes": 67,
+      "sha256": "e5dc0da35d20111e8ff3fdfc03682beca23d5f94ed74331bce81786b2636a24f"
+    },
+    {
+      "name": "config.json",
+      "bytes": 414,
+      "sha256": "ba9df8c25a4b8461887dd0a93d9252c9cd84697fe8d49a9d8794ce409af9acb2"
+    },
+    {
+      "name": "merges.txt",
+      "bytes": 524619,
+      "sha256": "9fd691f7c8039210e0fced15865466c65820d09b63988b0174bfe25de299051a"
+    },
+    {
+      "name": "model.safetensors",
+      "bytes": 619918824,
+      "sha256": "e1e130b9e404cf91a75ad45644c1da9d7fa5284085eecc864266a6923efb99e7"
+    },
+    {
+      "name": "preprocessor_config.json",
+      "bytes": 425,
+      "sha256": "cf3e396635b797ee1a464e1b2836e98748f8edac19e89aaa2c93b55ac15b0064"
+    },
+    {
+      "name": "special_tokens_map.json",
+      "bytes": 121,
+      "sha256": "d6e2b9cf664efbad2d22998b8d3da986abcbeed3e0825ad33605c9401f9cf73e"
+    },
+    {
+      "name": "tokenizer_config.json",
+      "bytes": 1100,
+      "sha256": "b55cda6198e152ded427c8a9b3faf1cccf27a7fa080697a62f6ff143f511f44f"
+    },
+    {
+      "name": "vocab.json",
+      "bytes": 1059962,
+      "sha256": "e089ad92ba36837a0d31433e555c8f45fe601ab5c221d4f607ded32d9f7a4349"
+    }
+  ],
+  "total_bytes": 621505532
+}

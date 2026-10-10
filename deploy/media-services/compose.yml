@@ -1,0 +1,159 @@
+name: inspiration-media-services
+
+x-mediacms: &mediacms
+  image: inspiration-mediacms:1ab99af4-full
+  build:
+    context: .
+    dockerfile: Dockerfile.mediacms
+  environment: &mediacms-env
+    SECRET_KEY: ${MEDIACMS_DJANGO_SECRET:?Set MEDIACMS_DJANGO_SECRET in the private env file}
+    POSTGRES_NAME: mediacms
+    POSTGRES_HOST: db
+    POSTGRES_PORT: '5432'
+    POSTGRES_USER: mediacms
+    POSTGRES_PASSWORD: ${MEDIACMS_DB_PASSWORD:?Set MEDIACMS_DB_PASSWORD in the private env file}
+    REDIS_LOCATION: redis://redis:6379/1
+    FRONTEND_HOST: http://127.0.0.1:${MEDIACMS_PORT:-18080}
+    MEDIACMS_SERVICE_TOKEN: ${MEDIACMS_SERVICE_TOKEN:?Set MEDIACMS_SERVICE_TOKEN in the private env file}
+    USE_WHISPER_TRANSCRIBE: ${MEDIACMS_ENABLE_TRANSCRIPTION:-false}
+    WHISPER_MODEL: ${MEDIACMS_WHISPER_MODEL:-base}
+    MEDIACMS_DISK_RESERVE_BYTES: ${MEDIACMS_DISK_RESERVE_BYTES:-10737418240}
+    PYTHONPATH: /opt/inspiration:/home/mediacms.io/mediacms
+    HOME: /home/mediacms.io
+    TMPDIR: /processing-tmp
+    OMP_NUM_THREADS: '2'
+    ENABLE_UWSGI: 'no'
+    ENABLE_NGINX: 'no'
+    ENABLE_CELERY_SHORT: 'no'
+    ENABLE_CELERY_LONG: 'no'
+    ENABLE_CELERY_BEAT: 'no'
+    ENABLE_MIGRATIONS: 'no'
+  volumes:
+    - mediacms-media:/home/mediacms.io/mediacms/media_files
+    - mediacms-static:/home/mediacms.io/mediacms/static
+    - mediacms-cache:/home/mediacms.io/.cache
+    - mediacms-tmp:/processing-tmp
+    - ./local_settings.py:/home/mediacms.io/mediacms/deploy/docker/local_settings.py:ro
+    - ./nginx.conf:/home/mediacms.io/mediacms/deploy/docker/nginx.conf:ro
+    - ./nginx_http_only.conf:/home/mediacms.io/mediacms/deploy/docker/nginx_http_only.conf:ro
+    - ./init_mediacms.py:/opt/inspiration/init_mediacms.py:ro
+    - ../../services/mediacms-bridge:/opt/inspiration/mediacms_bridge:ro
+  restart: unless-stopped
+  pids_limit: 512
+  logging: &bounded-logging
+    driver: local
+    options:
+      max-size: 20m
+      max-file: '3'
+  networks: [media]
+
+services:
+  db:
+    image: postgres:17.2-alpine@sha256:7e5df973a74872482e320dcbdeb055e178d6f42de0558b083892c50cda833c96
+    environment:
+      POSTGRES_DB: mediacms
+      POSTGRES_USER: mediacms
+      POSTGRES_PASSWORD: ${MEDIACMS_DB_PASSWORD:?Set MEDIACMS_DB_PASSWORD in the private env file}
+    volumes:
+      - mediacms-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U mediacms -d mediacms']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    logging: *bounded-logging
+    networks: [media]
+
+  redis:
+    image: redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952
+    command: [redis-server, --appendonly, 'yes', --maxmemory, 256mb, --maxmemory-policy, noeviction]
+    volumes:
+      - mediacms-redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    pids_limit: 128
+    logging: *bounded-logging
+    networks: [media]
+
+  init:
+    <<: *mediacms
+    environment:
+      <<: *mediacms-env
+      ADMIN_USER: inspiration-service
+      ADMIN_EMAIL: service@inspiration.invalid
+      ADMIN_PASSWORD: ${MEDIACMS_ADMIN_PASSWORD:?Set MEDIACMS_ADMIN_PASSWORD in the private env file}
+    command: [python, /opt/inspiration/init_mediacms.py]
+    restart: 'no'
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  web:
+    <<: *mediacms
+    environment:
+      <<: *mediacms-env
+      ENABLE_UWSGI: 'yes'
+      ENABLE_NGINX: 'yes'
+    ports:
+      - '127.0.0.1:${MEDIACMS_PORT:-18080}:80'
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1/api/v1/media',headers={'Authorization':'Token '+os.environ['MEDIACMS_SERVICE_TOKEN']}); urllib.request.urlopen(r,timeout=5).close()"
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      init: {condition: service_completed_successfully}
+
+  worker:
+    <<: *mediacms
+    command: [celery, -A, cms, worker, --loglevel=INFO, --concurrency=1, --prefetch-multiplier=1, -Q, 'long_tasks,short_tasks,celery', --uid=www-data, --gid=www-data]
+    mem_limit: 8g
+    memswap_limit: 8g
+    cpus: 4
+    stop_grace_period: 60s
+    depends_on:
+      init: {condition: service_completed_successfully}
+
+  beat:
+    <<: *mediacms
+    command: [celery, -A, cms, beat, --loglevel=INFO, --schedule=/home/mediacms.io/.cache/celerybeat-schedule]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    depends_on:
+      init: {condition: service_completed_successfully}
+
+networks:
+  media:
+    driver: bridge
+
+volumes:
+  mediacms-db:
+  mediacms-redis:
+  mediacms-media:
+  mediacms-static:
+  mediacms-cache:
+  mediacms-tmp:

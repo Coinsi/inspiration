@@ -768,7 +768,7 @@ function ShotsWorkspace() {
               onChange={setReferenceTab}
               tabs={[
                 { key: "assets", label: "角色与场景" },
-                { key: "video", label: "视频片段" },
+                { key: "video", label: "素材库" },
               ]}
             />
             <p className="text-sm text-muted-foreground my-4">

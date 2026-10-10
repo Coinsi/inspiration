@@ -1,0 +1,16 @@
+# Explicit CUDA opt-in; retain the base project's service, ports and data/cache volumes.
+services:
+  wise:
+    image: inspiration-wise-bridge:fcfa443f-cu128
+    environment:
+      FEATURE_EXTRACTOR_CONFIG: '{"default":{"compile":false,"warmup":false},"transformers/owlv2/google/owlv2-base-patch16-ensemble":{"device":"cuda"}}'
+    build:
+      args:
+        WISE_BASE: inspiration-wise-upstream:fcfa443f-cu128
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

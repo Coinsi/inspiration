@@ -22,7 +22,7 @@ _client = None
 
 
 @contextmanager
-def local_file(blob, canceled=lambda: False):
+def local_file(blob, canceled=lambda: False, *, temp_dir=None):
     """Seek local objects directly; download remote objects with bounded RAM and cleanup."""
     path = Path(blob.storage_uri)
     if path.is_absolute() or path.is_file():
@@ -30,7 +30,7 @@ def local_file(blob, canceled=lambda: False):
             raise FileNotFoundError("素材文件不存在")
         yield path
         return
-    with tempfile.TemporaryDirectory(prefix="inspiration-source-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="inspiration-source-", dir=temp_dir) as tmp:
         path = Path(tmp) / "source"
         digest = hashlib.sha256()
         with open_range(blob) as source, path.open("wb") as target:

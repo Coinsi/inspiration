@@ -34,14 +34,14 @@ def media(db, project_id, media_id, *, lock=False, include_deleted=False):
         stmt.with_for_update().execution_options(populate_existing=True) if lock else stmt
     )
     if not item or (item.deleted_at and not include_deleted):
-        raise NotFound("视频素材不存在")
+        raise NotFound("素材不存在")
     return item
 
 
 def version(db, project_id, version_id, *, lock=False):
     v = db.get(MediaVersion, version_id)
     if not v:
-        raise NotFound("视频版本不存在")
+        raise NotFound("素材版本不存在")
     item = media(db, project_id, v.media_id, lock=lock)
     if lock:
         db.refresh(v)
@@ -54,6 +54,8 @@ def version_out(v):
         "media_id",
         "ordinal",
         "filename",
+        "media_type",
+        "has_audio",
         "size_bytes",
         "uploaded_bytes",
         "fingerprint",
@@ -96,6 +98,7 @@ def catalog(
     sort="recent",
     folder_id=None,
     root_only=False,
+    media_type=None,
 ):
     from app.modules.library import folders
 
@@ -108,6 +111,15 @@ def catalog(
         conditions.append(LibraryMedia.name.icontains(query.strip(), autoescape=True))
     if folder_id is not None or root_only:
         conditions.append(LibraryMedia.folder_id == folder_id)
+    if media_type:
+        conditions.append(
+            select(MediaVersion.id)
+            .where(
+                MediaVersion.media_id == LibraryMedia.id,
+                MediaVersion.media_type == media_type,
+            )
+            .exists()
+        )
     total = db.scalar(select(func.count()).select_from(LibraryMedia).where(*conditions))
     order = {
         "recent": LibraryMedia.created_at.desc(),
@@ -131,7 +143,7 @@ def catalog(
     }
 
 
-def version_catalog(db, project_id, query="", offset=0, limit=24):
+def version_catalog(db, project_id, query="", offset=0, limit=24, media_type=None):
     """Bound the actual selectable versions, including media with many revisions."""
     conditions = [
         LibraryMedia.project_id == project_id,
@@ -140,6 +152,8 @@ def version_catalog(db, project_id, query="", offset=0, limit=24):
     ]
     if query.strip():
         conditions.append(LibraryMedia.name.icontains(query.strip(), autoescape=True))
+    if media_type:
+        conditions.append(MediaVersion.media_type == media_type)
     total = db.scalar(
         select(func.count()).select_from(MediaVersion).join(LibraryMedia).where(*conditions)
     )
@@ -202,16 +216,25 @@ def media_entries(db, project_id, items):
 
 
 def begin_upload(db, ctx, data):
-    from app.modules.library import folders
+    from app.modules.library import folders, media_types, upload_budget
 
     if data.size_bytes > settings.library_max_upload_bytes:
         raise CapabilityUnsupported(
-            f"单个视频最多 {settings.library_max_upload_bytes // (1024**3)} GB"
+            f"单个素材最多 {settings.library_max_upload_bytes // (1024**3)} GB"
         )
-    if Path(data.filename).suffix.lower() not in (".mp4", ".mov", ".mkv", ".webm"):
-        raise CapabilityUnsupported("请选择 MP4、MOV、MKV 或 WebM 视频")
+    media_type = media_types.for_filename(data.filename)
+    if media_type == "image" and data.size_bytes > media_types.MAX_IMAGE_BYTES:
+        raise CapabilityUnsupported("单张图片最多 64 MB")
     if data.media_id:
         item = media(db, ctx.project.id, data.media_id, lock=True)
+        original_type = db.scalar(
+            select(MediaVersion.media_type)
+            .where(MediaVersion.media_id == item.id)
+            .order_by(MediaVersion.ordinal)
+            .limit(1)
+        )
+        if original_type and original_type != media_type:
+            raise Conflict("新版本必须与原素材类型一致，请将不同类型的文件作为新素材导入")
         if db.scalar(
             select(MediaVersion.id).where(
                 MediaVersion.media_id == item.id, MediaVersion.status.in_(ACTIVE)
@@ -227,6 +250,7 @@ def begin_upload(db, ctx, data):
         )
         db.add(item)
         db.flush()
+    upload_budget.reserve(db, data.size_bytes)
     ordinal = (
         db.scalar(select(func.max(MediaVersion.ordinal)).where(MediaVersion.media_id == item.id))
         or 0
@@ -235,6 +259,7 @@ def begin_upload(db, ctx, data):
         media_id=item.id,
         ordinal=ordinal,
         filename=data.filename,
+        media_type=media_type,
         size_bytes=data.size_bytes,
         fingerprint=data.fingerprint,
     )
@@ -263,6 +288,9 @@ def append_chunk(db, ctx, version_id, offset, upload):
     path = staging_path(v.id)
     if offset and (not path.exists() or path.stat().st_size < offset):
         raise Conflict("服务器暂存文件缺失，请取消后重新上传")
+    from app.modules.library import upload_budget
+
+    upload_budget.check_space(len(data))
     with path.open("r+b" if path.exists() else "w+b") as stream:
         # Discard uncommitted tail after a failed DB transaction; the DB offset is authoritative.
         stream.truncate(offset)
@@ -281,7 +309,7 @@ def complete_upload(db, ctx, version_id):
     if v.status in ("queued", "processing", "ready"):
         return version_out(v)
     if v.status != "uploading" or v.uploaded_bytes != v.size_bytes:
-        raise Conflict("视频尚未上传完成")
+        raise Conflict("素材尚未上传完成")
     path = staging_path(v.id)
     if not path.exists() or path.stat().st_size != v.size_bytes:
         raise Conflict("暂存文件不完整，请重新上传")
@@ -320,6 +348,9 @@ def usage_out(db, u):
         "media_id": item.id,
         "name": item.name,
         "ordinal": v.ordinal,
+        "media_type": v.media_type,
+        "poster_hash": v.poster_hash,
+        "duration_ms": v.duration_ms,
         "shot_id": u.shot_id,
         "shot_title": shot.title or shot.code,
         "shot_deleted": shot.deleted_at is not None,
@@ -352,10 +383,19 @@ def create_usage(db, ctx, data):
     shot = db.scalar(select(Shot).where(Shot.id == data.shot_id).with_for_update())
     if not shot or shot.project_id != ctx.project.id or shot.deleted_at:
         raise NotFound("目标镜头不存在")
-    if v.status != "ready" or not v.duration_ms:
-        raise Conflict("请等待视频处理完成")
-    if data.end_ms - data.start_ms < 100 or data.end_ms > v.duration_ms:
-        raise CapabilityUnsupported("片段至少0.1秒，且必须在视频时长范围内")
+    if v.status != "ready":
+        raise Conflict("请等待素材处理完成")
+    if v.media_type == "image":
+        if data.start_ms is not None or data.end_ms is not None:
+            raise CapabilityUnsupported("图片按完整画面引用，不支持时间范围")
+    elif (
+        not v.duration_ms
+        or data.start_ms is None
+        or data.end_ms is None
+        or data.end_ms - data.start_ms < 100
+        or data.end_ms > v.duration_ms
+    ):
+        raise CapabilityUnsupported("音视频引用需指定至少0.1秒且不超过素材时长的片段")
     existing = db.scalar(
         select(MediaUsage).where(
             MediaUsage.version_id == v.id,
@@ -400,6 +440,7 @@ def remove_usage(db, ctx, usage_id):
 def impact(db, project_id, media_id):
     from app.models.evidence import IdentityEvidence
     from app.models.generation import GenerationJob
+    from app.models.media_processing import MediaProcessingRun
     from app.models.transcription import TranscriptionRun
     from app.modules.library.reuse import retained_count
 
@@ -418,6 +459,16 @@ def impact(db, project_id, media_id):
         db.scalars(
             select(MediaVersion.id).where(
                 MediaVersion.media_id == media_id, MediaVersion.status.in_(ACTIVE)
+            )
+        )
+    )
+    active.extend(
+        db.scalars(
+            select(MediaProcessingRun.id)
+            .join(MediaVersion)
+            .where(
+                MediaVersion.media_id == media_id,
+                MediaProcessingRun.status.in_(("queued", "processing", "waiting")),
             )
         )
     )
@@ -474,6 +525,10 @@ def trash(db, ctx, media_id, restore=False):
             },
         )
     item.deleted_at = None if restore else datetime.now(UTC)
+    if not restore:
+        from app.modules.library.processing import enqueue_cleanup
+
+        enqueue_cleanup(db, ctx, media_id)
     audit.record(
         db,
         action="library.restore" if restore else "library.trash",

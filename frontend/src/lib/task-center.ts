@@ -23,9 +23,21 @@ export const OPERATIONS: Record<string, [string, string]> = {
   video_frames: ["视频抽帧", "Video frames"],
   video_audio: ["提取音轨", "Audio extraction"],
   video_trim: ["导出视频片段", "Video trim"],
-  library_materialize: ["素材片段制作", "Library clip"],
+  library_materialize: ["素材制作", "Library media"],
 };
 export function taskLabel(operation: string, requestType: string, zh: boolean) {
+  if (operation === "library_materialize")
+    return requestType === "image"
+      ? zh
+        ? "参考图保存"
+        : "Reference image"
+      : requestType === "audio"
+        ? zh
+          ? "音频片段提取"
+          : "Audio clip extraction"
+        : zh
+          ? "视频片段制作"
+          : "Video clip creation";
   if (operation === "generate")
     return requestType === "video"
       ? zh
@@ -44,6 +56,7 @@ export function taskLabel(operation: string, requestType: string, zh: boolean) {
   );
 }
 export function taskSource(project: string, targetType: string, id: string) {
+  if (targetType === "creation") return `/projects/${project}/workbench`;
   if (targetType === "timeline")
     return `/projects/${project}/cuts?timeline=${id}`;
   if (targetType === "asset") return `/projects/${project}/assets/${id}`;
@@ -58,6 +71,7 @@ export interface TaskSummary {
   target_available: boolean;
   status: string;
   provider: string;
+  model_name?: string;
   request_type: string;
   operation: string;
   created_at: string;

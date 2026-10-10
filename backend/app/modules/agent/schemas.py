@@ -14,6 +14,7 @@ class Target(BaseModel):
 class Create(BaseModel):
     goal: str = Field(min_length=1, max_length=8000)
     engine: Literal["cloud_llm", "mock"] = "cloud_llm"
+    model_provider: str | None = Field(default=None, min_length=1, max_length=120)
     scope: list[Target] = Field(default_factory=list, max_length=12)
     skills: list[uuid.UUID] = Field(default_factory=list, max_length=3)
     skill_versions: list[SkillUse] = Field(default_factory=list, max_length=3)

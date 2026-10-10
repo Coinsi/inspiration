@@ -1,12 +1,24 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, ScanSearch, ImagePlus, X } from "lucide-react";
+import { Search, ScanSearch, ImagePlus, X, AudioLines } from "lucide-react";
 import { api, blobUrl } from "@/lib/api";
-import { mediaTime } from "@/lib/library";
+import {
+  mediaTime,
+  mediaTypeName,
+  type MediaType,
+  type SearchBBox,
+  type RegionMatch,
+} from "@/lib/library";
+import { LibraryRegionSelector } from "@/components/LibraryRegion";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { MediaImage } from "@/components/MediaImage";
 import { useConfirm } from "@/components/ui/confirm";
+import {
+  useLibraryProviders,
+  optionalModelReason,
+  OptionalModelsStatus,
+} from "@/components/LibraryProcessing";
 
 type IndexRun = {
   id: string;
@@ -29,26 +41,39 @@ export type SegmentResult = {
   version_id: string;
   ordinal: number;
   name: string;
-  start_ms: number;
-  end_ms: number;
-  thumbnail_hash: string;
+  media_type: MediaType;
+  start_ms: number | null;
+  end_ms: number | null;
+  thumbnail_hash: string | null;
+  proxy_hash?: string | null;
   score: number | null;
   description: string;
   kind: string;
+  provider?: string;
+  match_type?: "frame" | "interval" | "image";
+  matched_at_ms?: number | null;
+  bbox?: SearchBBox;
+  vector_id?: string;
+  matches?: RegionMatch[];
 };
 type SearchInput = {
   query: string;
   image?: string;
+  audio?: string;
+  bbox?: SearchBBox;
   mode: "semantic" | "annotated";
   kind?: "visual" | "speech";
   offset: number;
   collapse_versions: boolean;
+  engine: "local" | "wise";
+  target: "visual" | "audio" | "face" | "object";
 };
 type SearchResult = {
   items: SegmentResult[];
   coverage: Coverage;
   total?: number;
   has_more?: boolean;
+  candidate_limit?: number;
 };
 function useCoverage(projectId: string) {
   return useQuery({
@@ -174,6 +199,32 @@ export function LibrarySearch({
 }) {
   const zh = useI18n().lang === "zh",
     coverage = useCoverage(projectId);
+  const providers = useLibraryProviders(projectId);
+  const [chosenEngine, setEngine] = useState<"local" | "wise" | null>(null);
+  const [target, setTarget] = useState<SearchInput["target"]>("visual");
+  const [region, setRegion] = useState<SearchBBox | null>(null);
+  const regional = target === "face" || target === "object";
+  const targetLabel = {
+    visual: zh ? "画面" : "visuals",
+    audio: zh ? "声音" : "sound",
+    face: zh ? "人脸" : "faces",
+    object: zh ? "物体" : "objects",
+  }[target];
+  const wiseProvider = providers.data?.providers.find(
+    (provider) => provider.id === "wise",
+  );
+  const wiseConfigured =
+    !!providers.data?.enabled && !!wiseProvider?.configured;
+  const engine =
+    chosenEngine ??
+    (wiseConfigured && wiseProvider?.capabilities.includes("visual")
+      ? "wise"
+      : "local");
+  const wiseTargetEnabled =
+    !!wiseProvider?.capabilities.includes(target) &&
+    (!regional ||
+      wiseProvider?.optional_models?.[target as "face" | "object"]?.ready ===
+        true);
   const [query, setQuery] = useState(""),
     [mode, setMode] = useState<"semantic" | "annotated">("semantic"),
     [kind, setKind] = useState("");
@@ -183,6 +234,12 @@ export function LibrarySearch({
       name: string;
     } | null>(null),
     [fileError, setFileError] = useState("");
+  const [audio, setAudio] = useState<{
+    data: string;
+    mime: string;
+    name: string;
+  } | null>(null);
+  const fileRead = useRef(0);
   const [submitted, setSubmitted] = useState<SearchInput | null>(null);
   const [collapse, setCollapse] = useState(true);
   const result = useQuery({
@@ -195,10 +252,29 @@ export function LibrarySearch({
         limit: 24,
       }),
   });
-  const submit = () =>
+  const submit = () => {
+    if (
+      mode === "semantic" &&
+      engine === "wise" &&
+      (!wiseConfigured || !wiseTargetEnabled)
+    )
+      return;
+    if (mode === "semantic" && target === "face" && !picture) return;
+    // Preserve an engine the user has used, including the basic visual engine,
+    // when the provider status refreshes in the background.
+    setEngine(engine);
     setSubmitted({
-      query,
-      image: mode === "semantic" ? picture?.data : undefined,
+      query: mode === "semantic" && (picture || audio) ? "" : query,
+      image:
+        mode === "semantic" && target !== "audio" ? picture?.data : undefined,
+      bbox:
+        mode === "semantic" && regional && picture && region
+          ? region
+          : undefined,
+      audio:
+        mode === "semantic" && engine === "wise" && target === "audio"
+          ? audio?.data
+          : undefined,
       mode,
       kind:
         mode === "annotated" && kind
@@ -206,7 +282,10 @@ export function LibrarySearch({
           : undefined,
       offset: 0,
       collapse_versions: mode === "semantic" && collapse,
+      engine: mode === "semantic" ? engine : "local",
+      target,
     });
+  };
   return (
     <div className="space-y-6">
       <div className="rounded-xl border bg-card p-4 sm:p-6">
@@ -216,12 +295,12 @@ export function LibrarySearch({
           </span>
           <div>
             <h2 className="font-semibold">
-              {zh ? "从画面开始寻找灵感" : "Find inspiration in your footage"}
+              {zh ? "找到创作需要的那一刻" : "Find the moment your story needs"}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {zh
-                ? "描述你要找的画面，或上传一张参考图。找到后，直接引用到镜头。"
-                : "Describe a scene or choose a reference image, then use the matching segment in a shot."}
+                ? "描述画面、寻找声音，或查找一句台词。播放命中的位置，选择片段用到创作中。"
+                : "Find a visual, a sound or a line of dialogue. Preview a match and choose the range to use."}
             </p>
           </div>
         </div>
@@ -233,19 +312,145 @@ export function LibrarySearch({
               variant={mode === m ? "default" : "ghost"}
               onClick={() => {
                 setMode(m);
+                fileRead.current++;
+                setPicture(null);
+                setRegion(null);
+                setAudio(null);
+                setFileError("");
                 setSubmitted(null);
               }}
             >
               {m === "semantic"
                 ? zh
-                  ? "相似画面"
-                  : "Similar scenes"
+                  ? "内容检索"
+                  : "Content search"
                 : zh
-                  ? "明确标注"
-                  : "Annotations"}
+                  ? "字幕与标注"
+                  : "Captions & annotations"}
             </Button>
           ))}
         </div>
+        {mode === "semantic" && (
+          <div className="mb-4 space-y-2">
+            <div
+              role="group"
+              aria-label={zh ? "检索方式" : "Search method"}
+              className="flex flex-wrap gap-2"
+            >
+              {(
+                [
+                  {
+                    engine: "local",
+                    target: "visual",
+                    label: zh ? "基础画面" : "Basic visual",
+                  },
+                  {
+                    engine: "wise",
+                    target: "visual",
+                    label: zh ? "WISE 画面" : "WISE visual",
+                  },
+                  {
+                    engine: "wise",
+                    target: "audio",
+                    label: zh ? "WISE 声音" : "WISE sound",
+                  },
+                  {
+                    engine: "wise",
+                    target: "face",
+                    label: zh ? "参考人脸" : "Reference face",
+                  },
+                  {
+                    engine: "wise",
+                    target: "object",
+                    label: zh ? "物体区域" : "Objects",
+                  },
+                ] as const
+              )
+                .filter(
+                  (option) =>
+                    !["face", "object"].includes(option.target) ||
+                    wiseProvider?.capabilities.includes(option.target),
+                )
+                .map((option) => (
+                  <button
+                    key={`${option.engine}-${option.target}`}
+                    type="button"
+                    disabled={
+                      option.engine === "wise" &&
+                      (!wiseProvider?.capabilities.includes(option.target) ||
+                        ((option.target === "face" ||
+                          option.target === "object") &&
+                          wiseProvider?.optional_models?.[option.target]
+                            ?.ready !== true))
+                    }
+                    title={
+                      (option.target === "face" || option.target === "object") &&
+                      wiseProvider?.optional_models?.[option.target]?.ready !== true
+                        ? optionalModelReason(
+                            wiseProvider?.optional_models?.[option.target]
+                              ?.reason,
+                            zh,
+                          )
+                        : undefined
+                    }
+                    aria-pressed={
+                      engine === option.engine && target === option.target
+                    }
+                    className={`rounded-full border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-45 ${engine === option.engine && target === option.target ? "border-border-strong bg-elevated text-foreground" : "text-muted-foreground hover:bg-surface"}`}
+                    onClick={() => {
+                      setEngine(option.engine);
+                      setTarget(option.target);
+                      setSubmitted(null);
+                      fileRead.current++;
+                      setFileError("");
+                      setRegion(null);
+                      if (option.target !== "audio") setAudio(null);
+                      if (option.target === "audio") setPicture(null);
+                      if (option.target === "face") setQuery("");
+                      if (option.engine === "wise" && picture) setQuery("");
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+            </div>
+            <OptionalModelsStatus provider={wiseProvider} />
+            {wiseProvider && !wiseProvider.capabilities.includes("audio") && (
+              <p className="text-xs leading-6 text-muted-foreground">
+                {zh ? "声音索引尚未启用" : "Sound indexing is not enabled"}
+              </p>
+            )}
+            {regional && (
+              <p className="text-xs leading-6 text-muted-foreground">
+                {zh
+                  ? target === "face"
+                    ? "按参考脸寻找相似人脸。分数仅用于排序，不识别姓名或确认身份。"
+                    : "描述要找的物体，或在参考图中框选目标。打开结果，核对图片区域或视频中的命中画面。"
+                  : target === "face"
+                    ? "Find similar faces from a reference. Scores rank candidates; they do not identify a person."
+                    : "Describe an object or select it in a reference image. Open a result to inspect its region or matched video frame."}
+              </p>
+            )}
+            {engine === "wise" && !wiseConfigured && (
+              <p
+                role="status"
+                className="text-xs leading-6 text-muted-foreground"
+              >
+                {providers.isPending
+                  ? zh
+                    ? "正在读取检索服务配置…"
+                    : "Checking search configuration…"
+                  : providers.isError
+                    ? zh
+                      ? "无法读取检索服务配置，请稍后重试。"
+                      : "Search configuration is unavailable."
+                    : zh
+                      ? "WISE 尚未启用或连接。管理员配置服务并完成素材处理后，可以在这里检索。"
+                      : "WISE is not enabled or connected. An administrator must connect it and process media before searching."}
+              </p>
+            )}
+          </div>
+        )}
         <form
           className="flex flex-wrap gap-2"
           onSubmit={(e) => {
@@ -254,19 +459,40 @@ export function LibrarySearch({
           }}
         >
           <input
-            aria-label={zh ? "搜索画面描述" : "Scene search"}
+            aria-label={zh ? "搜索素材内容" : "Search media content"}
             className="h-11 min-w-0 flex-1 rounded-lg border bg-bg px-3 text-sm"
             placeholder={
               mode === "semantic"
-                ? zh
-                  ? "例如：雨中的街道，镜头跟随一个人向前走"
-                  : "A person walking down a rainy street"
+                ? target === "face"
+                  ? zh
+                    ? "请在下方选择人脸参考图片"
+                    : "Choose a face reference image below"
+                  : target === "object"
+                    ? zh
+                      ? "例如：红色杯子、背包，或框选参考图片中的物体"
+                      : "A red cup, a backpack, or an object selected in a reference image"
+                    : target === "audio"
+                      ? zh
+                        ? "例如：雨声、玻璃破碎、轻柔的钢琴"
+                        : "Rain, breaking glass or soft piano"
+                      : zh
+                        ? "例如：雨中的街道，镜头跟随一个人向前走"
+                        : "A person walking down a rainy street"
                 : zh
-                  ? "搜索人工画面标注或台词"
-                  : "Search visual annotations or dialogue"
+                  ? "输入字幕、台词或画面标注中的关键词"
+                  : "Search words in captions, dialogue or visual annotations"
             }
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            disabled={mode === "semantic" && target === "face"}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (e.target.value.trim()) {
+                fileRead.current++;
+                setPicture(null);
+                setRegion(null);
+                setAudio(null);
+              }
+            }}
           />
           {mode === "annotated" && (
             <select
@@ -277,14 +503,20 @@ export function LibrarySearch({
             >
               <option value="">{zh ? "全部标注" : "All annotations"}</option>
               <option value="visual">{zh ? "画面标注" : "Visual"}</option>
-              <option value="speech">{zh ? "台词标注" : "Dialogue"}</option>
+              <option value="speech">
+                {zh ? "字幕与台词" : "Captions & dialogue"}
+              </option>
             </select>
           )}
           <Button
             type="submit"
             disabled={
               result.isFetching ||
-              (mode === "semantic" && !query.trim() && !picture)
+              (mode === "semantic" && target === "face" && !picture) ||
+              (mode === "semantic" &&
+                engine === "wise" &&
+                (!wiseConfigured || !wiseTargetEnabled)) ||
+              (mode === "semantic" && !query.trim() && !picture && !audio)
             }
           >
             <Search className="h-4 w-4" />
@@ -293,8 +525,8 @@ export function LibrarySearch({
                 ? "查找中…"
                 : "Searching…"
               : zh
-                ? "查找片段"
-                : "Find segments"}
+                ? "查找素材"
+                : "Find media"}
           </Button>
         </form>
         {mode === "semantic" && (
@@ -308,53 +540,168 @@ export function LibrarySearch({
                   setSubmitted(null);
                 }}
               />
-              {zh ? "每个版本只显示最佳片段" : "Best segment per version"}
+              {regional
+                ? zh
+                  ? "按版本合并，保留所有命中区域"
+                  : "Group by version, retain all regions"
+                : zh
+                  ? "每个版本只显示最佳匹配"
+                  : "Best match per version"}
             </label>
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
-              <ImagePlus className="h-4 w-4" />
-              {zh ? "用图片找片段" : "Search with an image"}
-              <input
-                aria-label={zh ? "检索参考图片" : "Search reference image"}
-                type="file"
-                className="sr-only"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  setFileError("");
-                  if (
-                    f.size > 2 * 1024 * 1024 ||
-                    !["image/jpeg", "image/png", "image/webp"].includes(f.type)
-                  ) {
-                    setFileError(
-                      zh
-                        ? "请选择2 MB以内的PNG、JPEG或WebP图片"
-                        : "Choose a PNG, JPEG or WebP under 2 MB",
-                    );
-                    return;
-                  }
-                  try {
-                    const data = await new Promise<string>(
-                      (resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = () =>
-                          resolve(String(reader.result).split(",")[1]);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(f);
-                      },
-                    );
-                    setPicture({ data, mime: f.type, name: f.name });
-                  } catch {
-                    setFileError(
-                      zh
-                        ? "图片读取失败，请重新选择"
-                        : "Unable to read image; select it again",
-                    );
-                  }
-                  e.target.value = "";
-                }}
-              />
-            </label>
+            {target !== "audio" && (
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+                <ImagePlus className="h-4 w-4" />
+                {regional
+                  ? zh
+                    ? "选择参考图片"
+                    : "Choose a reference image"
+                  : zh
+                    ? "用图片找画面"
+                    : "Search with an image"}
+                <input
+                  aria-label={zh ? "检索参考图片" : "Search reference image"}
+                  type="file"
+                  className="sr-only"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f) return;
+                    const request = ++fileRead.current;
+                    setPicture(null);
+                    setRegion(null);
+                    setAudio(null);
+                    setSubmitted(null);
+                    setFileError("");
+                    if (
+                      f.size > 2 * 1024 * 1024 ||
+                      !["image/jpeg", "image/png", "image/webp"].includes(
+                        f.type,
+                      )
+                    ) {
+                      setFileError(
+                        zh
+                          ? "请选择2 MB以内的PNG、JPEG或WebP图片"
+                          : "Choose a PNG, JPEG or WebP under 2 MB",
+                      );
+                      return;
+                    }
+                    try {
+                      const data = await new Promise<string>(
+                        (resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () =>
+                            resolve(String(reader.result).split(",")[1]);
+                          reader.onerror = reject;
+                          reader.readAsDataURL(f);
+                        },
+                      );
+                      if (request !== fileRead.current) return;
+                      setPicture({ data, mime: f.type, name: f.name });
+                      setAudio(null);
+                      setQuery("");
+                      setSubmitted(null);
+                    } catch {
+                      if (request !== fileRead.current) return;
+                      setFileError(
+                        zh
+                          ? "图片读取失败，请重新选择"
+                          : "Unable to read image; select it again",
+                      );
+                    }
+                  }}
+                />
+              </label>
+            )}
+            {target === "audio" && engine === "wise" && (
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+                <AudioLines className="h-4 w-4" />
+                {zh ? "用音频找声音" : "Search with audio"}
+                <input
+                  aria-label={zh ? "检索参考音频" : "Search reference audio"}
+                  type="file"
+                  className="sr-only"
+                  accept=".wav,.mp3,.flac,.m4a,.ogg"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    const request = ++fileRead.current;
+                    setPicture(null);
+                    setRegion(null);
+                    setAudio(null);
+                    setSubmitted(null);
+                    setFileError("");
+                    if (
+                      file.size > 4 * 1024 * 1024 ||
+                      !/\.(wav|mp3|flac|m4a|ogg)$/i.test(file.name)
+                    ) {
+                      setFileError(
+                        zh
+                          ? "请选择4 MB以内、30秒以内的WAV、MP3、FLAC、M4A或OGG片段。"
+                          : "Choose a WAV, MP3, FLAC, M4A or OGG clip under 4 MB and 30 seconds.",
+                      );
+                      return;
+                    }
+                    try {
+                      const data = await new Promise<string>(
+                        (resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () =>
+                            resolve(String(reader.result).split(",")[1]);
+                          reader.onerror = reject;
+                          reader.readAsDataURL(file);
+                        },
+                      );
+                      if (request !== fileRead.current) return;
+                      setAudio({
+                        data,
+                        mime: file.type || "audio/mpeg",
+                        name: file.name,
+                      });
+                      setPicture(null);
+                      setQuery("");
+                      setSubmitted(null);
+                    } catch {
+                      if (request !== fileRead.current) return;
+                      setFileError(
+                        zh
+                          ? "音频读取失败，请重新选择。"
+                          : "Unable to read the audio. Select it again.",
+                      );
+                    }
+                  }}
+                />
+              </label>
+            )}
+            {audio && target === "audio" && (
+              <div className="flex w-full flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                <AudioLines size={20} className="text-muted-foreground" />
+                <span className="max-w-48 truncate text-xs">{audio.name}</span>
+                <audio
+                  controls
+                  preload="metadata"
+                  className="h-9 max-w-full"
+                  src={`data:${audio.mime};base64,${audio.data}`}
+                  aria-label={zh ? "试听检索参考音频" : "Preview search audio"}
+                />
+                <button
+                  type="button"
+                  aria-label={zh ? "移除检索音频" : "Remove search audio"}
+                  onClick={() => {
+                    fileRead.current++;
+                    setAudio(null);
+                  }}
+                >
+                  <X size={16} />
+                </button>
+                <span className="w-full text-xs text-muted-foreground">
+                  {zh
+                    ? "使用30秒以内的声音片段，最多4 MB；也可以直接输入声音描述。"
+                    : "Use a clip up to 30 seconds and 4 MB, or type a sound description."}
+                </span>
+              </div>
+            )}
             {picture && (
               <div className="flex items-center gap-2 rounded-md border p-1.5">
                 <img
@@ -367,13 +714,29 @@ export function LibrarySearch({
                 </span>
                 <button
                   aria-label={zh ? "移除检索图片" : "Remove search image"}
-                  onClick={() => setPicture(null)}
+                  onClick={() => {
+                    fileRead.current++;
+                    setPicture(null);
+                    setRegion(null);
+                  }}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
             )}
           </div>
+        )}
+        {mode === "semantic" && regional && picture && (
+          <LibraryRegionSelector
+            key={picture.data}
+            src={`data:${picture.mime};base64,${picture.data}`}
+            label={picture.name}
+            value={region}
+            onChange={(box) => {
+              setRegion(box);
+              setSubmitted(null);
+            }}
+          />
         )}
         {fileError && (
           <p role="alert" className="mt-2 text-xs text-danger">
@@ -382,34 +745,52 @@ export function LibrarySearch({
         )}
         <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
           {mode === "semantic"
-            ? zh
-              ? "根据采样画面寻找相似片段，可能漏掉短暂出现的内容。相似度不是识别置信度，请播放原片核对。"
-              : "Matches use sampled video. Brief appearances may be missed. Similarity is not confidence; verify by playing the source."
+            ? target === "audio"
+              ? zh
+                ? "根据音轨寻找声音，不等同于搜索台词。台词请在“字幕与标注”中检索已保存的字幕。"
+                : "Search acoustic content, not dialogue. Search saved captions under Captions & annotations."
+              : zh
+                ? "查找图片和视频中的相似画面。视频按采样画面检索，可能漏掉短暂内容；匹配分数仅供排序，请打开素材核对。"
+                : "Find similar images and sampled video frames. Brief appearances may be missed. Match scores rank results; preview the source to verify."
             : zh
-              ? "仅搜索已保存的人工画面与台词标注，可分页查看全部匹配。台词提到某物，不代表它出现在画面中。"
-              : "Search saved visual and dialogue annotations, with all matches paginated. Spoken mentions do not establish visual presence."}
+              ? "按关键词查找自动转写、导入的字幕和人工标注，可分页查看全部匹配。台词提到某物，不代表它出现在画面中。"
+              : "Find words in automatic transcripts, imported captions and manual annotations. All matches are paginated. Spoken mentions do not establish visual presence."}
         </p>
       </div>
-      <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-        <span>
-          {coverage.isPending
-            ? zh
-              ? "正在读取索引覆盖情况…"
-              : "Loading index coverage…"
-            : coverage.isError
-              ? zh
-                ? "索引覆盖情况暂不可用"
-                : "Index coverage unavailable"
-              : zh
-                ? `${coverage.data.indexed} / ${coverage.data.versions} 个视频版本已有索引 · ${coverage.data.unindexed} 个尚未完成`
-                : `${coverage.data.indexed} / ${coverage.data.versions} versions indexed · ${coverage.data.unindexed} unfinished`}
-        </span>
-        <span>
-          {zh
-            ? "本地检索 · 原片保留在自己的存储中"
-            : "Self-hosted search · Originals remain in your storage"}
-        </span>
-      </div>
+      {mode === "semantic" && (
+        <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {mode === "semantic" && engine === "wise"
+              ? result.data?.coverage
+                ? zh
+                  ? `${result.data.coverage.indexed} / ${result.data.coverage.versions} 个版本已完成${targetLabel}索引 · ${result.data.coverage.unindexed} 个尚未完成`
+                  : `${result.data.coverage.indexed} / ${result.data.coverage.versions} versions indexed for ${targetLabel}`
+                : zh
+                  ? "搜索时会核对当前能力的索引覆盖范围"
+                  : "Search checks index coverage for the selected capability"
+              : coverage.isPending
+                ? zh
+                  ? "正在读取索引覆盖情况…"
+                  : "Loading index coverage…"
+                : coverage.isError
+                  ? zh
+                    ? "索引覆盖情况暂不可用"
+                    : "Index coverage unavailable"
+                  : zh
+                    ? `${coverage.data.indexed} / ${coverage.data.versions} 个视频版本已有索引 · ${coverage.data.unindexed} 个尚未完成`
+                    : `${coverage.data.indexed} / ${coverage.data.versions} versions indexed · ${coverage.data.unindexed} unfinished`}
+          </span>
+          <span>
+            {zh
+              ? engine === "wise" && mode === "semantic"
+                ? "WISE 内容检索 · 原片版本保持关联"
+                : "基础检索 · 原片版本保持关联"
+              : engine === "wise" && mode === "semantic"
+                ? "WISE search · Linked to source versions"
+                : "Basic search · Linked to source versions"}
+          </span>
+        </div>
+      )}
       {result.data?.coverage.incompatible ? (
         <p className="text-xs text-warning">
           {zh
@@ -421,14 +802,32 @@ export function LibrarySearch({
         <div className="studio-empty min-h-60 rounded-xl border border-dashed">
           <ScanSearch className="h-9 w-9" />
           <p>
-            {zh
-              ? "试着描述一个人物、场景或动作"
-              : "Try describing a person, scene or action"}
+            {mode === "annotated"
+              ? zh
+                ? "输入一句台词，找到它出现的位置"
+                : "Find where a line is spoken"
+              : target === "audio"
+                ? zh
+                  ? "描述你想找的声音"
+                  : "Describe the sound you need"
+                : target === "face"
+                  ? zh
+                    ? "选择一张参考图片，圈出要找的人脸"
+                    : "Choose an image and select the face to find"
+                  : zh
+                    ? "试着描述一个人物、场景或动作"
+                    : "Try describing a person, scene or action"}
           </p>
           <span className="max-w-lg text-center text-xs">
-            {zh
-              ? "先在视频卡片上建立内容索引。未索引的视频不会被当作“没有匹配”。"
-              : "Index videos from their cards first. Unindexed videos are not treated as negative matches."}
+            {mode === "annotated"
+              ? zh
+                ? "完成字幕转写、导入 SRT 或保存标注后即可搜索，无需建立画面索引。"
+                : "Search after transcription, importing SRT or saving annotations. No visual index is required."
+              : zh
+                ? engine === "wise"
+                  ? "先在素材卡片的“处理与检索”中建立对应索引。未完成处理的素材不会参与搜索。"
+                  : "先在视频卡片上建立基础画面索引。未索引的视频不会被当作“没有匹配”。"
+                : "Index videos from their cards first. Unindexed videos are not treated as negative matches."}
           </span>
         </div>
       ) : result.isFetching ? (
@@ -448,14 +847,18 @@ export function LibrarySearch({
             {!result.data.items.length ? (
               <div className="studio-empty rounded-xl border">
                 <p>
-                  {zh
-                    ? "当前检索范围没有匹配片段"
-                    : "No matches in the current indexed scope"}
+                  {mode === "annotated"
+                    ? zh
+                      ? "可以缩短关键词，或先为素材转写、导入字幕。自动转写可能存在错字。"
+                      : "Try a shorter phrase or transcribe or import captions first. Automatic transcripts may contain errors."
+                    : zh
+                      ? "当前检索范围没有匹配片段"
+                      : "No matches in the current indexed scope"}
                 </p>
                 <span className="text-xs">
                   {zh
-                    ? "可以换一种描述，或为尚未处理的视频建立索引。"
-                    : "Try another description or index the remaining videos."}
+                    ? "可以换一种描述，或为尚未处理的素材建立索引。"
+                    : "Try another description or index the remaining media."}
                 </span>
               </div>
             ) : (
@@ -467,18 +870,96 @@ export function LibrarySearch({
                     onClick={() => onSelect(r)}
                   >
                     <div className="relative aspect-video">
-                      <MediaImage
-                        src={blobUrl(projectId, r.thumbnail_hash)}
-                        alt={r.name}
-                      />
+                      {r.media_type === "audio" ? (
+                        <div className="flex h-full flex-col items-center justify-center gap-2 bg-elevated text-muted-foreground">
+                          <AudioLines size={44} strokeWidth={1.25} />
+                          <span className="text-xs">
+                            {zh ? "音频片段" : "Audio segment"}
+                          </span>
+                        </div>
+                      ) : (
+                        <MediaImage
+                          src={
+                            r.thumbnail_hash ||
+                            (r.media_type === "image" && r.proxy_hash)
+                              ? blobUrl(
+                                  projectId,
+                                  (r.thumbnail_hash || r.proxy_hash)!,
+                                )
+                              : null
+                          }
+                          alt={r.name}
+                          className={
+                            r.media_type === "image"
+                              ? "[&_img]:object-contain"
+                              : undefined
+                          }
+                        />
+                      )}
                       <span className="absolute bottom-2 left-2 rounded bg-black/75 px-2 py-1 text-xs text-white">
-                        {mediaTime(r.start_ms)} — {mediaTime(r.end_ms)}
+                        {r.bbox && r.media_type === "image" ? (
+                          r.kind === "face" ? (
+                            zh ? (
+                              "人脸区域"
+                            ) : (
+                              "Face region"
+                            )
+                          ) : zh ? (
+                            "物体区域"
+                          ) : (
+                            "Object region"
+                          )
+                        ) : r.media_type === "image" ||
+                          r.match_type === "image" ? (
+                          zh ? (
+                            "整张图片"
+                          ) : (
+                            "Whole image"
+                          )
+                        ) : r.match_type === "frame" ? (
+                          `${zh ? "画面定位" : "Frame at"} ${mediaTime(r.matched_at_ms ?? r.start_ms)}`
+                        ) : (
+                          <>
+                            {r.kind === "audio" && (
+                              <AudioLines className="mr-1 inline h-3 w-3" />
+                            )}
+                            {mediaTime(r.start_ms)} — {mediaTime(r.end_ms)}
+                          </>
+                        )}
                       </span>
+                      {r.provider === "wise" && r.media_type !== "audio" && (
+                        <span className="absolute right-2 top-2 rounded bg-black/60 px-2 py-1 text-[10px] text-white">
+                          {r.media_type === "image"
+                            ? zh
+                              ? "图片"
+                              : "Image"
+                            : zh
+                              ? "原片封面"
+                              : "Source cover"}
+                        </span>
+                      )}
                     </div>
                     <div className="space-y-2 p-4">
                       <h3 className="truncate text-sm font-medium">{r.name}</h3>
-                      <p className="text-xs text-muted-foreground">
-                        v{r.ordinal} ·{" "}
+                      {!!r.matches?.length && (
+                        <p className="text-xs text-muted-foreground">
+                          {zh
+                            ? `${r.matches.length} 个命中区域 · 打开后核对具体位置`
+                            : `${r.matches.length} matched regions · Open to inspect their locations`}
+                        </p>
+                      )}
+                      <p
+                        className="text-xs text-muted-foreground"
+                        title={
+                          r.score !== null
+                            ? zh
+                              ? "匹配分数仅供本次检索排序，可以大于1或为负数；不同模型的分数不能直接比较。"
+                              : "Match scores rank this search. They may exceed 1 or be negative, and cannot be compared across models."
+                            : undefined
+                        }
+                      >
+                        {mediaTypeName(r.media_type || "video", zh)} · v
+                        {r.ordinal} ·{" "}
                         {r.score === null
                           ? r.kind === "visual"
                             ? zh
@@ -488,14 +969,25 @@ export function LibrarySearch({
                               ? "台词标注"
                               : "Dialogue annotation"
                           : zh
-                            ? `相似度 ${r.score.toFixed(3)}`
-                            : `Similarity ${r.score.toFixed(3)}`}
+                            ? `匹配分数 ${r.score.toFixed(3)}`
+                            : `Match score ${r.score.toFixed(3)}`}
                       </p>
                       {r.description && (
                         <p className="line-clamp-2 text-xs">{r.description}</p>
                       )}
                       <span className="studio-link text-xs">
-                        {zh ? "播放片段并引用" : "Play & reference"} →
+                        {r.media_type === "image"
+                          ? zh
+                            ? "查看图片并引用"
+                            : "View & reference image"
+                          : r.match_type === "frame"
+                            ? zh
+                              ? "查看定位并选择片段"
+                              : "View match & choose a range"
+                            : zh
+                              ? "播放片段并引用"
+                              : "Play & reference"}{" "}
+                        →
                       </span>
                     </div>
                   </button>
@@ -539,6 +1031,13 @@ export function LibrarySearch({
                 {zh ? "下一页" : "Next"}
               </Button>
             </div>
+            {result.data.candidate_limit && (
+              <p className="text-center text-xs leading-6 text-muted-foreground">
+                {zh
+                  ? `本次展示前 ${result.data.candidate_limit} 条候选范围内的结果，不代表全库匹配总数。`
+                  : `Results are drawn from at most ${result.data.candidate_limit} candidates, not a full-library match count.`}
+              </p>
+            )}
           </>
         )
       )}
@@ -552,12 +1051,14 @@ export function LibraryAnnotation({
   start,
   end,
   valid,
+  mediaType = "video",
 }: {
   projectId: string;
   versionId: string;
   start: number;
   end: number;
   valid: boolean;
+  mediaType?: MediaType;
 }) {
   const zh = useI18n().lang === "zh",
     qc = useQueryClient();
@@ -607,7 +1108,11 @@ export function LibraryAnnotation({
           end_ms: number;
           kind: string;
           text: string;
-          source?: { model_key?: string; reviewed?: boolean };
+          source?: {
+            model_key?: string;
+            reviewed?: boolean;
+            provider?: string;
+          };
         }[];
       }>(
         `/projects/${projectId}/library/versions/${versionId}/annotations?offset=${offset}`,
@@ -624,7 +1129,7 @@ export function LibraryAnnotation({
     },
   });
   const [text, setText] = useState(""),
-    [kind, setKind] = useState("visual");
+    [kind, setKind] = useState(mediaType === "audio" ? "speech" : "visual");
   const save = useMutation({
     mutationFn: () =>
       api.post(
@@ -650,8 +1155,8 @@ export function LibraryAnnotation({
       <div className="mt-3 space-y-3">
         <p className="text-muted-foreground">
           {zh
-            ? "记录你实际看见的内容或听见的台词，方便之后精确查找。标注与视频版本一起保留。"
-            : "Record visible evidence or dialogue for later lookup. Annotations stay with this video version."}
+            ? "记录你实际看见的内容或听见的台词，方便之后精确查找。标注与素材版本一起保留。"
+            : "Record visible evidence or dialogue for later lookup. Annotations stay with this media version."}
         </p>
         <select
           aria-label={zh ? "新标注来源" : "New annotation source"}
@@ -662,7 +1167,11 @@ export function LibraryAnnotation({
             save.reset();
           }}
         >
-          <option value="visual">{zh ? "画面内容" : "Visual evidence"}</option>
+          {mediaType !== "audio" && (
+            <option value="visual">
+              {zh ? "画面内容" : "Visual evidence"}
+            </option>
+          )}
           <option value="speech">{zh ? "台词内容" : "Dialogue"}</option>
         </select>
         <textarea
@@ -687,8 +1196,8 @@ export function LibraryAnnotation({
         {save.isSuccess && (
           <p role="status">
             {zh
-              ? "标注已保存，可在明确标注中检索。"
-              : "Saved. Find it in annotations search."}
+              ? "标注已保存，可在“字幕与标注”中检索。"
+              : "Saved. Find it in Captions & annotations."}
           </p>
         )}
         {save.error && (
@@ -717,9 +1226,15 @@ export function LibraryAnnotation({
                     : "Dialogue"}
               </p>
               <p className="break-words">{a.text}</p>
-              {a.source?.model_key && (
+              {(a.source?.model_key || a.source?.provider === "mediacms") && (
                 <p className="text-xs text-muted-foreground">
-                  {zh ? "自动转写后人工核对" : "Transcribed, then reviewed"}
+                  {a.source?.reviewed
+                    ? zh
+                      ? "自动转写 · 已人工核对"
+                      : "Automatic transcript · Reviewed"
+                    : zh
+                      ? "自动转写 · 尚未人工核对"
+                      : "Automatic transcript · Not reviewed"}
                 </p>
               )}
               <button
@@ -729,8 +1244,8 @@ export function LibraryAnnotation({
                   if (
                     await confirm({
                       message: zh
-                        ? "移除这条检索标注？不影响原视频与镜头引用。"
-                        : "Remove this annotation? The video and shot references remain.",
+                        ? "移除这条检索标注？不影响原素材与镜头引用。"
+                        : "Remove this annotation? The media and shot references remain.",
                     })
                   )
                     remove.mutate(a.id);

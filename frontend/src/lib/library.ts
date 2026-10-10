@@ -1,4 +1,63 @@
+export type MediaType = "video" | "image" | "audio";
+export type SearchBBox = { x: number; y: number; w: number; h: number };
+export type RegionMatch = {
+  id: string;
+  vector_id: string;
+  bbox: SearchBBox;
+  start_ms: number | null;
+  end_ms: number | null;
+  matched_at_ms: number | null;
+  score: number;
+};
+export function librarySourceUrl(
+  projectId: string,
+  source: {
+    media_id: string;
+    version_id: string;
+    media_type?: MediaType;
+    start_ms: number | null;
+    end_ms: number | null;
+  },
+) {
+  const params = new URLSearchParams({
+    media: source.media_id,
+    version: source.version_id,
+  });
+  if (
+    source.media_type !== "image" &&
+    source.start_ms !== null &&
+    source.end_ms !== null &&
+    Number.isFinite(source.start_ms) &&
+    Number.isFinite(source.end_ms) &&
+    source.start_ms >= 0 &&
+    source.end_ms > source.start_ms
+  ) {
+    params.set("start", String(source.start_ms));
+    params.set("end", String(source.end_ms));
+  }
+  return `/projects/${projectId}/library?${params.toString()}`;
+}
+export const mediaTypeName = (kind: MediaType, zh: boolean) =>
+  ({
+    video: zh ? "视频" : "Video",
+    image: zh ? "图片" : "Image",
+    audio: zh ? "音频" : "Audio",
+  })[kind];
+export const mediaAccept: Record<MediaType, string> = {
+  video: ".mp4,.mov,.mkv,.webm",
+  image: ".png,.jpg,.jpeg,.webp",
+  audio: ".wav,.mp3,.flac,.m4a,.ogg",
+};
+export function fileMediaType(name: string): MediaType | null {
+  const extension = `.${name.split(".").pop()?.toLowerCase()}`;
+  return (
+    (Object.keys(mediaAccept) as MediaType[]).find((kind) =>
+      mediaAccept[kind].split(",").includes(extension),
+    ) ?? null
+  );
+}
 export interface MediaVersion {
+  media_type: MediaType;
   reuse_origin?: { version_id: string; name: string; ordinal: number } | null;
   id: string;
   media_id: string;
@@ -15,6 +74,7 @@ export interface MediaVersion {
   proxy_hash: string | null;
   poster_hash: string | null;
   duration_ms: number | null;
+  has_audio?: boolean | null;
   width: number | null;
   height: number | null;
 }
@@ -27,6 +87,7 @@ export interface LibraryMedia {
   usage_count: number;
 }
 export interface MediaUsage {
+  media_type: MediaType;
   id: string;
   version_id: string;
   media_id: string;
@@ -35,8 +96,8 @@ export interface MediaUsage {
   shot_id: string;
   shot_title: string;
   shot_deleted: boolean;
-  start_ms: number;
-  end_ms: number;
+  start_ms: number | null;
+  end_ms: number | null;
   purpose: string;
   note: string;
   proxy_hash: string;
@@ -70,10 +131,15 @@ export const mediaSize = (bytes: number) =>
   bytes >= 1024 ** 3
     ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
     : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-export const mediaTime = (ms: number) =>
-  `${Math.floor(ms / 60000)
-    .toString()
-    .padStart(2, "0")}:${((ms % 60000) / 1000).toFixed(1).padStart(4, "0")}`;
+export const mediaTime = (ms: number | null) =>
+  ms === null
+    ? "—"
+    : `${Math.floor(ms / 60000)
+        .toString()
+        .padStart(
+          2,
+          "0",
+        )}:${((ms % 60000) / 1000).toFixed(1).padStart(4, "0")}`;
 export async function digest(blob: Blob) {
   return [
     ...new Uint8Array(

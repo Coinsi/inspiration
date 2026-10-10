@@ -64,7 +64,7 @@ def prepare(db, ctx, gen_id, data):
     preset = PRESETS[data.mode].get(data.preset)
     if not preset:
         raise CapabilityUnsupported("该分类下不存在所选角色预设")
-    caps = service._provider_instance(db, ctx.project.id, data.provider).capabilities()
+    caps = service._provider_instance(db, ctx.project.id, data.provider, user_id=ctx.user.id).capabilities()
     if "image" not in caps.modalities or "img2img" not in caps.features:
         raise CapabilityUnsupported(
             "请使用支持参考图编辑的图片供应商；测试素材不能用于角色一致性生成"

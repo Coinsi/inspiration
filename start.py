@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -19,7 +20,8 @@ import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
 API_URL = "http://127.0.0.1:8000"
@@ -27,6 +29,51 @@ WEB_URL = "http://127.0.0.1:5173"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # 本地健康检查不经过系统代理。
 HTTP = build_opener(ProxyHandler({}))
+
+
+class NoRedirect(HTTPRedirectHandler):
+    # Never forward private service credentials to a redirect destination.
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def wise_runtime(private_env: Path, environ: dict) -> str:
+    """Read only the literal runtime switch; never import private keys into os.environ."""
+    value = environ.get("WISE_RUNTIME")
+    if value is None:
+        # Match complete assignments, including quoted multiline values of other
+        # keys, so a line inside an unrelated secret cannot select a runtime.
+        assignments = re.compile(
+            r"^[ \t]*(?:export[ \t]+)?(?P<key>[A-Za-z_][A-Za-z_0-9]*)[ \t]*"
+            r"=[ \t]*(?P<value>'(?:\\'|[^'])*'|\"(?:\\\"|[^\"])*\"|[^\r\n]*)"
+            r"(?P<tail>[^\r\n]*)$",
+            re.MULTILINE,
+        )
+        for match in assignments.finditer(private_env.read_text(encoding="utf-8-sig")):
+            if match["key"] != "WISE_RUNTIME":
+                continue
+            value = match["value"].strip()
+            if value.startswith(("'", '"')):
+                if (
+                    len(value) < 2
+                    or value[-1] != value[0]
+                    or (match["tail"].strip() and not match["tail"].lstrip().startswith("#"))
+                ):
+                    raise StartupError("WISE_RUNTIME 仅支持 cpu 或 cuda 的字面值。")
+                value = value[1:-1]
+            else:
+                value = re.split(r"[ \t]+#", value, maxsplit=1)[0].strip()
+                if value.startswith("#"):
+                    value = ""
+    value = "cpu" if value in {None, ""} else value
+    if value not in {"cpu", "cuda"}:
+        raise StartupError("WISE_RUNTIME 仅支持 cpu 或 cuda；未更改现有服务。")
+    return value
+
+
+PROCESSING_HTTP = build_opener(ProxyHandler({}), NoRedirect())
+WISE_COMMIT = "fcfa443fbb46eb361bb19151339338616838a5b5"
+PROCESSING_README = "deploy/media-services/README.md"
 CONFIG_QUERY = """
 import json
 from urllib.parse import urlsplit
@@ -45,8 +92,27 @@ print(json.dumps({
     'library_indexer_url': s.library_indexer_url,
     'transcriber_token': s.transcriber_token,
     'library_indexer_token': s.library_indexer_token,
+    'library_processing_enabled': s.library_processing_enabled,
+    'library_wise_url': s.library_wise_url,
+    'library_wise_token': s.library_wise_token,
+    'library_mediacms_url': s.library_mediacms_url,
+    'library_mediacms_token': s.library_mediacms_token,
     'minio': [m.hostname, m.port or (443 if s.minio_secure else 80)],
 }))
+"""
+# Read only the installed Whisper manifest and existing cache. Do not import
+# torch/whisper, instantiate a model, or invoke a downloader.
+WHISPER_CACHE_CHECK = """
+import ast, hashlib, importlib.util, pathlib, sys
+source = pathlib.Path(importlib.util.find_spec('whisper').origin).read_text()
+tree = ast.parse(source)
+models = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == '_MODELS' for t in n.targets))
+url = models[sys.argv[1]]
+path = pathlib.Path('/cache/whisper') / url.rsplit('/', 1)[-1]
+with path.open('rb') as f:
+    actual = hashlib.file_digest(f, 'sha256').hexdigest()
+raise SystemExit(0 if actual == url.split('/')[-2] else 1)
 """
 
 
@@ -74,11 +140,7 @@ def http_text(url: str) -> str:
 def api_ready(app_name: str) -> bool:
     try:
         data = json.loads(http_text(API_URL + "/health"))
-        return (
-            isinstance(data, dict)
-            and data.get("status") == "ok"
-            and data.get("app") == app_name
-        )
+        return isinstance(data, dict) and data.get("status") == "ok" and data.get("app") == app_name
     except (OSError, URLError, ValueError):
         return False
 
@@ -88,6 +150,49 @@ def web_ready() -> bool:
         html = http_text(WEB_URL)
         return "Inspiration" in html and 'id="root"' in html
     except (OSError, URLError):
+        return False
+
+
+def processing_ready(name: str, url: str, token: str) -> bool:
+    """Authenticated service identity checks, not model/queue readiness claims."""
+
+    def read(path, method="GET"):
+        request = Request(
+            url.rstrip("/") + path,
+            method=method,
+            headers={"Authorization": ("Bearer " if name == "wise" else "Token ") + token},
+        )
+        with PROCESSING_HTTP.open(request, timeout=4) as response:
+            return json.loads(response.read(1024 * 1024))
+
+    try:
+        if name == "wise":
+            data = read("/health")
+            return (
+                isinstance(data, dict)
+                and data.get("service") == "inspiration-wise-bridge"
+                and data.get("upstream_commit") == WISE_COMMIT
+                and data.get("worker_alive") is True
+            )
+        # This protected extension is specific to our MediaCMS integration.
+        # OPTIONS checks permissions without uploading or creating any media.
+        metadata = read("/api/inspiration/v1/media/", "OPTIONS")
+        if not (
+            isinstance(metadata, dict)
+            and metadata.get("name") == "Upload"
+            and "application/json" in metadata.get("renders", [])
+            and "multipart/form-data" in metadata.get("parses", [])
+        ):
+            return False
+        data = read("/api/v1/media")
+        return (
+            isinstance(data, dict)
+            and isinstance(data.get("results"), list)
+            and type(data.get("count")) is int
+            and data["count"] >= 0
+        )
+    except (OSError, URLError, ValueError, TypeError):
+        # Never log response bodies, request headers, or exception URLs.
         return False
 
 
@@ -141,9 +246,7 @@ class Launcher:
         self.frontend = root / "frontend"
         self.runtime = root / ".runtime"
         self.python = (
-            self.backend
-            / ".venv"
-            / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            self.backend / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         )
         self.env = {**os.environ, "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
         self.started: list[subprocess.Popen] = []
@@ -181,17 +284,13 @@ class Launcher:
                 "操作超时，请检查服务或网络，详情见 .runtime/startup.log。"
             ) from error
         if check and result.returncode:
-            raise StartupError(
-                "操作未成功，请查看 .runtime/startup.log；现有配置和数据未被清理。"
-            )
+            raise StartupError("操作未成功，请查看 .runtime/startup.log；现有配置和数据未被清理。")
         return result
 
     def prepare(self):
         self.node = shutil.which("node")
         if not self.node:
-            raise StartupError(
-                "未找到 Node.js。请先安装 Node.js 20+，然后重新双击启动。"
-            )
+            raise StartupError("未找到 Node.js。请先安装 Node.js 20+，然后重新双击启动。")
         version = self.command([self.node, "--version"], capture=True).stdout.strip()
         if int(version.lstrip("v").split(".")[0]) < 20:
             raise StartupError(f"当前 Node.js 为 {version}，需要 20 或更高版本。")
@@ -202,34 +301,27 @@ class Launcher:
             [
                 str(self.python),
                 "-c",
-                "import fastapi, uvicorn, sqlalchemy, alembic, psycopg, pydantic_settings, celery, redis, minio",
+                "import fastapi, uvicorn, sqlalchemy, alembic, psycopg, "
+                "pydantic_settings, celery, redis, minio",
             ],
             check=False,
         )
         if installed.returncode:
             say("[准备] 首次安装后端依赖，可能需要几分钟……")
-            self.command(
-                [str(self.python), "-m", "pip", "install", "-e", ".[dev]"], timeout=900
-            )
+            self.command([str(self.python), "-m", "pip", "install", "-e", ".[dev]"], timeout=900)
         env_file = self.backend / ".env"
         if not env_file.exists():
             content = (self.backend / ".env.example").read_text(encoding="utf-8")
             content = content.replace("@postgres:5432", "@127.0.0.1:5432")
             content = content.replace("redis://redis:", "redis://127.0.0.1:")
-            content = content.replace(
-                "MINIO_ENDPOINT=minio:", "MINIO_ENDPOINT=127.0.0.1:"
-            )
+            content = content.replace("MINIO_ENDPOINT=minio:", "MINIO_ENDPOINT=127.0.0.1:")
             with env_file.open("x", encoding="utf-8") as handle:
                 handle.write(content)
             say("[准备] 已从示例创建本地 .env；已有 .env 始终保留。")
         self.prepare_frontend()
-        result = self.command(
-            [str(self.python), "-c", CONFIG_QUERY], capture=True, check=False
-        )
+        result = self.command([str(self.python), "-c", CONFIG_QUERY], capture=True, check=False)
         if result.returncode:
-            raise StartupError(
-                "无法读取 backend/.env，请检查配置格式；不会覆盖您的配置。"
-            )
+            raise StartupError("无法读取 backend/.env，请检查配置格式；不会覆盖您的配置。")
         return json.loads(result.stdout)
 
     def prepare_frontend(self):
@@ -246,7 +338,9 @@ class Launcher:
         if stamp.exists() and stamp.read_text(encoding="utf-8") == fingerprint:
             result = self.command(
                 [npm, "ls", "--depth=0", "--include=dev"],
-                cwd=self.frontend, capture=True, check=False,
+                cwd=self.frontend,
+                capture=True,
+                check=False,
             )
             if result.returncode == 0:
                 return
@@ -258,11 +352,13 @@ class Launcher:
         say("[准备] 正在同步前端依赖，可能需要几分钟……")
         self.command(
             [npm, "ci" if lock.exists() else "install", "--include=dev"],
-            cwd=self.frontend, timeout=900,
+            cwd=self.frontend,
+            timeout=900,
         )
         self.command(
             [npm, "ls", "--depth=0", "--include=dev"],
-            cwd=self.frontend, capture=True,
+            cwd=self.frontend,
+            capture=True,
         )
         # npm install 可能首次生成锁文件，记录安装完成后的输入。
         fingerprint = hashlib.sha256(
@@ -275,9 +371,7 @@ class Launcher:
             return
         docker = shutil.which("docker")
         if not docker:
-            raise StartupError(
-                "缺少的基础服务需要 Docker，请安装并打开 Docker Desktop 后再启动。"
-            )
+            raise StartupError("缺少的基础服务需要 Docker，请安装并打开 Docker Desktop 后再启动。")
 
         def ready():
             return (
@@ -291,9 +385,7 @@ class Launcher:
 
         if not ready():
             say("[服务] 正在启动 Docker Desktop……")
-            result = self.command(
-                [docker, "desktop", "start", "--detach"], timeout=30, check=False
-            )
+            result = self.command([docker, "desktop", "start", "--detach"], timeout=30, check=False)
             if result.returncode:
                 raise StartupError("无法自动启动 Docker Desktop，请手动打开它后重试。")
             wait_for("Docker Desktop", ready, timeout=120)
@@ -404,7 +496,8 @@ class Launcher:
             wait_for(label, ready, timeout=10)
         except StartupError as error:
             raise StartupError(
-                f"端口 {port} 已被占用，但不是就绪的 Inspiration {label}。请检查占用，不会强行关闭其他程序。"
+                f"端口 {port} 已被占用，但不是就绪的 Inspiration {label}。"
+                "请检查占用，不会强行关闭其他程序。"
             ) from error
         say(f"[复用] {label}已经运行。")
         return True
@@ -420,7 +513,8 @@ class Launcher:
                     "-c",
                     (
                         "from app.tasks.celery_app import celery_app; "
-                        f"result = celery_app.control.inspect(timeout=1, destination=[{worker_name!r}]).ping(); "
+                        "result = celery_app.control.inspect(timeout=1, "
+                        f"destination=[{worker_name!r}]).ping(); "
                         "raise SystemExit(0 if result else 1)"
                     ),
                 ],
@@ -482,9 +576,7 @@ class Launcher:
             if port_open("127.0.0.1", port):
                 continue
             python = (
-                self.runtime
-                / name
-                / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+                self.runtime / name / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             )
             model_dir = self.runtime / "models" / model
             if not python.is_file() or not (model_dir / "config.json").is_file():
@@ -497,7 +589,8 @@ class Launcher:
                 f"os.environ[{env_key!r}] = {str(model_dir)!r}; "
                 "os.environ['HF_HUB_OFFLINE'] = '1'; "
                 f"sys.path.insert(0, {str(service.parent)!r}); "
-                f"spec=importlib.util.spec_from_file_location('local_inference', {str(service)!r}); "
+                "spec=importlib.util.spec_from_file_location('local_inference', "
+                f"{str(service)!r}); "
                 "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
                 f"import uvicorn; uvicorn.run(module.app, host='127.0.0.1', port={port})"
             )
@@ -512,12 +605,399 @@ class Launcher:
                 else:
                     self.env[token_env] = previous
 
+    def processing_services(self, config):
+        """Optional isolated stacks; absence must not break the creative workspace."""
+        if not config.get("library_processing_enabled"):
+            return
+        for name in ("wise", "mediacms"):
+            url = config.get(f"library_{name}_url")
+            if not url:
+                continue
+            token = config.get(f"library_{name}_token")
+            try:
+                if not token:
+                    raise StartupError("缺少服务认证配置，请检查 backend/.env。")
+                self.ensure_processing_service(name, url, token)
+            except StartupError as error:
+                say(f"[提示] {name} 自动处理未就绪：{error} 参见 {PROCESSING_README}。")
+            except (OSError, ValueError, TypeError, KeyError):
+                say(f"[提示] {name} 启动检查失败，未重置配置；请按 {PROCESSING_README} 检查部署。")
+
+    def ensure_processing_service(self, name, url, token):
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or "\\" in url
+                or any(ord(c) < 32 for c in url + token)
+            ):
+                raise ValueError
+        except ValueError:
+            raise StartupError("服务地址或认证格式无效，请检查 backend/.env。") from None
+
+        ready = processing_ready(name, url, token)
+        managed = (
+            parsed.scheme == "http"
+            and parsed.hostname in {"localhost", "127.0.0.1"}
+            and parsed.path in {"", "/"}
+        )
+        if not managed:
+            if not ready:
+                raise StartupError("已配置地址未通过认证与接口身份检查；不会改连本地服务。")
+            say(f"[复用] {name} 已配置服务接口就绪（模型与任务能力另行验证）。")
+            return
+        if ready and name == "wise":
+            say("[复用] WISE 接口与工作进程就绪；上游安装由实际任务检查，模型能力另行验证。")
+            return
+        if not ready and port_open(parsed.hostname, port):
+            # Includes bad credentials, a still-starting stack, and unrelated apps.
+            # Never run compose against an occupied but unverified endpoint.
+            raise StartupError("端口已有服务，但认证或身份检查未通过；未重启或替换该服务。")
+
+        folder = self.root / "deploy/media-services"
+        private_env = folder / ".env"
+        overrides = []
+        if (
+            name == "wise"
+            and private_env.is_file()
+            and wise_runtime(private_env, self.env) == "cuda"
+        ):
+            gpu_override = folder / "compose.wise.gpu.yml"
+            if not gpu_override.is_file():
+                raise StartupError("缺少 compose.wise.gpu.yml，未启动或切换 WISE 运行环境。")
+            overrides = ["-f", str(gpu_override)]
+        if ready:
+            # A healthy local endpoint may belong to a manually deployed stack.
+            # Only inspect/recover peer containers when the managed stack exists.
+            docker = self.docker or shutil.which("docker")
+            if not private_env.is_file() or not docker:
+                say("[复用] MediaCMS 接口就绪；未检查独立部署的后台 worker。")
+                return
+            result = self.command(
+                [docker, "info", "--format", "{{.ServerVersion}}"],
+                capture=True,
+                check=False,
+                timeout=15,
+            )
+            if result.returncode:
+                say("[复用] MediaCMS 接口就绪；Docker 不可达，未检查后台 worker。")
+                return
+            self.docker = docker
+        else:
+            if not private_env.is_file():
+                raise StartupError("缺少私有 deploy/media-services/.env，请先完成部署准备。")
+            self.ensure_docker()
+
+        filename = "compose.wise.yml" if name == "wise" else "compose.yml"
+        compose = [
+            self.docker,
+            "compose",
+            "-f",
+            str(folder / filename),
+            *overrides,
+            "--env-file",
+            str(private_env),
+        ]
+        # config contains secrets: capture in memory, never use the normal log path.
+        result = self.command(
+            [*compose, "config", "--format", "json"],
+            capture=True,
+            check=False,
+        )
+        if result.returncode:
+            raise StartupError("私有 Compose 配置不完整或不可解析，请先按文档准备。")
+        definition = json.loads(result.stdout)
+        expected_project = (
+            "inspiration-wise-services" if name == "wise" else "inspiration-media-services"
+        )
+        if definition.get("name") != expected_project:
+            raise StartupError("Compose 项目名与本集成不符；未创建另一套服务。")
+        services = definition["services"]
+        endpoint = services["wise" if name == "wise" else "web"]
+        if not any(
+            str(p.get("published")) == str(port) and p.get("host_ip") == "127.0.0.1"
+            for p in endpoint.get("ports", [])
+        ):
+            raise StartupError("服务地址端口与本地 Compose 不一致；不会改连另一份部署。")
+        env = endpoint.get("environment", {})
+        key = "WISE_BRIDGE_TOKEN" if name == "wise" else "MEDIACMS_SERVICE_TOKEN"
+        if env.get(key) != token:
+            raise StartupError("主后端与私有 Compose 的服务密钥不一致；不会覆盖密钥。")
+        optional_wise = False
+        if name == "wise":
+            capabilities = set(str(env.get("WISE_BRIDGE_CAPABILITIES", "")).split(","))
+            if (
+                str(env.get("HF_HUB_OFFLINE")) != "1"
+                or str(env.get("TRANSFORMERS_OFFLINE")) != "1"
+                or not capabilities <= {"visual", "audio", "face", "object"}
+            ):
+                raise StartupError("一键启动仅接受离线且能力名称明确的 WISE 配置。")
+            optional_wise = bool(capabilities & {"face", "object"})
+            devices = (
+                endpoint.get("deploy", {})
+                .get("resources", {})
+                .get("reservations", {})
+                .get("devices", [])
+            )
+            expected_devices = (
+                [{"driver": "nvidia", "count": 1, "capabilities": ["gpu"]}] if overrides else []
+            )
+            if devices != expected_devices:
+                raise StartupError("WISE 的 GPU 申请与运行环境选择不一致；未修改容器。")
+
+        def containers():
+            result = self.command(
+                [*compose, "ps", "--all", "--format", "json"],
+                capture=True,
+                check=False,
+            )
+            if result.returncode:
+                raise StartupError("无法核对已有 Compose 容器；未修改运行服务。")
+            raw = result.stdout.strip()
+            rows = (
+                json.loads(raw)
+                if raw.startswith("[")
+                else [json.loads(line) for line in raw.splitlines()]
+            )
+            return {row["Service"]: row for row in rows}
+
+        current = containers()
+        if optional_wise and current.get("wise", {}).get("State") != "exited":
+            raise StartupError(
+                "可选模型仅能恢复配置一致的既有已停止容器；请先单独部署与验收，不会自动新建。"
+            )
+        if ready and current.get("web", {}).get("State") != "running":
+            say("[复用] MediaCMS 接口就绪，未接管不属于本 Compose 的服务。")
+            return
+        if name == "mediacms":
+            initialized = current.get("init", {})
+            if initialized.get("State") != "exited" or initialized.get("ExitCode") != 0:
+                raise StartupError(
+                    "MediaCMS 尚无成功的初始化记录，请先按文档部署；不会在启动时执行迁移。"
+                )
+            groups = [("db", "redis"), ("web", "worker", "beat")]
+        else:
+            groups = [("wise",)]
+        pending = [
+            s for group in groups for s in group if current.get(s, {}).get("State") != "running"
+        ]
+        optional_container = None
+        optional_image = None
+        for service in pending:
+            existing = current.get(service)
+            if not existing:
+                continue
+            if existing.get("State") not in {"exited", "created"}:
+                raise StartupError("容器正在恢复或已暂停，请检查现有状态；不会干预该容器。")
+            # --no-recreate intentionally preserves stopped containers too. Do
+            # not accidentally resume old tokens or download-enabled settings.
+            inspected = self.command(
+                [self.docker, "inspect", existing["ID"]],
+                capture=True,
+                check=False,
+            )
+            if inspected.returncode:
+                raise StartupError("无法核对已停止容器的配置；未恢复该容器。")
+            inspected_container = json.loads(inspected.stdout)[0]
+            if optional_wise:
+                optional_container = inspected_container.get("Id")
+                optional_image = inspected_container.get("Image")
+                if (
+                    not isinstance(optional_container, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", optional_container) is None
+                    or not isinstance(optional_image, str)
+                    or re.fullmatch(r"sha256:[0-9a-f]{64}", optional_image) is None
+                ):
+                    raise StartupError("无法核对可选模型容器及镜像的固定身份；未恢复服务。")
+            actual = inspected_container["Config"]
+            actual_env = dict(
+                value.split("=", 1) for value in actual.get("Env", []) if "=" in value
+            )
+            if actual.get("Image") != services[service]["image"] or any(
+                actual_env.get(key) != str(value)
+                for key, value in services[service].get("environment", {}).items()
+            ):
+                raise StartupError(
+                    "已停止容器与当前 Compose 配置不一致，请手动核对部署；不会自动重建。"
+                )
+            if name == "wise":
+                requests = inspected_container.get("HostConfig", {}).get("DeviceRequests") or []
+                expected_requests = (
+                    [
+                        {
+                            "Driver": "nvidia",
+                            "Count": 1,
+                            "DeviceIDs": [],
+                            "Capabilities": [["gpu"]],
+                            "Options": {},
+                        }
+                    ]
+                    if overrides
+                    else []
+                )
+                normalized_requests = [
+                    {
+                        "Driver": request.get("Driver"),
+                        "Count": request.get("Count"),
+                        "DeviceIDs": request.get("DeviceIDs") or [],
+                        "Capabilities": request.get("Capabilities") or [],
+                        "Options": request.get("Options") or {},
+                    }
+                    for request in requests
+                ]
+                if normalized_requests != expected_requests:
+                    raise StartupError(
+                        "已停止容器的 GPU 申请与 Compose 不一致；不会自动切换或重建。"
+                    )
+            for mount in services[service].get("volumes", []):
+                if mount.get("type") != "volume":
+                    continue
+                expected_volume = definition.get("volumes", {}).get(mount["source"], {}).get("name")
+                if not expected_volume or not any(
+                    item.get("Destination") == mount["target"]
+                    and item.get("Name") == expected_volume
+                    for item in inspected_container.get("Mounts", [])
+                ):
+                    raise StartupError(
+                        "已停止容器的数据卷与 Compose 不一致；不会改连或替换数据卷。"
+                    )
+        for image in {services[s]["image"] for s in pending}:
+            checked = self.command(
+                [self.docker, "image", "inspect", image, "--format", "{{.Id}}"],
+                capture=True,
+                check=False,
+            )
+            if checked.returncode:
+                raise StartupError("所需镜像尚未准备；请按文档构建或拉取，一键启动不会自动下载。")
+            if optional_wise and checked.stdout.strip() != optional_image:
+                raise StartupError(
+                    "已停止容器与本地目标镜像的固定 ID 不一致；请核对部署，不会自动切换镜像。"
+                )
+        if name == "mediacms" and "worker" in pending:
+            self.check_whisper_cache(definition, services["worker"])
+
+        for group in groups:
+            selected = [s for s in group if s in pending]
+            if selected:
+                say(f"[服务] 补启 {name}：{', '.join(selected)}（不重建、不拉取镜像）……")
+                # A checked optional container must never become a new deployment
+                # if it disappears after inspection. Exact-ID start can only resume
+                # that container; compose up could create a missing replacement.
+                arguments = (
+                    [self.docker, "start", optional_container]
+                    if optional_wise
+                    else [
+                        *compose,
+                        "up",
+                        "-d",
+                        "--no-deps",
+                        "--no-build",
+                        "--pull",
+                        "never",
+                        "--no-recreate",
+                        *selected,
+                    ]
+                )
+                result = self.command(
+                    arguments,
+                    cwd=self.root,
+                    timeout=120,
+                    capture=True,
+                    check=False,
+                )
+                if result.returncode:
+                    raise StartupError(
+                        "服务补启失败；不会创建替代容器，请按文档检查。"
+                        if optional_wise
+                        else "Compose 补启失败；已有容器与数据均保留，请按文档检查。"
+                    )
+
+            def group_running(group=group):
+                rows = containers()
+                if optional_wise:
+                    row_id = str(rows.get("wise", {}).get("ID", ""))
+                    if len(row_id) < 12 or not optional_container.startswith(row_id):
+                        return False
+                return all(
+                    rows.get(s, {}).get("State") == "running"
+                    and rows[s].get("Health", "") in {"", "healthy"}
+                    for s in group
+                )
+
+            wait_for(f"{name} {'/'.join(group)}", group_running, timeout=60)
+        wait_for(name, lambda: processing_ready(name, url, token), timeout=60)
+        say(f"[服务] {name} 接口已验证；容器已运行，模型效果与队列处理仍以任务验收为准。")
+
+    def check_whisper_cache(self, definition, worker):
+        """Before resuming queued ASR, verify the existing model without network."""
+        env = worker.get("environment", {})
+        if str(env.get("USE_WHISPER_TRANSCRIBE", "false")).lower() != "true":
+            return
+        mount = next(
+            (
+                v
+                for v in worker.get("volumes", [])
+                if v.get("target") == "/home/mediacms.io/.cache" and v.get("type") == "volume"
+            ),
+            None,
+        )
+        if mount is None:
+            raise StartupError("无法确定 Whisper 缓存卷；未启动可能下载模型的 worker。")
+        volume = definition.get("volumes", {}).get(mount["source"], {}).get("name")
+        if not volume:
+            raise StartupError("Whisper 缓存卷配置不完整，请先准备模型。")
+        checked = self.command(
+            [self.docker, "volume", "inspect", volume, "--format", "{{.Name}}"],
+            capture=True,
+            check=False,
+        )
+        if checked.returncode:
+            raise StartupError("Whisper 缓存卷不存在，请先按文档准备模型。")
+        checked = self.command(
+            [
+                self.docker,
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "--network",
+                "none",
+                "--read-only",
+                "--memory",
+                "256m",
+                "--cpus",
+                "1",
+                "--mount",
+                f"type=volume,source={volume},target=/cache,readonly",
+                "--entrypoint",
+                "python",
+                worker["image"],
+                "-c",
+                WHISPER_CACHE_CHECK,
+                str(env.get("WHISPER_MODEL", "base")),
+            ],
+            capture=True,
+            check=False,
+            timeout=90,
+        )
+        if checked.returncode:
+            raise StartupError(
+                "Whisper 缓存缺失或摘要不符，请先准备模型；未启动会自动下载的 worker。"
+            )
+
     def start(self):
         config = self.prepare()
         api_exists = self.existing(8000, "后端", lambda: api_ready(config["app_name"]))
         web_exists = self.existing(5173, "前端", web_ready)
         self.dependencies(config)
         self.optional_services(config)
+        self.processing_services(config)
         if api_exists:
             checked = self.command(
                 [
@@ -613,9 +1093,7 @@ def main(argv=None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(
-        description="一键启动 Inspiration（已有服务会复用）"
-    )
+    parser = argparse.ArgumentParser(description="一键启动 Inspiration（已有服务会复用）")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     parser.add_argument(
         "--no-pause", action="store_true", help="完成后不等待按键，供终端/自动化使用"
@@ -625,15 +1103,13 @@ def main(argv=None) -> int:
     code = 0
     try:
         say("Inspiration 一键启动\n")
-        if sys.version_info < (3, 11):
+        if sys.version_info < (3, 11):  # noqa: UP036 - launcher runs before the project venv
             raise StartupError("需要 Python 3.11 或更高版本。")
         launcher.runtime.mkdir(exist_ok=True)
         with startup_lock(launcher.runtime / "start.lock"):
             launcher.start()
         say(f"\n启动成功！\n网页：{WEB_URL}\n接口文档：{API_URL}/docs")
-        say(
-            f"日志：{launcher.runtime}\n关闭此窗口不会停止服务，再次双击可复用已运行的服务。"
-        )
+        say(f"日志：{launcher.runtime}\n关闭此窗口不会停止服务，再次双击可复用已运行的服务。")
         if not args.no_browser:
             try:
                 webbrowser.open(WEB_URL)

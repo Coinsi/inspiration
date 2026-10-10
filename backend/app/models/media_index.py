@@ -8,14 +8,22 @@ from sqlalchemy import (
     Boolean,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.models.annotation_text_index import (
+    INDEX_NAME,
+    AnnotationBigrams,
+    after_annotation_drop,
+    before_annotation_create,
+)
 from app.models.base import Base, TimestampMixin, uuid_pk
 
 
@@ -53,3 +61,12 @@ class MediaAnnotation(Base, TimestampMixin):
     text: Mapped[str] = mapped_column(Text)
     source: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"))
+
+
+event.listen(MediaAnnotation.__table__, "before_create", before_annotation_create)
+event.listen(MediaAnnotation.__table__, "after_drop", after_annotation_drop)
+Index(
+    INDEX_NAME,
+    AnnotationBigrams(MediaAnnotation.__table__.c.text, table=MediaAnnotation.__table__),
+    postgresql_using="gin",
+)

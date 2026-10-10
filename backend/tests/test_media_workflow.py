@@ -97,6 +97,8 @@ def studio(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "agent_worker_enabled", False)
     monkeypatch.setattr(settings, "canvas_worker_enabled", False)
     monkeypatch.setattr(settings, "library_worker_enabled", False)
+    monkeypatch.setattr(settings, "library_processing_enabled", False)
+    monkeypatch.setattr(settings, "library_processing_auto", False)
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
         pytest.skip("Set TEST_DATABASE_URL for isolated PostgreSQL integration checks")

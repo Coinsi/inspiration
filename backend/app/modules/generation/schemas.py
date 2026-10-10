@@ -86,6 +86,7 @@ class JobOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     input_snapshot: dict = Field(default_factory=dict)
+    routing_state: dict = Field(default_factory=dict)
     cost_raw: dict | None = None
 
 
@@ -167,6 +168,7 @@ class GenerationOut(BaseModel):
     target_type: str
     target_id: uuid.UUID
     provider: str
+    model: str | None = None
     output_type: RequestType
     output_blob_hash: str | None
     thumbnail_hash: str | None

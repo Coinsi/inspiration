@@ -1,0 +1,59 @@
+name: inspiration-wise-services
+
+services:
+  wise:
+    image: inspiration-wise-bridge:fcfa443f-cpu
+    build:
+      context: ../../services/wise-bridge
+      args:
+        WISE_BASE: inspiration-wise-upstream:fcfa443f-cpu
+    environment:
+      WISE_BRIDGE_TOKEN: ${WISE_BRIDGE_TOKEN:?Set WISE_BRIDGE_TOKEN in the private env file}
+      WISE_BRIDGE_DATA: /data
+      WISE_SOURCE_DIR: /opt/wise
+      WISE_PYTHON: /opt/conda/envs/wise-env/bin/python
+      WISE_BRIDGE_CAPABILITIES: ${WISE_BRIDGE_CAPABILITIES:-visual,audio}
+      WISE_OPTIONAL_MANIFEST_DIR: /data/optional-models
+      WISE_OPTIONAL_USE: ${WISE_OPTIONAL_USE:-unspecified}
+      FEATURE_EXTRACTOR_CONFIG: '{"default":{"compile":false,"warmup":false},"transformers/owlv2/google/owlv2-base-patch16-ensemble":{"device":"cpu"}}'
+      WISE_BRIDGE_MAX_FILE_BYTES: '8589934592'
+      WISE_BRIDGE_MAX_STORAGE_BYTES: '107374182400'
+      WISE_BRIDGE_MIN_FREE_BYTES: '10737418240'
+      WISE_QUERY_CACHE_MODELS: ${WISE_QUERY_CACHE_MODELS:-1}
+      WISE_QUERY_CACHE_PROJECTS: ${WISE_QUERY_CACHE_PROJECTS:-2}
+      WISE_QUERY_CACHE_INDEX_BYTES: ${WISE_QUERY_CACHE_INDEX_BYTES:-536870912}
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: ${WISE_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${WISE_OFFLINE:-1}
+      OMP_NUM_THREADS: '2'
+    ports:
+      - '127.0.0.1:${WISE_PORT:-9671}:9671'
+    volumes:
+      - wise-data:/data
+      - wise-cache:/cache
+    init: true
+    mem_limit: 12g
+    memswap_limit: 12g
+    cpus: 4
+    pids_limit: 256
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: '3'
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD
+        - /opt/conda/envs/wise-env/bin/python
+        - -c
+        - "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:9671/health',headers={'Authorization':'Bearer '+os.environ['WISE_BRIDGE_TOKEN']}); urllib.request.urlopen(r,timeout=10).close()"
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  wise-data:
+  wise-cache:

@@ -2,11 +2,21 @@ import { MaterialTabs } from "@/components/MaterialTabs";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Film, Plus, LayoutGrid, List, Play } from "lucide-react";
+import {
+  Film,
+  Plus,
+  LayoutGrid,
+  List,
+  Play,
+  AudioLines,
+  Image as ImageIcon,
+} from "lucide-react";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { api, blobUrl, type Shot } from "@/lib/api";
 import {
   mediaSize,
+  mediaTypeName,
+  type MediaType,
   mediaStatus,
   mediaTime,
   type LibraryMedia,
@@ -19,12 +29,16 @@ import { LibraryUpload } from "@/components/LibraryUpload";
 import { LibraryReuse } from "@/components/LibraryReuse";
 import { LibraryOrganization } from "@/components/LibraryOrganization";
 import {
+  LibraryProcessing,
+  LibraryProcessingControl,
+} from "@/components/LibraryProcessing";
+import {
   LibrarySearch,
   LibraryIndexControl,
   LibraryAnnotation,
   type SegmentResult,
 } from "@/components/LibrarySearch";
-import { MediaSegmentPlayer } from "@/components/MediaSegmentPlayer";
+import { LibraryMediaPreview } from "@/components/LibraryMediaPreview";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
@@ -54,6 +68,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
     [sort, setSort] = useState("recent");
+  const [mediaType, setMediaType] = useState<MediaType | "all">("all");
   const [layout, setLayout] = usePersistentState<"grid" | "list">(
     "video-library.layout",
     "grid",
@@ -65,7 +80,9 @@ function LibraryContent({ projectId }: { projectId: string }) {
     }, 250);
     return () => clearTimeout(timer);
   }, [search]);
-  const [view, setView] = useState<"videos" | "search">("videos");
+  const [view, setView] = useState<"videos" | "search" | "processing">(
+    "videos",
+  );
   const [organizing, setOrganizing] = usePersistentState(
     `library.organizing.${projectId}`,
     false,
@@ -77,12 +94,14 @@ function LibraryContent({ projectId }: { projectId: string }) {
   const [upload, setUpload] = useState<{
     mediaId?: string;
     resume?: MediaVersion;
+    mediaType?: MediaType;
   } | null>(params.get("import") === "1" ? {} : null);
   const list = useQuery({
     queryKey: [
       "library",
       projectId,
       "catalog",
+      mediaType,
       deleted,
       query,
       page,
@@ -91,7 +110,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
     ],
     queryFn: () =>
       api.get<{ items: LibraryMedia[]; total: number }>(
-        `${base}/catalog?${new URLSearchParams({ deleted: String(deleted), query, offset: String(page * 24), sort, ...(folderId ? { folder_id: folderId } : folder === "root" ? { root_only: "true" } : {}) })}`,
+        `${base}/catalog?${new URLSearchParams({ deleted: String(deleted), query, offset: String(page * 24), sort, ...(mediaType === "all" ? {} : { media_type: mediaType }), ...(folderId ? { folder_id: folderId } : folder === "root" ? { root_only: "true" } : {}) })}`,
       ),
     refetchInterval: 4000,
   });
@@ -130,12 +149,12 @@ function LibraryContent({ projectId }: { projectId: string }) {
       <div className="page-heading mb-6">
         <div>
           <h1 className="text-xl font-semibold">
-            {zh ? "视频素材库" : "Video library"}
+            {zh ? "素材库" : "Media library"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {zh
-              ? "保留原片，按片段引用。让拍摄素材成为下一次创作的起点。"
-              : "Keep originals and reference precise segments in your next creation."}
+              ? "让视频、图片和声音成为创作的起点。保留原文件，随时预览、检索与引用。"
+              : "Keep videos, images and audio together. Preview, find and reference them in your next creation."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -144,7 +163,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
           </Button>
           <Button onClick={() => setUpload({})}>
             <Plus className="h-4 w-4" />
-            {zh ? "导入视频" : "Import video"}
+            {zh ? "导入素材" : "Import media"}
           </Button>
         </div>
       </div>
@@ -164,17 +183,26 @@ function LibraryContent({ projectId }: { projectId: string }) {
           size="sm"
           onClick={() => setView("videos")}
         >
-          {zh ? "我的视频" : "My videos"}
+          {zh ? "我的素材" : "My media"}
         </Button>
         <Button
           variant={view === "search" ? "default" : "ghost"}
           size="sm"
           onClick={() => setView("search")}
         >
-          {zh ? "查找画面" : "Find scenes"}
+          {zh ? "搜索素材" : "Search media"}
+        </Button>
+        <Button
+          variant={view === "processing" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setView("processing")}
+        >
+          {zh ? "素材处理" : "Processing"}
         </Button>
       </div>
-      {view === "search" ? (
+      {view === "processing" ? (
+        <LibraryProcessing projectId={projectId} />
+      ) : view === "search" ? (
         <LibrarySearch
           projectId={projectId}
           onSelect={(r) => {
@@ -185,6 +213,31 @@ function LibraryContent({ projectId }: { projectId: string }) {
         />
       ) : (
         <>
+          <div
+            className="mb-4 flex flex-wrap gap-2"
+            role="group"
+            aria-label={zh ? "素材类型" : "Media type"}
+          >
+            {(["all", "video", "image", "audio"] as const).map((kind) => (
+              <Button
+                key={kind}
+                size="sm"
+                variant={mediaType === kind ? "default" : "ghost"}
+                aria-pressed={mediaType === kind}
+                onClick={() => {
+                  setMediaType(kind);
+                  setPage(0);
+                  setSelection({});
+                }}
+              >
+                {kind === "all"
+                  ? zh
+                    ? "全部"
+                    : "All"
+                  : mediaTypeName(kind, zh)}
+              </Button>
+            ))}
+          </div>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Button
               variant="ghost"
@@ -208,8 +261,8 @@ function LibraryContent({ projectId }: { projectId: string }) {
             >
               {deleted
                 ? zh
-                  ? "返回视频"
-                  : "Back to videos"
+                  ? "返回素材"
+                  : "Back to media"
                 : zh
                   ? "回收站"
                   : "Trash"}
@@ -248,14 +301,14 @@ function LibraryContent({ projectId }: { projectId: string }) {
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-surface p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <input
-                  aria-label={zh ? "搜索视频" : "Search videos"}
+                  aria-label={zh ? "搜索素材" : "Search media"}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder={zh ? "按名称查找视频…" : "Find videos by name…"}
+                  placeholder={zh ? "按名称查找素材…" : "Find media by name…"}
                   className="h-9 max-w-full rounded-md border bg-bg px-3 text-sm"
                 />
                 <select
-                  aria-label={zh ? "视频排序" : "Sort videos"}
+                  aria-label={zh ? "素材排序" : "Sort media"}
                   className="h-9 rounded-md border bg-bg px-2 text-xs"
                   value={sort}
                   onChange={(e) => {
@@ -270,7 +323,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                 <div
                   className="flex rounded-lg border p-0.5"
                   role="group"
-                  aria-label={zh ? "视频显示方式" : "Video layout"}
+                  aria-label={zh ? "素材显示方式" : "Media layout"}
                 >
                   {(["grid", "list"] as const).map((mode) => (
                     <Button
@@ -307,11 +360,11 @@ function LibraryContent({ projectId }: { projectId: string }) {
           )}
           {list.isPending ? (
             <div role="status" className="studio-empty">
-              {zh ? "加载视频素材…" : "Loading videos…"}
+              {zh ? "加载素材…" : "Loading media…"}
             </div>
           ) : list.isError ? (
             <div role="alert" className="studio-empty">
-              <p>{zh ? "视频素材加载失败" : "Unable to load videos"}</p>
+              <p>{zh ? "素材加载失败" : "Unable to load media"}</p>
               <Button variant="outline" onClick={() => void list.refetch()}>
                 {zh ? "重试" : "Retry"}
               </Button>
@@ -322,7 +375,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
               <h2 className="text-base font-medium">
                 {search
                   ? zh
-                    ? "没有匹配的视频"
+                    ? "没有匹配的素材"
                     : "No matches"
                   : deleted
                     ? zh
@@ -330,11 +383,11 @@ function LibraryContent({ projectId }: { projectId: string }) {
                       : "Trash is empty"
                     : folder !== "all"
                       ? zh
-                        ? "此目录还没有视频"
-                        : "No videos in this folder"
+                        ? "此目录还没有素材"
+                        : "No media in this folder"
                       : zh
-                        ? "把第一段视频放进来"
-                        : "Bring in your first video"}
+                        ? "导入第一份创作素材"
+                        : "Bring in your first media"}
               </h2>
               <p className="max-w-md text-center text-sm">
                 {zh
@@ -343,7 +396,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
               </p>
               {!deleted && !search && (
                 <Button onClick={() => setUpload({})}>
-                  {zh ? "选择视频" : "Choose video"}
+                  {zh ? "选择素材" : "Choose media"}
                 </Button>
               )}
             </div>
@@ -364,6 +417,16 @@ function LibraryContent({ projectId }: { projectId: string }) {
                 {filtered.map((item) => {
                   const v = item.versions[0],
                     ready = item.versions.find((v) => v.status === "ready");
+                  const kind = (ready || v)?.media_type || "video";
+                  const cover =
+                    ready?.poster_hash ||
+                    (kind === "image" ? ready?.proxy_hash : null);
+                  const KindIcon =
+                    kind === "audio"
+                      ? AudioLines
+                      : kind === "image"
+                        ? ImageIcon
+                        : Film;
                   return (
                     <article
                       className={`group overflow-hidden rounded-xl border bg-card transition-colors hover:border-primary/40 ${layout === "list" ? "sm:grid sm:grid-cols-[220px_minmax(0,1fr)]" : ""}`}
@@ -392,14 +455,23 @@ function LibraryContent({ projectId }: { projectId: string }) {
                             />
                           </label>
                         )}
-                        {!deleted && ready?.poster_hash ? (
+                        {!deleted && cover ? (
                           <MediaImage
-                            src={blobUrl(projectId, ready.poster_hash)}
+                            src={blobUrl(projectId, cover)}
                             alt={item.name}
+                            className={
+                              kind === "image"
+                                ? "[&_img]:object-contain"
+                                : undefined
+                            }
                           />
                         ) : (
                           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                            <Film className="h-5 w-5" />
+                            <KindIcon
+                              className={
+                                kind === "audio" ? "h-12 w-12" : "h-5 w-5"
+                              }
+                            />
                             {deleted
                               ? zh
                                 ? "已移入回收站"
@@ -417,11 +489,15 @@ function LibraryContent({ projectId }: { projectId: string }) {
                             }}
                           >
                             <span className="grid h-11 w-11 place-items-center rounded-full border border-white/30 bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                              <Play className="h-5 w-5" />
+                              {kind === "image" ? (
+                                <ImageIcon className="h-5 w-5" />
+                              ) : (
+                                <Play className="h-5 w-5" />
+                              )}
                             </span>
                           </button>
                         )}
-                        {ready?.duration_ms && (
+                        {ready?.duration_ms != null && kind !== "image" && (
                           <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-[11px] tabular-nums text-white">
                             {mediaTime(ready.duration_ms)}
                           </span>
@@ -436,7 +512,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                         </h2>
                         <p className="text-xs text-muted-foreground">
                           {v
-                            ? `${mediaSize(v.size_bytes)} · v${v.ordinal} · ${mediaStatus(v.status, zh)}`
+                            ? `${mediaTypeName(kind, zh)} · ${mediaSize(v.size_bytes)} · v${v.ordinal} · ${mediaStatus(v.status, zh)}`
                             : ""}
                           {ready?.duration_ms
                             ? ` · ${mediaTime(ready.duration_ms)}`
@@ -462,7 +538,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                                 action.mutate(`${item.id}/restore`)
                               }
                             >
-                              {zh ? "恢复视频" : "Restore"}
+                              {zh ? "恢复素材" : "Restore"}
                             </Button>
                           ) : (
                             <>
@@ -527,10 +603,25 @@ function LibraryContent({ projectId }: { projectId: string }) {
                           )}
                         </div>
                         {!deleted && ready && (
-                          <LibraryIndexControl
-                            projectId={projectId}
-                            versionId={ready.id}
-                          />
+                          <>
+                            <LibraryProcessingControl
+                              projectId={projectId}
+                              versionId={ready.id}
+                              mediaType={kind}
+                              hasAudio={ready.has_audio}
+                            />
+                            {kind === "video" && (
+                              <details className="mt-3 text-xs text-muted-foreground">
+                                <summary className="cursor-pointer">
+                                  {zh ? "基础画面索引" : "Basic visual index"}
+                                </summary>
+                                <LibraryIndexControl
+                                  projectId={projectId}
+                                  versionId={ready.id}
+                                />
+                              </details>
+                            )}
+                          </>
                         )}
                       </div>
                     </article>
@@ -577,7 +668,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
       )}
       {detail.isLoading && openId && (
         <p role="status" className="text-sm text-muted-foreground">
-          {zh ? "正在读取视频版本…" : "Loading video versions…"}
+          {zh ? "正在读取素材版本…" : "Loading media versions…"}
         </p>
       )}
       {detail.isError && openId && (
@@ -603,7 +694,12 @@ function LibraryContent({ projectId }: { projectId: string }) {
               setParams(next, { replace: true });
             }
           }}
-          onUpload={() => setUpload({ mediaId: open.id })}
+          onUpload={() =>
+            setUpload({
+              mediaId: open.id,
+              mediaType: open.versions[0]?.media_type || "video",
+            })
+          }
           onChange={refresh}
         />
       )}
@@ -663,6 +759,13 @@ function LibraryDetail({
       "",
   );
   const v = item.versions.find((v) => v.id === versionId);
+  const kind = v?.media_type || "video";
+  const [matchId, setMatchId] = useState(segment?.matches?.[0]?.id || "");
+  const selectedMatch =
+    segment?.version_id === versionId
+      ? segment?.matches?.find((match) => match.id === matchId)
+      : undefined;
+  const isImage = kind === "image";
   const linked = params.get("media") === item.id;
   const linkedTime = (key: string, fallback: number) => {
     const value = Number(params.get(key));
@@ -679,7 +782,9 @@ function LibraryDetail({
       ),
     );
   const [shotId, setShotId] = useState(params.get("shot") || ""),
-    [purpose, setPurpose] = useState("visual_reference"),
+    [purpose, setPurpose] = useState(
+      v?.media_type === "audio" ? "editing_source" : "visual_reference",
+    ),
     [note, setNote] = useState(segment?.description || "");
   const shots = useQuery({
     queryKey: ["all-shots", projectId],
@@ -689,20 +794,21 @@ function LibraryDetail({
   const startMs = Math.round(Number(start) * 1000),
     endMs = Math.round(Number(end) * 1000);
   const valid =
-    start !== "" &&
-    end !== "" &&
-    Number.isFinite(startMs) &&
-    Number.isFinite(endMs) &&
-    startMs >= 0 &&
-    endMs - startMs >= 100 &&
-    endMs <= (v?.duration_ms || 0);
+    isImage ||
+    (start !== "" &&
+      end !== "" &&
+      Number.isFinite(startMs) &&
+      Number.isFinite(endMs) &&
+      startMs >= 0 &&
+      endMs - startMs >= 100 &&
+      endMs <= (v?.duration_ms || 0));
   const reference = useMutation({
     mutationFn: () =>
       api.post(`/projects/${projectId}/library/usages`, {
         version_id: versionId,
         shot_id: selectedShot,
-        start_ms: startMs,
-        end_ms: endMs,
+        start_ms: isImage ? null : startMs,
+        end_ms: isImage ? null : endMs,
         purpose,
         note,
       }),
@@ -720,9 +826,9 @@ function LibraryDetail({
             </p>
           )}
           <label className="flex items-center gap-3 text-xs">
-            {zh ? "视频版本" : "Version"}
+            {zh ? "素材版本" : "Version"}
             <select
-              aria-label={zh ? "视频版本" : "Video version"}
+              aria-label={zh ? "素材版本" : "Media version"}
               value={versionId}
               className="h-9 min-w-0 flex-1 rounded-md border bg-bg px-2"
               onChange={(e) => {
@@ -741,18 +847,56 @@ function LibraryDetail({
             </select>
           </label>
           {v?.proxy_hash && (
-            <MediaSegmentPlayer
+            <LibraryMediaPreview
+              mediaType={kind}
               key={v.id}
               src={blobUrl(projectId, v.proxy_hash)}
               start={startMs || 0}
               end={endMs || 0}
               label={item.name}
+              region={selectedMatch}
               onMark={(kind, ms) => {
                 if (kind === "start") setStart(String(ms / 1000));
                 else setEnd(String(ms / 1000));
                 reference.reset();
               }}
             />
+          )}
+          {segment?.version_id === versionId && !!segment.matches?.length && (
+            <div className="space-y-2 rounded-lg border bg-surface p-3">
+              <p className="text-xs text-muted-foreground">
+                {zh
+                  ? "选择一个命中区域核对。保留的区域仅来自本次有限候选集；区域框不会改变原图或引用范围。"
+                  : "Inspect a region from this search's bounded candidate set. Boxes do not crop the source or change its reference."}
+              </p>
+              <div
+                role="group"
+                aria-label={zh ? "命中区域" : "Matched regions"}
+                className="flex max-h-36 flex-wrap gap-2 overflow-y-auto pr-1"
+              >
+                {segment.matches.map((match, index) => (
+                  <Button
+                    key={match.id}
+                    size="sm"
+                    variant={match.id === matchId ? "default" : "outline"}
+                    aria-pressed={match.id === matchId}
+                    onClick={() => {
+                      setMatchId(match.id);
+                      if (!isImage) {
+                        setStart(String((match.start_ms || 0) / 1000));
+                        setEnd(String((match.end_ms || 0) / 1000));
+                      }
+                      reference.reset();
+                    }}
+                  >
+                    {zh ? `区域 ${index + 1}` : `Region ${index + 1}`}
+                    {match.matched_at_ms !== null
+                      ? ` · ${mediaTime(match.matched_at_ms)}`
+                      : ""}
+                  </Button>
+                ))}
+              </div>
+            </div>
           )}
           {v?.reuse_origin && (
             <p className="rounded-lg border bg-muted/40 p-3 text-xs leading-6">
@@ -763,9 +907,17 @@ function LibraryDetail({
           )}
           <p className="text-xs text-muted-foreground">
             {zh
-              ? "正在播放轻量预览。引用始终指向原片版本；新增版本不会替换已有引用。"
-              : "Playing a lightweight preview. References point to the original version and never follow newer uploads automatically."}
+              ? "正在查看轻量预览。引用始终指向原文件版本；新增版本不会替换已有引用。"
+              : "Viewing a lightweight preview. References point to the original version and never follow newer uploads automatically."}
           </p>
+          {segment?.match_type === "frame" &&
+            segment.version_id === versionId && (
+              <p className="rounded-lg border bg-surface px-3 py-2 text-xs leading-6 text-muted-foreground">
+                {zh
+                  ? `定位到 ${mediaTime(selectedMatch?.matched_at_ms ?? segment.matched_at_ms ?? segment.start_ms)} 的采样画面。当前是定位预览，请播放前后内容，调整引用的起止时间。`
+                  : `Matched a sampled frame at ${mediaTime(selectedMatch?.matched_at_ms ?? segment.matched_at_ms ?? segment.start_ms)}. Play the surrounding footage and adjust the range before referencing it.`}
+              </p>
+            )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Button
               size="sm"
@@ -787,7 +939,7 @@ function LibraryDetail({
               </a>
             )}
           </div>
-          {v && valid && (
+          {v && kind === "video" && valid && (
             <Link
               className="studio-link block text-sm"
               to={`/projects/${projectId}/evidence?version=${v.id}&start=${startMs}&end=${endMs}`}
@@ -797,7 +949,7 @@ function LibraryDetail({
                 : "Record identity evidence for this segment →"}
             </Link>
           )}
-          {v?.status === "ready" && (
+          {v?.status === "ready" && kind === "video" && v.has_audio !== false && (
             <Link
               className="studio-link block text-sm"
               to={`/projects/${projectId}/transcriptions?version=${v.id}`}
@@ -807,11 +959,12 @@ function LibraryDetail({
                 : "Transcribe audio and edit captions →"}
             </Link>
           )}
-          {v && (
+          {v && !isImage && (
             <LibraryAnnotation
               key={`${v.id}.${startMs}.${endMs}`}
               projectId={projectId}
               versionId={v.id}
+              mediaType={kind}
               start={startMs}
               end={endMs}
               valid={valid}
@@ -820,35 +973,49 @@ function LibraryDetail({
         </div>
         <div className="space-y-4 rounded-lg border bg-surface p-4">
           <h3 className="text-sm font-medium">
-            {zh ? "选一个片段，用到镜头中" : "Reference a segment in a shot"}
+            {isImage
+              ? zh
+                ? "将图片用到镜头中"
+                : "Reference this image in a shot"
+              : zh
+                ? "选一个片段，用到镜头中"
+                : "Reference a segment in a shot"}
           </h3>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              [start, setStart, zh ? "入点（秒）" : "Start (seconds)"],
-              [end, setEnd, zh ? "出点（秒）" : "End (seconds)"],
-            ].map(([value, setter, label], i) => (
-              <label className="space-y-1 text-xs" key={i}>
-                <span>{label as string}</span>
-                <input
-                  aria-label={label as string}
-                  type="number"
-                  min={0}
-                  step={0.1}
-                  value={value as string}
-                  onChange={(e) => {
-                    (setter as (v: string) => void)(e.target.value);
-                    reference.reset();
-                  }}
-                  className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
-                />
-              </label>
-            ))}
-          </div>
+          {isImage ? (
+            <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+              {zh
+                ? "引用整张图片，无需设置起止时间。"
+                : "Use the whole image. No time range is needed."}
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                [start, setStart, zh ? "入点（秒）" : "Start (seconds)"],
+                [end, setEnd, zh ? "出点（秒）" : "End (seconds)"],
+              ].map(([value, setter, label], i) => (
+                <label className="space-y-1 text-xs" key={i}>
+                  <span>{label as string}</span>
+                  <input
+                    aria-label={label as string}
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={value as string}
+                    onChange={(e) => {
+                      (setter as (v: string) => void)(e.target.value);
+                      reference.reset();
+                    }}
+                    className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
+                  />
+                </label>
+              ))}
+            </div>
+          )}
           {!valid && (
             <p role="alert" className="text-xs text-danger">
               {zh
-                ? "请选择视频范围内至少0.1秒的片段。"
-                : "Choose at least 0.1 seconds within the video."}
+                ? "请选择素材范围内至少0.1秒的片段。"
+                : "Choose at least 0.1 seconds within the media."}
             </p>
           )}
           <label className="block space-y-1 text-xs">
@@ -897,9 +1064,11 @@ function LibraryDetail({
               }}
               className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
             >
-              <option value="visual_reference">
-                {zh ? "画面参考" : "Visual reference"}
-              </option>
+              {kind !== "audio" && (
+                <option value="visual_reference">
+                  {zh ? "画面参考" : "Visual reference"}
+                </option>
+              )}
               <option value="editing_source">
                 {zh ? "剪辑备选" : "Editing source"}
               </option>
@@ -909,7 +1078,7 @@ function LibraryDetail({
             aria-label={zh ? "片段备注" : "Segment note"}
             placeholder={
               zh
-                ? "例如：参考这段运镜与人物动作"
+                ? "例如：说明这份素材在镜头中的用途"
                 : "What should this segment inform?"
             }
             maxLength={1000}
@@ -923,8 +1092,8 @@ function LibraryDetail({
           />
           <p className="text-xs text-muted-foreground">
             {zh
-              ? "保存后可在镜头详情中播放；不会自动加入时间线或发送给AI。"
-              : "Play it from the shot details. This does not add it to the timeline or send it to AI."}
+              ? "保存后可在镜头详情中查看；不会自动加入时间线或发送给AI。"
+              : "View it from the shot details. This does not add it to the timeline or send it to AI."}
           </p>
           <Button
             disabled={
@@ -1031,8 +1200,12 @@ function ImpactDialog({
                 key={r.id}
               >
                 <p>
-                  {r.shot_title} · v{r.ordinal} · {mediaTime(r.start_ms)} —{" "}
-                  {mediaTime(r.end_ms)}{" "}
+                  {r.shot_title} · v{r.ordinal} ·{" "}
+                  {r.media_type === "image"
+                    ? zh
+                      ? "整张图片"
+                      : "Whole image"
+                    : `${mediaTime(r.start_ms)} — ${mediaTime(r.end_ms)}`}{" "}
                   {r.shot_deleted
                     ? zh
                       ? "（镜头已删除，引用仍保留）"
@@ -1046,8 +1219,8 @@ function ImpactDialog({
                     if (
                       await confirm({
                         message: zh
-                          ? "解除这处片段引用？原视频仍保留。"
-                          : "Remove this usage? The original video remains.",
+                          ? "解除这处片段引用？原素材仍保留。"
+                          : "Remove this usage? The original media remains.",
                       })
                     )
                       remove.mutate(r.id);
@@ -1114,8 +1287,8 @@ function ImpactDialog({
                 if (
                   await confirm({
                     message: zh
-                      ? "确认将此视频及其版本移入回收站？可稍后恢复。"
-                      : "Move this video and its versions to trash? You can restore them later.",
+                      ? "确认将此素材及其版本移入回收站？可稍后恢复。"
+                      : "Move this media and its versions to trash? You can restore them later.",
                   })
                 )
                   trash.mutate();

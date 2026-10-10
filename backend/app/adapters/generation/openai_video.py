@@ -55,6 +55,9 @@ class OpenAIVideoProvider(GenerationProvider):
                     **kwargs,
                 )
             if not response.is_success:
+                if method == "POST" and response.status_code in (401, 403, 404, 429):
+                    from app.modules.generation.model_routing import SubmissionRejected
+                    raise SubmissionRejected(f"视频服务拒绝提交（HTTP {response.status_code}），未创建任务")
                 raise ProviderError(
                     f"视频服务请求失败（HTTP {response.status_code}），请核对渠道协议和模型权限"
                 )

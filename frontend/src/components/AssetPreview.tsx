@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, blobUrl, type Asset, type RefImage } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
+import { MediaPreview } from "@/components/MediaPreview";
 import { MediaImage } from "@/components/MediaImage";
 import { useI18n } from "@/lib/i18n";
 
@@ -24,16 +25,18 @@ export function AssetPreview({
   return (
     <Modal open title={asset.name} onClose={onClose} width={940}>
       <div className="grid gap-5 md:grid-cols-[1.3fr_1fr]">
-        <div className="relative aspect-[4/3] overflow-hidden rounded-lg border bg-elevated">
-          <MediaImage
-            src={
-              asset.representative_blob_hash
-                ? blobUrl(projectId, asset.representative_blob_hash)
-                : null
-            }
-            alt={asset.name}
-            className="[&_img]:object-contain"
-          />
+        <div>
+          {asset.representative_blob_hash ? (
+            <MediaPreview
+              src={blobUrl(projectId, asset.representative_blob_hash)}
+              label={asset.name}
+              filename={asset.name}
+            />
+          ) : (
+            <div className="aspect-[16/10] overflow-hidden rounded-xl">
+              <MediaImage src={null} alt={asset.name} />
+            </div>
+          )}
         </div>
         <div className="min-w-0 space-y-4">
           <p className="text-xs text-muted-foreground">

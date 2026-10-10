@@ -1,0 +1,105 @@
+# Copyright 2026 University of Oxford; Apache-2.0.
+# Exact WISE prepare_filter_stmt from fcfa443fbb46eb361bb19151339338616838a5b5.
+# https://github.com/ox-vgg/wise/blob/fcfa443fbb46eb361bb19151339338616838a5b5/src/wise/db/utils.py
+from typing import Callable
+import sqlalchemy as sa
+
+def prepare_filter_stmt(
+    table: sa.Table,
+    columns: list[str],
+    query_fn: Callable[[sa.CTE], sa.Select],
+    include_ordering: bool = True,
+):
+    """
+    Prepare a reusable function to execute a query with a variable number of filters
+    expressed as a CTE and join operation. The query function is expected to take
+    a CTE expression as input and return a SQLAlchemy Select statement, which will
+    be prepared and cached for execution.
+    Args:
+        table: The SQLAlchemy Table object to provide column types for bind parameters
+        columns: List of column names to create filter with - user will provide values for these later
+        query_fn: A function that takes a CTE expression and returns a Select statement
+        include_ordering: Whether to include an ordering column in the CTE for stable results
+    """
+
+    def get_filter_cte(num_filters: int = 10):
+        """
+        Create a pre-compiled CTE statement with placeholders for bind parameters.
+
+        Args:
+            num_values: Number of placeholders to prepare for in the statement
+
+        Returns:
+            tuple: (cte, param_names) where:
+                - cte expression representing the filter to be used in join
+                - param_names is a dict mapping tuple index positions to param names
+        """
+
+        # Create bind parameters for each possible value in the batch
+        values_data = []
+        param_names = []
+        for i in range(num_filters):
+            # Create named parameters for each column in each row
+            params = tuple(
+                sa.bindparam(f"{c}_{i}", type_=table.c[c].type)
+                for c in columns
+            )
+            names = {c: x.key for c, x in zip(columns, params)}
+            param_names.append(names)
+
+            if include_ordering:
+                params = (
+                    sa.bindparam(f"rank_{i}", type_=sa.Integer, value=i),
+                ) + params
+            values_data.append(params)
+
+        # Create the values expression
+        values_columns = [sa.column(c, type_=table.c[c].type) for c in columns]
+        if include_ordering:
+            values_columns = [
+                sa.column("rank", type_=sa.Integer)
+            ] + values_columns
+        values_expr = sa.values(*values_columns).data(values_data).cte("cte")
+
+        return values_expr, param_names
+
+    def populate_filters(param_names: list[dict], filters: list[tuple]):
+        """
+        Get parameters for the compiled statement
+
+        Args:
+            param_names: Parameter name mapping from create_compiled_cte_statement
+            filters: List of filter tuples (id, src_id, path, checksum, size)
+
+        Returns:
+            The parameters dictionary to be passed to the execution
+        """
+        # Prepare parameters for execution
+        params = {}
+
+        # Fill only the parameters we need based on the number of filters
+        if len(filters) > len(param_names):
+            raise ValueError(
+                f"Number of filters {len(filters)} exceeds number of prepared parameters {len(param_names)}"
+            )
+
+        for names, vals in zip(param_names, filters):
+            for c, v in zip(columns, vals):
+                params[names[c]] = v
+
+        return params
+
+    param_names = []
+    compiled_stmt = None
+
+    def run(conn: sa.Connection, filters: list[tuple]):
+        nonlocal param_names, compiled_stmt
+        if compiled_stmt is None or len(filters) != len(param_names):
+            filter_cte, param_names = get_filter_cte(len(filters))
+            sql_stmt = query_fn(filter_cte)
+            compiled_stmt = sql_stmt.compile(conn)
+
+        params = populate_filters(param_names, filters)
+        return conn.execute(compiled_stmt, params)
+
+    return run

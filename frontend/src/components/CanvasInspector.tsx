@@ -7,6 +7,7 @@ import { api, type Asset, type Shot, type ProviderConfig } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import type { ConfirmOptions } from "@/components/ui/confirm";
 import { CanvasRunMedia } from "@/components/CanvasMedia";
+import { defaultCreationProvider } from "@/lib/model-selection";
 import {
   labels,
   statuses,
@@ -226,7 +227,15 @@ export function CanvasInspector({
                           generate: {
                             ...selected.data.generate,
                             request_type: e.target.value as
-                              "image" | "video" | "audio",
+                              | "image"
+                              | "video"
+                              | "audio",
+                            provider: defaultCreationProvider(
+                              providers.data,
+                              e.target.value,
+                            ),
+                            provider_params: {},
+                            count: 1,
                           },
                         })
                       }
@@ -237,7 +246,7 @@ export function CanvasInspector({
                     </select>
                   </label>
                   <label className="block text-xs space-y-2">
-                    <span>供应商</span>
+                    <span>创作模型</span>
                     <select
                       className={field}
                       value={selected.data.generate.provider}
@@ -257,7 +266,9 @@ export function CanvasInspector({
                                   ? "image"
                                   : selected.data.generate.request_type,
                             count:
-                              model?.config.protocol === "openai_video"
+                              model?.config.protocol === "openai_video" ||
+                              (model?.config.protocol === "routed" &&
+                                model.config.modality === "video")
                                 ? 1
                                 : selected.data.generate.count,
                             provider_params: {},
@@ -270,6 +281,12 @@ export function CanvasInspector({
                         ?.filter(
                           (p) =>
                             p.enabled &&
+                            (!p.config.modality ||
+                              p.config.modality ===
+                                selected.data.generate.request_type) &&
+                            (!p.config.hidden_from_catalog ||
+                              p.provider_name ===
+                                selected.data.generate.provider) &&
                             p.kind !== "llm" &&
                             p.provider_name !== "mock",
                         )
@@ -277,7 +294,7 @@ export function CanvasInspector({
                           <option key={p.id} value={p.provider_name}>
                             {p.channel_name
                               ? `${p.channel_name} / ${p.display_name}`
-                              : p.provider_name}
+                              : p.display_name || p.provider_name}
                           </option>
                         ))}
                     </select>

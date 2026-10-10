@@ -15,10 +15,14 @@ from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
 from app.models.generation import ModelChannel, ProviderConfig
 from app.models.identity import Project
+from app.modules.generation.model_catalog import Price
 
 PROTOCOLS = {
     "gpt_image": {"name": "OpenAI Images 兼容", "types": ["image"]},
     "openai_video": {"name": "OpenAI Videos 兼容", "types": ["video"]},
+    "ark_image": {"name": "火山方舟图片", "types": ["image"]},
+    "ark_video": {"name": "火山方舟视频", "types": ["video"]},
+    "minimax_video": {"name": "MiniMax 海螺视频", "types": ["video"]},
     "cloud_llm": {"name": "OpenAI Chat 兼容", "types": ["text"]},
     "jimeng": {"name": "旧版自定义 /submit · /status", "types": ["image", "video"]},
     "mock": {"name": "离线测试", "types": ["image", "video"]},
@@ -63,7 +67,16 @@ class ModelIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=100)
     model: str = Field(min_length=1, max_length=128)
-    protocol: Literal["gpt_image", "openai_video", "cloud_llm", "jimeng", "mock"]
+    protocol: Literal[
+        "gpt_image",
+        "openai_video",
+        "cloud_llm",
+        "jimeng",
+        "mock",
+        "ark_image",
+        "ark_video",
+        "minimax_video",
+    ]
     modality: Literal["image", "video", "text"]
     enabled: bool = True
     is_default: bool = False
@@ -73,9 +86,14 @@ class ModelIn(BaseModel):
     mask_editing: bool = False
     max_video_seconds: float = Field(default=10, ge=1, le=120, allow_inf_nan=False)
     parameters: dict[str, list[str | int]] = Field(default_factory=dict)
+    price: Price = Field(default_factory=Price)
 
     @model_validator(mode="after")
     def supported(self):
+        if self.price.mode == "per_second" and self.modality != "video":
+            raise ValueError("按秒计价仅用于视频")
+        if self.modality == "text" and self.price.mode != "unconfigured":
+            raise ValueError("文字计价暂未接入")
         if self.is_default and self.modality != "text":
             raise ValueError("目前默认模型用于文字创作；图片和视频在创作时选择")
         if self.modality not in PROTOCOLS[self.protocol]["types"]:
@@ -84,6 +102,9 @@ class ModelIn(BaseModel):
             raise ValueError("蒙版编辑需要支持参考图的 Images 协议")
         if self.protocol == "openai_video" and self.max_reference_images > 1:
             raise ValueError("Videos 协议最多接收一张起始参考图")
+        limits = {"ark_image": 14, "ark_video": 2, "minimax_video": 1}
+        if self.protocol in limits and self.max_reference_images > limits[self.protocol]:
+            raise ValueError("参考图上限超出该接口支持的范围")
         if self.modality == "text" and (self.parameters or self.max_reference_images):
             raise ValueError("文字模型不使用生成参数与参考图上限")
         allowed = (
@@ -93,6 +114,12 @@ class ModelIn(BaseModel):
         )
         if self.protocol == "openai_video":
             allowed = {"duration", "size"}
+        if self.protocol == "ark_image":
+            allowed = {"size"}
+        if self.protocol == "ark_video":
+            allowed = {"duration", "resolution", "aspect_ratio"}
+        if self.protocol == "minimax_video":
+            allowed = {"duration", "resolution"}
         if set(self.parameters) - allowed:
             raise ValueError("包含当前协议未支持的参数")
         for key, values in self.parameters.items():
@@ -149,6 +176,7 @@ def public_model(row):
         "mask_editing": c.get("mask_editing", False),
         "max_video_seconds": c.get("max_video_seconds", 10),
         "parameters": {k: v.get("enum", []) for k, v in c.get("param_schema", {}).items()},
+        "price": c.get("price", {"mode": "unconfigured", "amount": "0"}),
     }
 
 
@@ -286,6 +314,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         "max_video_seconds": data.max_video_seconds,
         "stream": row.config.get("stream", False),
         "param_schema": {k: {"enum": list(dict.fromkeys(v))} for k, v in data.parameters.items()},
+        "price": data.price.model_dump(mode="json"),
     }
     row.endpoint = None
     row.credentials_encrypted = None
@@ -392,7 +421,57 @@ def provider_view(db, row):
     return result
 
 
+def selected_llm(db, project_id, name, user_id=None):
+    if name.startswith("personal_"):
+        from app.modules.generation.personal import text_config
+        return text_config(db, name, user_id)
+    """Resolve an explicit, project-owned text model. Never silently use another default."""
+    from app.modules.generation import model_catalog as catalog
+
+    if name.startswith(catalog.PREFIX):
+        try:
+            model_id = uuid.UUID(name[len(catalog.PREFIX) :])
+        except ValueError:
+            raise NotFound("文字模型不存在")
+        model = catalog.get_model(db, project_id, model_id)
+        if model.modality != "text" or not model.enabled:
+            raise CapabilityUnsupported("请选择已启用的文字模型")
+        candidates, _ = catalog.all_candidates(db, model)
+        if not candidates:
+            raise CapabilityUnsupported("所选文字模型没有可用连接")
+        row = db.get(ProviderConfig, uuid.UUID(catalog.ordered(candidates)[0]["profile_id"]))
+    else:
+        row = db.scalar(
+            select(ProviderConfig).where(
+                ProviderConfig.project_id == project_id, ProviderConfig.provider_name == name
+            )
+        )
+    if not row or row.kind != "llm":
+        raise NotFound("文字模型不属于当前项目")
+    value = resolved(db, row)
+    if not value.enabled or not value.endpoint or not value.credentials_encrypted:
+        raise CapabilityUnsupported("所选文字模型尚未连接或已停用")
+    return value
+
+
 def llm_config(db, project_id):
+    from app.modules.generation import model_catalog as catalog
+
+    logical = [
+        m
+        for m in catalog.rows(db, project_id)
+        if m.modality == "text" and m.definition.get("is_default")
+    ]
+    if logical:
+        model = logical[0]
+        if not model.enabled:
+            raise CapabilityUnsupported("默认文字模型已停用，请在创作模型中调整")
+        candidates, _ = catalog.all_candidates(db, model)
+        if not candidates:
+            raise CapabilityUnsupported("默认文字模型没有可用线路，请检查渠道配置")
+        selected = catalog.ordered(candidates)[0]
+        row = db.get(ProviderConfig, uuid.UUID(selected["profile_id"]))
+        return resolved(db, row)
     rows = list(
         db.scalars(
             select(ProviderConfig)

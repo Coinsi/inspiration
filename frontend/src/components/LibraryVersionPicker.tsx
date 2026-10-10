@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
-import { mediaTime, type MediaVersion } from "@/lib/library";
+import {
+  mediaTime,
+  mediaTypeName,
+  type MediaType,
+  type MediaVersion,
+} from "@/lib/library";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { AudioLines } from "lucide-react";
 import { MediaImage } from "@/components/MediaImage";
 
 type NamedVersion = MediaVersion & { name: string };
@@ -27,12 +33,14 @@ export function LibraryVersionPicker({
   onChange,
   label,
   disabled = false,
+  mediaType = "video",
 }: {
   projectId: string;
   value: string;
   onChange: (id: string) => void;
   label: string;
   disabled?: boolean;
+  mediaType?: MediaType | "all";
 }) {
   const zh = useI18n().lang === "zh";
   const [input, setInput] = useState(""),
@@ -44,13 +52,13 @@ export function LibraryVersionPicker({
       setOffset(0);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [input]);
+  }, [input, mediaType]);
   const chosen = useLibraryVersion(projectId, value);
   const catalog = useQuery({
-    queryKey: ["library-version-catalog", projectId, query, offset],
+    queryKey: ["library-version-catalog", projectId, query, offset, mediaType],
     queryFn: () =>
       api.get<{ items: NamedVersion[]; total: number }>(
-        `/projects/${projectId}/library/version-catalog?query=${encodeURIComponent(query)}&offset=${offset}&limit=${pageSize}`,
+        `/projects/${projectId}/library/version-catalog?query=${encodeURIComponent(query)}&offset=${offset}&limit=${pageSize}${mediaType === "all" ? "" : `&media_type=${mediaType}`}`,
       ),
   });
   useEffect(() => {
@@ -62,7 +70,8 @@ export function LibraryVersionPicker({
   const waiting = catalog.isFetching || input.trim() !== query;
   const items = catalog.data?.items ?? [];
   const selected = chosen.data;
-  const name = (v: NamedVersion) => `${v.name} · v${v.ordinal}`;
+  const name = (v: NamedVersion) =>
+    `${v.name} · v${v.ordinal}${mediaType === "all" ? ` · ${mediaTypeName(v.media_type || "video", zh)}` : ""}`;
   return (
     <div
       className="min-w-0 space-y-2"
@@ -72,7 +81,7 @@ export function LibraryVersionPicker({
       <input
         className={field}
         aria-label={`${label}：搜索`}
-        placeholder={zh ? "搜索视频名称" : "Search video names"}
+        placeholder={zh ? "搜索素材名称" : "Search media names"}
         type="search"
         maxLength={255}
         value={input}
@@ -87,7 +96,7 @@ export function LibraryVersionPicker({
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">
-          {zh ? "选择已处理的视频" : "Choose a ready video"}
+          {zh ? "选择已处理的素材" : "Choose ready media"}
         </option>
         {value && !items.some((v) => v.id === value) && (
           <option value={value}>
@@ -110,7 +119,7 @@ export function LibraryVersionPicker({
       </select>
       {catalog.isError ? (
         <div role="alert" className="text-xs text-danger">
-          {zh ? "视频列表读取失败。" : "Could not load videos."}
+          {zh ? "素材列表读取失败。" : "Could not load media."}
           <Button
             variant="ghost"
             size="sm"
@@ -129,8 +138,8 @@ export function LibraryVersionPicker({
               : !catalog.data?.total
                 ? query
                   ? zh
-                    ? "没有匹配的视频"
-                    : "No matching videos"
+                    ? "没有匹配的素材"
+                    : "No matching media"
                   : zh
                     ? "暂无可用版本"
                     : "No ready versions"
@@ -179,22 +188,35 @@ export function LibraryVersionPicker({
       {selected && (
         <div className="flex min-w-0 items-center gap-3 rounded-lg bg-muted/50 p-2">
           <div className="h-12 w-20 shrink-0 overflow-hidden rounded">
-            <MediaImage
-              src={
-                selected.poster_hash
-                  ? blobUrl(projectId, selected.poster_hash)
-                  : null
-              }
-              alt={selected.name}
-            />
+            {selected.media_type === "audio" ? (
+              <div className="flex h-full items-center justify-center rounded bg-elevated text-muted-foreground">
+                <AudioLines size={24} />
+              </div>
+            ) : (
+              <MediaImage
+                src={
+                  selected.poster_hash ||
+                  (selected.media_type === "image" ? selected.proxy_hash : null)
+                    ? blobUrl(
+                        projectId,
+                        (selected.poster_hash || selected.proxy_hash)!,
+                      )
+                    : null
+                }
+                alt={selected.name}
+              />
+            )}
           </div>
           <div className="min-w-0 text-xs">
             <p className="truncate font-medium" title={name(selected)}>
               {name(selected)}
             </p>
             <p className="mt-1 text-muted-foreground">
-              {mediaTime(selected.duration_ms ?? 0)} ·{" "}
-              {zh ? "已固定原片版本" : "Source version pinned"}
+              {mediaTypeName(selected.media_type || "video", zh)}
+              {selected.duration_ms != null
+                ? ` · ${mediaTime(selected.duration_ms)}`
+                : ""}{" "}
+              · {zh ? "已固定原片版本" : "Source version pinned"}
             </p>
           </div>
         </div>

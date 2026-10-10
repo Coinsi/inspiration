@@ -1,0 +1,10 @@
+{
+  "name": "Oxford VGG WISE",
+  "repository": "https://github.com/ox-vgg/wise.git",
+  "canonical_repository": "https://gitlab.com/vgg/wise/wise/",
+  "commit": "fcfa443fbb46eb361bb19151339338616838a5b5",
+  "version": "2.1.0+dev",
+  "verified_at": "2026-10-04",
+  "license": "Apache-2.0",
+  "note": "Never install the unrelated PyPI package named wise. Install this exact Git commit in an isolated ML environment. Model weights have separate upstream licenses."
+}

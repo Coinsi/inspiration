@@ -1,0 +1,24 @@
+# WISE's official recipe selects Python >=3.10. On 2026-10-04 it selected
+# Python 3.14, which has no wheels for its required torch<2.9. Keep the actual
+# checkout unchanged and constrain only the copied build environment to 3.11.
+FROM mambaorg/micromamba:1.5.10@sha256:e3797091302382ea841498bc93a7b0a50f7c1448333d5e946d2d1608d0c5f43d
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN git init /opt/wise \
+    && git -C /opt/wise remote add origin https://github.com/ox-vgg/wise.git \
+    && git -C /opt/wise fetch --depth 1 origin fcfa443fbb46eb361bb19151339338616838a5b5 \
+    && git -C /opt/wise checkout --detach FETCH_HEAD \
+    && test "$(git -C /opt/wise rev-parse HEAD)" = fcfa443fbb46eb361bb19151339338616838a5b5 \
+    && mkdir -p /tmp/wise-env-build \
+    && chown -R ${MAMBA_USER}:${MAMBA_USER} /opt/wise /tmp/wise-env-build
+USER ${MAMBA_USER}
+WORKDIR /tmp/wise-env-build
+RUN cp /opt/wise/environment.yml /opt/wise/requirements.txt . \
+    && sed -i 's/python>=3.10/python=3.11/' environment.yml \
+    && sed -i 's/^onnxruntime-gpu.*$/onnxruntime/' requirements.txt
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    --mount=type=cache,target=/home/mambauser/.cache,uid=57439,gid=57439 \
+    PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
+    micromamba create --always-copy --yes -n wise-env -f environment.yml
+RUN micromamba run -n wise-env pip install --no-deps -e /opt/wise

@@ -5,8 +5,8 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from pathlib import Path
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -38,8 +38,9 @@ def validate_target(db, project_id, target_type, target_id):
     from app.models.asset import Asset
     from app.models.shot import Shot
     from app.models.timeline import Timeline
+    from app.models.creation import Creation
 
-    cls = {"shot": Shot, "asset": Asset, "timeline": Timeline}.get(target_type)
+    cls = {"shot": Shot, "asset": Asset, "timeline": Timeline, "creation": Creation}.get(target_type)
     target = db.get(cls, target_id) if cls else None
     if target is None or target.project_id != project_id or getattr(target, "deleted_at", None):
         raise NotFound("目标不存在")
@@ -294,6 +295,12 @@ def retry(db, ctx, job_id):
         require(ctx.role, "timeline.edit")
     if job.status not in ("failed", "canceled"):
         raise Conflict("仅失败或取消的任务可以重试")
+    if job.provider.startswith("personal_") and job.created_by != ctx.user.id:
+        raise Conflict("只能由原提交者重试使用个人服务的任务")
+    from app.modules.generation.model_routing import retry_allowed
+
+    if not retry_allowed(job):
+        raise Conflict("上游提交状态不确定，禁止自动重发；请核对上游记录后再创建新的生成任务")
     existing = db.scalar(
         select(GenerationJob).where(
             GenerationJob.project_id == ctx.project.id,
@@ -314,6 +321,34 @@ def retry(db, ctx, job_id):
         if target.status == "locked":
             raise Conflict("镜头已锁定，请先解锁")
     snapshot["retry_of"] = str(job.id)
+    routing_state = {}
+    state = job.routing_state or {}
+    if state.get("resume") or state.get("phase") in ("accepted", "generated"):
+        resume = state.get("resume") or state
+        route = next(
+            (
+                r
+                for r in snapshot.get("routing", {}).get("candidates", [])
+                if r["provider_name"] == resume.get("provider_name")
+            ),
+            None,
+        )
+        if snapshot.get("personal_service"):
+            route = {"model_profile": snapshot.get("model_profile", {})}
+        if (
+            not route
+            or route["model_profile"].get("protocol") not in {"openai_video", "ark_video", "minimax_video"}
+            or not resume.get("external_job_id")
+        ):
+            raise Conflict(
+                "上游可能已经生成结果，此协议暂不支持恢复下载；请核对上游结果，不会重新生成"
+            )
+        routing_state = {
+            "resume": {
+                "provider_name": resume["provider_name"],
+                "external_job_id": resume["external_job_id"],
+            }
+        }
     new = GenerationJob(
         project_id=ctx.project.id,
         target_type=job.target_type,
@@ -325,6 +360,7 @@ def retry(db, ctx, job_id):
         created_by=ctx.user.id,
         params=copy.deepcopy(job.params),
         input_snapshot=snapshot,
+        routing_state=routing_state,
     )
     db.add(new)
     db.flush()
@@ -392,7 +428,9 @@ def execute(db, job_id):
             materialized = _materialize_references(
                 db, [ReferenceImage(**r) for r in snap.get("references", [])]
             )
-            provider = _provider_instance(db, project_id, provider_name, snap)
+            provider = _provider_instance(db, project_id, provider_name, snap, user_id=job.created_by)
+            if hasattr(provider, "bind_job"):
+                provider.bind_job(job_id)
             if snap.get("mask"):
                 materialized_mask = _materialize_references(db, [ReferenceImage(**snap["mask"])])[0]
                 if "inpaint" not in provider.capabilities().features:
@@ -467,6 +505,8 @@ def execute(db, job_id):
                 mask=materialized_mask,
             )
             handle = provider.submit(req)
+            if getattr(provider, "actual_route", None):
+                snap["model_profile"] = provider.actual_route["model_profile"]
             # Do not overwrite a concurrent cancellation while recording the remote handle.
             db.refresh(job)
             job.external_job_id = handle.external_job_id
@@ -502,7 +542,7 @@ def execute(db, job_id):
                 data, dimensions = media_engine.validate_output(data, out.type)
                 media_details.append(dimensions)
                 requested_size = snap.get("provider_params", {}).get("size")
-                if dimensions and requested_size and requested_size != "auto":
+                if dimensions and requested_size and "x" in str(requested_size):
                     actual_size = f"{dimensions['width']}x{dimensions['height']}"
                     if requested_size != actual_size:
                         warnings.append(
@@ -539,7 +579,11 @@ def execute(db, job_id):
         if job.status == "canceled":
             db.rollback()
             return
-        points = float(job.estimated_cost or 0)
+        points = (
+            provider.actual_cost()
+            if hasattr(provider, "actual_cost")
+            else float(job.estimated_cost or 0)
+        )
         for index, (blob, typ) in enumerate(blobs):
             db.add(
                 Generation(
@@ -554,6 +598,19 @@ def execute(db, job_id):
                     prompt_snapshot=snap.get("prompt", ""),
                     params=snap.get("params", {}),
                     input_refs={
+                        **(
+                            {
+                                "routing": {
+                                    "model_id": snap["routing"]["model_id"],
+                                    "model_revision": snap["routing"]["revision"],
+                                    "model_name": snap["routing"]["name"],
+                                    "provider_name": (job.routing_state or {}).get("provider_name"),
+                                    "channel_name": (job.routing_state or {}).get("channel_name"),
+                                }
+                            }
+                            if snap.get("routing")
+                            else {}
+                        ),
                         "variant_index": index,
                         "skills": snap.get("skills", []),
                         "original_prompt": snap.get("original_prompt", snap.get("prompt", "")),
@@ -591,6 +648,8 @@ def execute(db, job_id):
                 )
             )
         event(job, "succeeded", f"已保存 {len(blobs)} 个结果")
+        from app.modules.generation.personal import record_result
+        record_result(db, job)
         if warnings:
             job.cost_raw = {**(job.cost_raw or {}), "warnings": warnings}
         job.actual_cost = points
@@ -615,6 +674,8 @@ def execute(db, job_id):
         if job and job.status != "canceled":
             job.error = str(exc)[:2000]
             event(job, "failed", job.error)
+            from app.modules.generation.personal import record_result
+            record_result(db, job)
             db.commit()
     finally:
         files.close()

@@ -8,10 +8,89 @@ from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.modules.library import indexing, schemas, service
 
-router = APIRouter(prefix="/projects/{project_id}/library", tags=["video-library"])
+router = APIRouter(prefix="/projects/{project_id}/library", tags=["media-library"])
 EDIT = require_action("asset.edit")
 REFERENCE = require_action("shot.edit")
 GENERATE = require_action("generation.trigger")
+
+
+@router.get("/processing/providers")
+def processing_providers(ctx: ProjectContext = Depends(get_project_context)):
+    from app.modules.library import processing
+
+    return processing.providers()
+
+
+@router.get("/processing/runs")
+def processing_runs(
+    version_id: uuid.UUID | None = None,
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    limit: int = Query(default=30, ge=1, le=100),
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import processing
+
+    return processing.listing(db, ctx, version_id=version_id, offset=offset, limit=limit)
+
+
+@router.post("/versions/{version_id}/process")
+def process_version(
+    version_id: uuid.UUID,
+    data: schemas.ProcessingIn,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import processing
+
+    return processing.submit(db, ctx, version_id, data)
+
+
+@router.post("/processing/runs/{run_id}/cancel")
+def cancel_processing(
+    run_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import processing
+
+    return processing.cancel(db, ctx, run_id)
+
+
+@router.post("/processing/runs/{run_id}/retry")
+def retry_processing(
+    run_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import processing
+
+    return processing.retry(db, ctx, run_id)
+
+
+@router.get("/generated")
+def generated_catalog(
+    query: str = Query(default="", max_length=255),
+    kind: Literal["image", "video"] | None = None,
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    limit: int = Query(default=24, ge=1, le=100),
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import generated
+
+    return generated.catalog(db, ctx.project.id, query=query, kind=kind, offset=offset, limit=limit)
+
+
+@router.get("/generated/{generation_id}")
+def generated_detail(
+    generation_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import generated
+
+    return generated.detail(db, ctx.project.id, generation_id)
 
 
 @router.get("/folders")
@@ -99,11 +178,12 @@ def catalog(
     sort: Literal["recent", "oldest", "name"] = "recent",
     folder_id: uuid.UUID | None = None,
     root_only: bool = False,
+    media_type: Literal["video", "image", "audio"] | None = None,
     ctx: ProjectContext = Depends(get_project_context),
     db: Session = Depends(get_db, scope="function"),
 ):
     return service.catalog(
-        db, ctx.project.id, deleted, query, offset, limit, sort, folder_id, root_only
+        db, ctx.project.id, deleted, query, offset, limit, sort, folder_id, root_only, media_type
     )
 
 
@@ -112,10 +192,11 @@ def version_catalog(
     query: str = Query(default="", max_length=255),
     offset: int = Query(default=0, ge=0, le=1_000_000),
     limit: int = Query(default=24, ge=1, le=100),
+    media_type: Literal["video", "image", "audio"] | None = None,
     ctx: ProjectContext = Depends(get_project_context),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return service.version_catalog(db, ctx.project.id, query, offset, limit)
+    return service.version_catalog(db, ctx.project.id, query, offset, limit, media_type)
 
 
 @router.get("/items/{media_id}")
@@ -155,6 +236,10 @@ def search(
     ctx: ProjectContext = Depends(get_project_context),
     db: Session = Depends(get_db, scope="function"),
 ):
+    if data.engine == "wise" and data.mode == "semantic":
+        from app.modules.library import wise_search
+
+        return wise_search.search(db, ctx, data)
     return indexing.search(db, ctx, data)
 
 

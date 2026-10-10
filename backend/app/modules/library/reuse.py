@@ -47,7 +47,7 @@ def create(db, ctx, data):
     folders.get(db, ctx.project.id, data.folder_id)
     item, source = service.version(db, source_ctx.project.id, data.source_version_id, lock=True)
     if source.status != "ready" or not source.original_hash or not source.proxy_hash:
-        raise Conflict("请先完成原视频上传和预览处理")
+        raise Conflict("请先完成素材上传和预览处理")
     existing = db.scalar(
         select(MediaReuse).where(
             MediaReuse.source_version_id == source.id,
@@ -72,6 +72,8 @@ def create(db, ctx, data):
         ordinal=1,
         status="ready",
         filename=source.filename,
+        media_type=source.media_type,
+        has_audio=source.has_audio,
         size_bytes=source.size_bytes,
         uploaded_bytes=source.size_bytes,
         fingerprint=source.fingerprint,

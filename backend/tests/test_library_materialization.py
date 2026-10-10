@@ -3,7 +3,10 @@
 # ruff: noqa: F811
 import io
 import uuid
+from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 from sqlalchemy import select
 
@@ -12,6 +15,7 @@ from app.models.generation import Generation
 from app.models.library import LibraryMedia, MediaVersion
 from app.models.shot import Shot
 from app.modules.generation import jobs
+from app.modules.library import materialization
 from app.storage import cas
 from tests.test_media_workflow import changing_video, post_ok, studio  # noqa: F401
 
@@ -118,7 +122,9 @@ def test_real_derivatives_idempotence_and_permissions(studio, changing_video, mo
             assert request.references[0].data_url.startswith("data:image/png;base64,")
             return super().submit(request)
 
-    monkeypatch.setattr(generation_service, "_provider_instance", lambda *_: ReferenceProvider())
+    monkeypatch.setattr(
+        generation_service, "_provider_instance", lambda *_, **__: ReferenceProvider()
+    )
     generated = post_ok(
         client,
         root + f"/shots/{ids['shot']}/generate",
@@ -187,3 +193,96 @@ def test_unlinked_inflight_job_retains_original_and_retry_checks_trash(
     with sessions() as db:
         jobs.execute(db, uuid.UUID(retried["id"]))
     assert client.get(root + f"/jobs/{retried['id']}").json()["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("exception_type", [ValueError, OSError])
+def test_materialization_job_hides_decoder_and_filesystem_details(
+    studio, changing_video, monkeypatch, caplog, exception_type
+):
+    client, sessions, ids = studio
+    _, version, _ = seed(sessions, ids, changing_video)
+    root = f"/api/v1/projects/{ids['project']}"
+    usage = post_ok(
+        client,
+        root + "/library/usages",
+        {"version_id": version, "shot_id": ids["shot"], "start_ms": 0, "end_ms": 1000},
+    )
+    private_detail = r"ffmpeg C:\private\media\source.mp4 failed; api_key=private-test-key"
+
+    def broken_decoder(*args, **kwargs):
+        raise exception_type(private_detail)
+
+    monkeypatch.setattr(materialization.media_engine, "run", broken_decoder)
+    # Go through the real local generation worker: its persisted error and event
+    # messages are public, not just the exception returned by this module.
+    job = post_ok(
+        client,
+        root + f"/library/usages/{usage['id']}/materialize",
+        {"request_key": str(uuid.uuid4()), "output_type": "audio"},
+    )
+    assert job["status"] == "failed"
+    persisted = client.get(root + f"/jobs/{job['id']}").json()
+    assert persisted["error"] == (
+        "素材提取失败，请检查原素材是否可读、剩余磁盘空间及存储服务后重试。"
+    )
+    assert "private-test-key" not in str(persisted)
+    assert "source.mp4" not in str(persisted)
+    assert private_detail in caplog.text
+    with sessions() as db:
+        assert not db.scalar(select(Generation).where(Generation.job_id == uuid.UUID(job["id"])))
+
+
+def test_materialization_preserves_safe_validation_in_job_error(studio, monkeypatch):
+    client, sessions, ids = studio
+    _, version, _ = seed(sessions, ids, b"source for explicit missing audio validation")
+    root = f"/api/v1/projects/{ids['project']}"
+    usage = post_ok(
+        client,
+        root + "/library/usages",
+        {"version_id": version, "shot_id": ids["shot"], "start_ms": 0, "end_ms": 1000},
+    )
+    monkeypatch.setattr(
+        materialization,
+        "probe_media",
+        lambda *args: {"has_video": True, "has_audio": False, "duration_ms": 2000},
+    )
+    job = post_ok(
+        client,
+        root + f"/library/usages/{usage['id']}/materialize",
+        {"request_key": str(uuid.uuid4()), "output_type": "audio"},
+    )
+    assert job["status"] == "failed"
+    assert job["error"] == "这个素材没有音轨，无法提取音频"
+    empty_db = SimpleNamespace(get=lambda *_: None)
+    with pytest.raises(materialization.MaterializationValidationError, match="原素材文件不存在"):
+        materialization.process(empty_db, {"source_blob": "missing"}, lambda: False)
+
+
+def test_materialization_cancellation_keeps_type_and_closes_stream_and_temp(
+    tmp_path, monkeypatch, caplog
+):
+    from app.modules.generation import media_engine
+
+    stream = io.BytesIO(b"object storage upload")
+    blob = SimpleNamespace(storage_uri=str(tmp_path / "not-local"))
+    db = SimpleNamespace(get=lambda *_: blob)
+    temporary_directory = materialization.tempfile.TemporaryDirectory
+    created = []
+
+    def tracked_directory(**kwargs):
+        directory = temporary_directory(dir=tmp_path, **kwargs)
+        created.append(Path(directory.name))
+        return directory
+
+    monkeypatch.setattr(materialization.tempfile, "TemporaryDirectory", tracked_directory)
+    monkeypatch.setattr(materialization.cas, "open_range", lambda *_: stream)
+    snapshot = {
+        "source_blob": "object-hash",
+        "library_origin": {"media_type": "audio", "start_ms": 0, "end_ms": 1000},
+        "options": {"output_type": "audio", "time_ms": None},
+    }
+    with pytest.raises(media_engine.Canceled):
+        materialization.process(db, snapshot, lambda: True)
+    assert stream.closed
+    assert created and all(not path.exists() for path in created)
+    assert "Library materialization failed" not in caplog.text

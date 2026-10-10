@@ -4,12 +4,15 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -40,6 +43,9 @@ class MediaVersion(Base, TimestampMixin):
     media_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("library_media.id"), index=True)
     ordinal: Mapped[int] = mapped_column(Integer)
     filename: Mapped[str] = mapped_column(String(255))
+    media_type: Mapped[str] = mapped_column(String(16), default="video", server_default="video")
+    # NULL preserves unknown stream metadata on versions imported before probing.
+    has_audio: Mapped[bool | None] = mapped_column(Boolean)
     fingerprint: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     uploaded_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -54,6 +60,7 @@ class MediaVersion(Base, TimestampMixin):
     height: Mapped[int | None] = mapped_column(Integer)
     __table_args__ = (
         UniqueConstraint("media_id", "ordinal", name="uq_media_version_ordinal"),
+        CheckConstraint("media_type IN ('video','image','audio')", name="ck_media_version_type"),
         CheckConstraint(
             "size_bytes > 0 AND uploaded_bytes >= 0 AND uploaded_bytes <= size_bytes",
             name="ck_media_upload_size",
@@ -66,14 +73,26 @@ class MediaUsage(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("media_version.id"), index=True)
     shot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shot.id"), index=True)
-    start_ms: Mapped[int] = mapped_column(BigInteger)
-    end_ms: Mapped[int] = mapped_column(BigInteger)
+    start_ms: Mapped[int | None] = mapped_column(BigInteger)
+    end_ms: Mapped[int | None] = mapped_column(BigInteger)
     purpose: Mapped[str] = mapped_column(String(32))
     note: Mapped[str] = mapped_column(String(1000), default="")
     __table_args__ = (
-        CheckConstraint("start_ms >= 0 AND end_ms > start_ms", name="ck_media_usage_range"),
+        CheckConstraint(
+            "(start_ms IS NULL AND end_ms IS NULL) OR "
+            "(start_ms IS NOT NULL AND end_ms IS NOT NULL AND start_ms >= 0 AND end_ms > start_ms)",
+            name="ck_media_usage_range",
+        ),
         UniqueConstraint(
             "version_id", "shot_id", "start_ms", "end_ms", "purpose", name="uq_media_usage"
+        ),
+        Index(
+            "uq_media_usage_whole",
+            "version_id",
+            "shot_id",
+            "purpose",
+            unique=True,
+            postgresql_where=text("start_ms IS NULL AND end_ms IS NULL"),
         ),
     )
 

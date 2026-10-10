@@ -1,0 +1,334 @@
+.connect-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 24px 2px;
+  gap: 15px;
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.connect-steps span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.connect-steps b {
+  display: grid;
+  place-items: center;
+  height: 23px;
+  width: 23px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 50%;
+  font-size: 11px;
+}
+.connect-steps i {
+  width: 42px;
+  height: 1px;
+  background: hsl(var(--border));
+}
+.connect-steps .is-current {
+  color: hsl(var(--fg));
+}
+.connect-steps .is-current b,
+.connect-steps .is-done b {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.3);
+}
+.connect-picker {
+  padding: 26px 24px 24px;
+}
+.connect-intro h3,
+.connect-provider-heading h3 {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.connect-intro p,
+.connect-provider-heading p {
+  font-size: 12px;
+  color: hsl(var(--muted));
+  margin-top: 7px;
+  line-height: 1.8;
+}
+.connect-intro {
+  margin-bottom: 24px;
+}
+.connect-service {
+  width: 100%;
+  padding: 20px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  text-align: left;
+  margin: 12px 0;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.connect-service:hover {
+  background: hsl(var(--elevated));
+  border-color: hsl(var(--primary) / 0.5);
+}
+.connect-service-mark {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  font-size: 19px;
+  font-weight: 700;
+  border-radius: 12px;
+}
+.connect-service-mark.is-ark {
+  background: #ec714314;
+  color: #d77d55;
+}
+.connect-service-mark.is-minimax {
+  background: #9069dd14;
+  color: #a184d8;
+}
+.connect-service-copy {
+  flex: 1;
+  min-width: 0;
+}
+.connect-service-copy strong {
+  font-size: 14px;
+  display: block;
+}
+.connect-service-copy small {
+  display: block;
+  font-size: 11px;
+  color: hsl(var(--muted));
+  line-height: 1.8;
+  margin-top: 4px;
+}
+.connect-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+.connect-tags i {
+  font-style: normal;
+  font-size: 10px;
+  border: 1px solid hsl(var(--border));
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: hsl(var(--muted));
+}
+.connect-footnote {
+  font-size: 11px;
+  color: hsl(var(--muted));
+  margin-top: 22px;
+  line-height: 1.8;
+}
+.connect-back {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: hsl(var(--muted));
+  font-size: 11px;
+}
+.connect-provider-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.connect-provider-heading a {
+  display: flex;
+  gap: 5px;
+  white-space: nowrap;
+  color: hsl(var(--primary));
+  font-size: 12px;
+}
+.connect-key {
+  display: flex;
+  align-items: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: 9px;
+  gap: 8px;
+  padding: 0 12px;
+}
+.connect-key:focus-within {
+  outline: 2px solid hsl(var(--primary) / 0.35);
+}
+.connect-key > svg {
+  color: hsl(var(--muted));
+  flex-shrink: 0;
+}
+.connect-key input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding-left: 0;
+  min-width: 0;
+}
+.connect-key input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.connect-key button {
+  padding: 8px 0;
+  color: hsl(var(--muted));
+}
+.connect-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.connect-label span {
+  color: hsl(var(--muted));
+  font-size: 11px;
+}
+.model-form .connect-model {
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+.connect-model.is-selected {
+  background: hsl(var(--primary) / 0.04);
+  border-color: hsl(var(--primary) / 0.3);
+}
+.connect-model span {
+  flex: 1;
+}
+.connect-model strong {
+  display: block;
+  font-weight: 550;
+  font-size: 13px;
+}
+.connect-model small {
+  display: block;
+  margin-top: 2px;
+}
+.connect-model-check {
+  opacity: 0;
+  color: hsl(var(--primary));
+}
+.connect-model.is-selected .connect-model-check {
+  opacity: 1;
+}
+.connect-advanced-toggle {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: hsl(var(--muted));
+  padding: 5px 0;
+}
+.connect-advanced {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 10px;
+  background: hsl(var(--elevated));
+}
+.connect-save {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 18px;
+}
+.connect-save p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: hsl(var(--muted));
+}
+.connect-save button {
+  width: 100%;
+}
+.model-heading-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (max-width: 500px) {
+  .connect-picker {
+    padding: 22px 18px;
+  }
+  .connect-service {
+    padding: 16px 12px;
+    gap: 10px;
+  }
+  .connect-steps {
+    gap: 10px;
+    padding-inline: 18px;
+  }
+  .connect-provider-heading {
+    align-items: flex-start;
+  }
+  .connect-service-mark {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+.model-dialog:has(.connect-service-tabs) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.model-dialog:has(.connect-service-tabs) > header,
+.connect-steps {
+  flex-shrink: 0;
+}
+.model-dialog:has(.connect-service-tabs) > form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.connect-form,
+.connect-picker {
+  min-height: 0;
+  overflow-y: auto;
+}
+.connect-form {
+  padding-block: 18px;
+  gap: 14px;
+}
+.connect-save {
+  flex-shrink: 0;
+  margin: 0 24px;
+  padding: 14px 0 18px;
+  gap: 10px;
+}
+@media (max-width: 500px) {
+  .connect-save {
+    margin-inline: 18px;
+  }
+}
+
+.connect-service-tabs {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 18px 24px 0;
+}
+.connect-service-tabs button {
+  font-size: 12px;
+  color: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 7px;
+  padding: 8px 12px;
+}
+.connect-service-tabs button[aria-pressed="true"] {
+  color: hsl(var(--fg));
+  background: hsl(var(--elevated));
+  border-color: hsl(var(--border-strong));
+}
+@media (max-width: 500px) {
+  .connect-service-tabs {
+    padding-inline: 18px;
+  }
+}

@@ -51,7 +51,7 @@ def inpaint(db, ctx, generation_id, data):
         raise CapabilityUnsupported("请选择资产或镜头图片")
     if not data.prompt.strip():
         raise CapabilityUnsupported("请填写修改要求")
-    provider = service._provider_instance(db, ctx.project.id, data.provider)
+    provider = service._provider_instance(db, ctx.project.id, data.provider, user_id=ctx.user.id)
     if "inpaint" not in provider.capabilities().features:
         raise CapabilityUnsupported("当前供应商不支持蒙版局部重绘")
     blob = db.get(Blob, g.output_blob_hash)
@@ -133,7 +133,7 @@ def optimize_prompt(db, ctx, data):
     references = [prompt_reference(db, ctx.project.id, r) for r in data.references]
     target = None
     if data.target_provider:
-        provider = service._provider_instance(db, ctx.project.id, data.target_provider)
+        provider = service._provider_instance(db, ctx.project.id, data.target_provider, user_id=ctx.user.id)
         caps = provider.capabilities()
         if data.media_type not in caps.modalities:
             raise CapabilityUnsupported("目标供应商不支持所选生成类型")

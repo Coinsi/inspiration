@@ -1,0 +1,177 @@
+.personal-services {
+  padding: 12px 4px;
+  color: hsl(var(--fg));
+}
+.personal-services header {
+  margin-bottom: 26px;
+  max-width: 640px;
+}
+.personal-services-eyebrow {
+  font-size: 12px;
+  opacity: 0.55;
+  letter-spacing: 0.06em;
+}
+.personal-services h2 {
+  font-size: 23px;
+  font-weight: 650;
+  margin: 8px 0 10px;
+}
+.personal-services header p,
+.personal-service-card > p,
+.personal-services-footnote {
+  font-size: 13px;
+  opacity: 0.65;
+  line-height: 1.8;
+}
+.personal-services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+  gap: 16px;
+}
+.personal-service-card {
+  border: 1px solid hsl(var(--border));
+  border-radius: 18px;
+  padding: 22px;
+  background: hsl(var(--bg));
+}
+.personal-service-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.personal-service-heading h3 {
+  font-weight: 650;
+  font-size: 17px;
+  margin-bottom: 4px;
+}
+.personal-service-heading span {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.personal-service-card ul {
+  margin: 18px 0;
+  padding: 0;
+  list-style: none;
+}
+.personal-service-card li {
+  padding: 12px 0;
+  border-top: 1px solid hsl(var(--border));
+}
+.personal-service-card li > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+.personal-service-card li strong {
+  font-size: 13px;
+}
+.personal-service-card li p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 7px;
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+.service-verification {
+  font-size: 11px;
+  opacity: 0.65;
+}
+.service-verification.failed,
+.personal-services-error {
+  color: #d97060;
+  opacity: 1;
+}
+.service-verification.verified {
+  color: #389e79;
+  opacity: 1;
+}
+.personal-service-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.personal-services-footnote {
+  margin-top: 20px;
+}
+.personal-services-notice {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  padding: 14px;
+  background: #398f7814;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+.personal-service-editor {
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+}
+.personal-service-editor > p,
+.personal-service-editor a,
+.personal-service-editor details {
+  font-size: 13px;
+  opacity: 0.7;
+}
+.personal-service-editor label small {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-left: 8px;
+}
+.personal-service-editor label > input[type="password"] {
+  margin-top: 10px;
+}
+.personal-service-editor legend {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.personal-model-option {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  margin: 8px 0;
+  cursor: pointer;
+}
+.personal-model-option strong {
+  font-size: 14px;
+  flex: 1;
+}
+.personal-model-option span {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.personal-service-editor footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.personal-service-editor code {
+  display: block;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.personal-service-help {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: hsl(var(--primary));
+}
+
+.personal-model-option .personal-model-lifecycle {
+  display: block;
+  margin: 6px 0 0;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #d5a955;
+  opacity: 1;
+}

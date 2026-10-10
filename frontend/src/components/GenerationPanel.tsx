@@ -10,6 +10,7 @@ import { PromptOptimizer } from "@/components/PromptOptimizer";
 import { PromptLibrary } from "@/components/PromptLibrary";
 import { JobStatus } from "@/components/JobStatus";
 import { apiUpload } from "@/lib/api";
+import { librarySourceUrl } from "@/lib/library";
 import { Link } from "react-router-dom";
 import { MediaVideo } from "@/components/MediaVideo";
 import { MediaAudio } from "@/components/MediaAudio";
@@ -83,6 +84,7 @@ function GenerationPanelContent({
   const [skills, setSkills] = useState<SkillUse[]>([]);
   const [useRefs, setUseRefs] = useState(defaults?.use_references ?? true);
   const [est, setEst] = useState<number | null>(null);
+  const [estimateNote, setEstimateNote] = useState("");
   const defaultModelApplied = useRef(false);
   const [hasSavedProvider] = useState(() => {
     try {
@@ -107,6 +109,7 @@ function GenerationPanelContent({
     const model = providerConfigs.find(
       (p) =>
         p.enabled &&
+        !p.config.hidden_from_catalog &&
         p.kind === "generation" &&
         p.config.is_default &&
         p.config.modality === "image",
@@ -121,6 +124,7 @@ function GenerationPanelContent({
         (p) =>
           p.kind === "generation" &&
           p.enabled &&
+          (!p.config.hidden_from_catalog || p.provider_name === provider) &&
           p.provider_name !== "mock" &&
           (targetType !== "asset" || p.config.modality !== "video"),
       )
@@ -139,7 +143,10 @@ function GenerationPanelContent({
   const selectedModel = providerConfigs?.find(
     (p) => p.provider_name === provider,
   );
-  const singleVideo = selectedModel?.config.protocol === "openai_video";
+  const singleVideo =
+    selectedModel?.config.protocol === "openai_video" ||
+    (selectedModel?.config.protocol === "routed" &&
+      selectedModel.config.modality === "video");
   useEffect(() => {
     if (singleVideo) setCount(1);
     if (targetType === "asset") setType("image");
@@ -185,6 +192,7 @@ function GenerationPanelContent({
   }, [provider]);
   useEffect(() => {
     setEst(null);
+    setEstimateNote("");
   }, [
     provider,
     type,
@@ -235,6 +243,9 @@ function GenerationPanelContent({
         `${base}/generations?target_type=${targetType}&target_id=${targetId}`,
       ),
   });
+  const canCompareImages =
+    (gens?.filter((g) => g.output_type === "image" && g.output_blob_hash)
+      .length ?? 0) >= 2;
   const { data: quota } = useQuery({
     queryKey: ["quota", projectId],
     queryFn: () => api.get<Quota | null>(`${base}/quota`),
@@ -254,13 +265,19 @@ function GenerationPanelContent({
 
   const estimate = useMutation({
     mutationFn: (request: typeof payload) =>
-      api.post<{ points: number }>(
-        `${base}/${t}/${targetId}/estimate`,
-        request,
-      ),
+      api.post<{
+        points: number;
+        detail?: { pricing?: string; message?: string };
+      }>(`${base}/${t}/${targetId}/estimate`, request),
     onSuccess: (d, request) => {
-      if (JSON.stringify(request) === payloadSignature.current)
+      if (JSON.stringify(request) === payloadSignature.current) {
         setEst(d.points);
+        setEstimateNote(
+          d.detail?.pricing === "unconfigured"
+            ? "部分线路积分未配置，实际费用以上游为准"
+            : d.detail?.message || "",
+        );
+      }
     },
     onError: (e) => toast.push((e as Error).message, "error"),
   });
@@ -403,7 +420,10 @@ function GenerationPanelContent({
                     {providerConfigs?.find((c) => c.provider_name === p)
                       ?.channel_name
                       ? `${providerConfigs.find((c) => c.provider_name === p)?.channel_name} / ${providerConfigs.find((c) => c.provider_name === p)?.display_name}`
-                      : (PROVIDER_LABEL[p] ?? p)}
+                      : providerConfigs?.find((c) => c.provider_name === p)
+                          ?.display_name ||
+                        PROVIDER_LABEL[p] ||
+                        p}
                   </option>
                 ))}
               </select>
@@ -784,7 +804,7 @@ function GenerationPanelContent({
                 </Button>
                 <span>
                   {est !== null
-                    ? `≈ ${est} ${tr("gen.points")}`
+                    ? `${estimateNote.includes("未配置") ? "" : `≈ ${est} ${tr("gen.points")} · `}${estimateNote || "预计用量"}`
                     : quota
                       ? `${tr("gen.quota")} ${quota.used_cost}/${quota.limit_cost}`
                       : ""}
@@ -832,9 +852,13 @@ function GenerationPanelContent({
                 </span>
               </h3>
               <p>
-                {zh
-                  ? "预览、比较，选择最合适的那一版。"
-                  : "Preview, compare and choose the right version."}
+                {canCompareImages
+                  ? zh
+                    ? "预览、比较，选择最合适的那一版。"
+                    : "Preview, compare and choose the right version."
+                  : zh
+                    ? "预览作品，选择最合适的那一版。"
+                    : "Preview and choose the right version."}
               </p>
             </div>
           </div>
@@ -908,24 +932,26 @@ function GenerationPanelContent({
             </div>
           ) : gens && gens.length > 0 ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-                <p className="text-xs text-muted-foreground">
-                  {zh
-                    ? "选择两个图片版本，并排比较后再采用。"
-                    : "Choose two image versions to compare before selecting."}
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={compareIds.length !== 2}
-                  onClick={() => setComparing(true)}
-                >
-                  {zh
-                    ? `比较版本 (${compareIds.length}/2)`
-                    : `Compare (${compareIds.length}/2)`}
-                </Button>
-              </div>
-              {comparing && (
+              {canCompareImages && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                  <p className="text-xs text-muted-foreground">
+                    {zh
+                      ? "选择两个图片版本，并排比较后再采用。"
+                      : "Choose two image versions to compare before selecting."}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={compareIds.length !== 2}
+                    onClick={() => setComparing(true)}
+                  >
+                    {zh
+                      ? `比较版本 (${compareIds.length}/2)`
+                      : `Compare (${compareIds.length}/2)`}
+                  </Button>
+                </div>
+              )}
+              {canCompareImages && comparing && (
                 <Modal
                   open
                   onClose={() => setComparing(false)}
@@ -1021,9 +1047,12 @@ function GenerationPanelContent({
                       <Link
                         className="studio-link block truncate px-2 pt-2 text-xs"
                         title={g.input_refs.library_origin.name}
-                        to={`${base}/library?media=${g.input_refs.library_origin.media_id}&version=${g.input_refs.library_origin.version_id}&start=${g.input_refs.library_origin.start_ms}&end=${g.input_refs.library_origin.end_ms}`}
+                        to={librarySourceUrl(
+                          projectId,
+                          g.input_refs.library_origin,
+                        )}
                       >
-                        {zh ? "查看原片" : "View source"} ·{" "}
+                        {zh ? "查看原素材" : "View source"} ·{" "}
                         {g.input_refs.library_origin.name} · v
                         {g.input_refs.library_origin.ordinal}
                       </Link>
@@ -1067,24 +1096,26 @@ function GenerationPanelContent({
                     </div>
                     {g.output_type === "image" && g.output_blob_hash && (
                       <div className="flex flex-wrap">
-                        <label className="flex w-full items-center gap-2 px-2 pt-2 text-xs text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            checked={compareIds.includes(g.id)}
-                            disabled={
-                              !compareIds.includes(g.id) &&
-                              compareIds.length >= 2
-                            }
-                            onChange={(e) =>
-                              setCompareIds((ids) =>
-                                e.target.checked
-                                  ? [...ids, g.id]
-                                  : ids.filter((id) => id !== g.id),
-                              )
-                            }
-                          />
-                          {zh ? "加入比较" : "Compare"} · {g.id.slice(0, 8)}
-                        </label>
+                        {canCompareImages && (
+                          <label className="flex w-full items-center gap-2 px-2 pt-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={compareIds.includes(g.id)}
+                              disabled={
+                                !compareIds.includes(g.id) &&
+                                compareIds.length >= 2
+                              }
+                              onChange={(e) =>
+                                setCompareIds((ids) =>
+                                  e.target.checked
+                                    ? [...ids, g.id]
+                                    : ids.filter((id) => id !== g.id),
+                                )
+                              }
+                            />
+                            {zh ? "加入比较" : "Compare"} · {g.id.slice(0, 8)}
+                          </label>
+                        )}
                         <details className="generation-edit-tools">
                           <summary>{zh ? "编辑工具" : "Editing tools"}</summary>
                           <div>

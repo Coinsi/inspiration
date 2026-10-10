@@ -46,7 +46,7 @@ export function LibraryReuse({
   return (
     <Modal
       open
-      title={zh ? "从其他项目复用视频" : "Reuse video from another project"}
+      title={zh ? "从其他项目复用素材" : "Reuse media from another project"}
       onClose={() => {
         if (!reuse.isPending) onClose();
       }}
@@ -55,7 +55,7 @@ export function LibraryReuse({
       <div className="space-y-4">
         <p className="text-sm leading-6 text-muted-foreground">
           {zh
-            ? "将固定版本加入当前项目，供本项目成员使用。原片与预览文件共用，无需重复上传；源视频更新不会替换本项目的版本。"
+            ? "将固定版本加入当前项目，供本项目成员使用。原片与预览文件共用，无需重复上传；源素材更新不会替换本项目的版本。"
             : "Add a fixed version for this project's members. Original and preview files are shared without uploading again. Later source changes never replace this version."}
         </p>
         {projects.isPending ? (
@@ -100,10 +100,11 @@ export function LibraryReuse({
         )}
         {sourceProject && (
           <LibraryVersionPicker
+            mediaType="all"
             key={sourceProject}
             projectId={sourceProject}
             value={version}
-            label={zh ? "复用视频版本" : "Version to reuse"}
+            label={zh ? "复用素材版本" : "Version to reuse"}
             disabled={reuse.isPending}
             onChange={(id) => {
               setVersion(id);

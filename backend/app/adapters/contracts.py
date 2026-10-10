@@ -71,6 +71,10 @@ class GenerationResult(BaseModel):
 class GenerationProvider(ABC):
     name: str
 
+    def validate_request(self, req: GenerationRequest) -> None:
+        """Validate protocol combinations locally, before reserving or submitting."""
+        ...
+
     @abstractmethod
     def capabilities(self) -> Capabilities: ...
 

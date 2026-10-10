@@ -3,6 +3,7 @@
 from sqlalchemy import String, and_, case, cast, func, or_, select
 
 from app.models.asset import Asset
+from app.models.creation import Creation
 from app.models.generation import Generation
 from app.models.generation import GenerationJob as Job
 from app.models.shot import Shot
@@ -18,11 +19,13 @@ def base_query(project_id):
         (Job.target_type == "shot", func.coalesce(func.nullif(Shot.title, ""), Shot.code)),
         (Job.target_type == "asset", Asset.name),
         (Job.target_type == "timeline", Timeline.name),
+        (Job.target_type == "creation", Creation.title),
         else_=None,
     )
     available = case(
         (Job.target_type == "shot", and_(Shot.id.is_not(None), Shot.deleted_at.is_(None))),
         (Job.target_type == "asset", and_(Asset.id.is_not(None), Asset.deleted_at.is_(None))),
+        (Job.target_type == "creation", Creation.id.is_not(None)),
         (
             Job.target_type == "timeline",
             and_(Timeline.id.is_not(None), Timeline.deleted_at.is_(None)),
@@ -42,7 +45,7 @@ def base_query(project_id):
     query = select(
         Job, title.label("target_name"), available.label("target_available"), result_count
     )
-    for model, kind in ((Shot, "shot"), (Asset, "asset"), (Timeline, "timeline")):
+    for model, kind in ((Shot, "shot"), (Asset, "asset"), (Timeline, "timeline"), (Creation, "creation")):
         query = query.outerjoin(
             model,
             and_(
@@ -64,6 +67,7 @@ def summary(row):
         "target_available": bool(available),
         "status": job.status,
         "provider": job.provider,
+        "model_name": job.input_snapshot.get("routing", {}).get("name") or job.input_snapshot.get("model_profile", {}).get("display_name"),
         "request_type": job.request_type,
         "operation": job.input_snapshot.get("operation", "generate"),
         "created_at": job.created_at,
@@ -115,6 +119,7 @@ def catalog(db, project_id, status="", operation="", search="", offset=0, limit=
 
 def workspace(db, ctx, job_id):
     from app.core.permissions import can
+    from app.modules.generation.model_routing import retry_allowed
 
     project_id = ctx.project.id
     job = service.get_job(db, project_id, job_id)
@@ -162,6 +167,7 @@ def workspace(db, ctx, job_id):
         "can_retry": permitted
         and item["target_available"]
         and job.status in ("failed", "canceled")
+        and retry_allowed(job)
         and not retry_exists,
         "outputs": [
             {**schemas.GenerationOut.model_validate(g).model_dump(mode="json"), "output_mime": mime}

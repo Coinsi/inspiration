@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, blobUrl } from "@/lib/api";
 import { mediaTime, type MediaUsage } from "@/lib/library";
-import { MediaSegmentPlayer } from "@/components/MediaSegmentPlayer";
+import { LibraryMediaPreview } from "@/components/LibraryMediaPreview";
 import { useI18n } from "@/lib/i18n";
 import { useConfirm } from "@/components/ui/confirm";
 import { useState } from "react";
@@ -61,13 +61,13 @@ export function ShotMediaReferences({
       {allowChoose && <ShotVideoPicker projectId={projectId} shotId={shotId} />}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">
-          {zh ? "视频片段引用" : "Referenced video segments"}
+          {zh ? "素材引用" : "Referenced media"}
         </h3>
         <Link
           to={`/projects/${projectId}/library?shot=${shotId}`}
           className="studio-link text-xs"
         >
-          {zh ? "从视频素材库选择" : "Choose from video library"} →
+          {zh ? "从素材库选择" : "Choose from media library"} →
         </Link>
       </div>
       {usages.isPending ? (
@@ -84,8 +84,8 @@ export function ShotMediaReferences({
       ) : !usages.data.length ? (
         <p className="text-xs text-muted-foreground">
           {zh
-            ? "尚未引用视频片段。引用保留原版本和时间范围，不会自动发送给生成模型。"
-            : "No video segments yet. References preserve the source version and range; they are not automatically sent to models."}
+            ? "尚未引用素材。图片保留整张画面，音视频保留所选时间范围，均关联原版本。"
+            : "No references yet. Images retain the whole picture; audio and video retain the selected range. All references link to their source version."}
         </p>
       ) : (
         usages.data.map((u) => (
@@ -94,16 +94,22 @@ export function ShotMediaReferences({
               {u.name} · v{u.ordinal}
             </p>
             <p className="text-xs text-muted-foreground">
-              {mediaTime(u.start_ms)} — {mediaTime(u.end_ms)} ·{" "}
+              {u.media_type === "image"
+                ? zh
+                  ? "完整图片"
+                  : "Whole image"
+                : `${mediaTime(u.start_ms ?? 0)} — ${mediaTime(u.end_ms ?? 0)}`}{" "}
+              ·{" "}
               {u.purpose === "visual_reference"
                 ? zh
-                  ? "画面参考"
-                  : "Visual reference"
+                  ? "创作参考"
+                  : "Creative reference"
                 : zh
                   ? "剪辑备选"
                   : "Editing source"}
             </p>
-            <MediaSegmentPlayer
+            <LibraryMediaPreview
+              mediaType={u.media_type}
               key={`${u.id}.${u.proxy_hash}`}
               src={blobUrl(projectId, u.proxy_hash)}
               start={u.start_ms}
@@ -114,35 +120,66 @@ export function ShotMediaReferences({
             <div className="flex flex-wrap gap-2">
               {(
                 [
-                  ["image", zh ? "提取中间参考帧" : "Extract middle frame"],
+                  [
+                    "image",
+                    u.media_type === "image"
+                      ? zh
+                        ? "保存为镜头参考图"
+                        : "Save as shot image"
+                      : zh
+                        ? "提取中间参考帧"
+                        : "Extract middle frame",
+                  ],
                   ["video", zh ? "制作剪辑片段" : "Create video clip"],
-                  ["audio", zh ? "提取音轨" : "Extract audio"],
+                  [
+                    "audio",
+                    u.media_type === "audio"
+                      ? zh
+                        ? "提取音频片段"
+                        : "Extract audio clip"
+                      : zh
+                        ? "提取音轨"
+                        : "Extract audio track",
+                  ],
                 ] as const
-              ).map(([kind, label]) => (
-                <Button
-                  key={kind}
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    materialize.isPending ||
-                    (kind !== "image" && u.end_ms - u.start_ms > 60000)
-                  }
-                  onClick={() =>
-                    materialize.mutate({
-                      id: u.id,
-                      kind,
-                      key: crypto.randomUUID(),
-                    })
-                  }
-                >
-                  {label}
-                </Button>
-              ))}
+              )
+                .filter(
+                  ([kind]) => u.media_type === "video" || kind === u.media_type,
+                )
+                .map(([kind, label]) => (
+                  <Button
+                    key={kind}
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      materialize.isPending ||
+                      (kind !== "image" &&
+                        (u.end_ms ?? 0) - (u.start_ms ?? 0) > 60000)
+                    }
+                    onClick={() =>
+                      materialize.mutate({
+                        id: u.id,
+                        kind,
+                        key: crypto.randomUUID(),
+                      })
+                    }
+                  >
+                    {label}
+                  </Button>
+                ))}
             </div>
             <p className="text-xs leading-5 text-muted-foreground">
-              {zh
-                ? "从原片制作并保存到本镜头的生成结果，可继续用作参考图或剪辑。视频和音轨每段限 60 秒，画面最高 1920 × 1080，保留来源。"
-                : "Creates independent shot media from the original. Use frames as generation references or clips in editing. Clips/audio up to 60 seconds; picture fits within 1920 × 1080. Source provenance is retained."}
+              {u.media_type === "image"
+                ? zh
+                  ? "保存完整参考图到本镜头，保留原素材版本与来源。"
+                  : "Save the whole image to this shot with source provenance."
+                : u.media_type === "audio"
+                  ? zh
+                    ? "从原音频提取所选片段并保存到本镜头，可用于声音参考或剪辑。每段限 60 秒，保留原素材版本与来源。"
+                    : "Save the selected audio range to this shot for sound references or editing. Clips are limited to 60 seconds and retain source provenance."
+                  : zh
+                    ? "从原视频提取参考帧、剪辑片段或音轨，并保存到本镜头。视频和音轨每段限 60 秒，画面最高 1920 × 1080，保留来源。"
+                    : "Save frames, video clips or audio tracks from the source video to this shot. Clips and audio are limited to 60 seconds; picture fits within 1920 × 1080. Source provenance is retained."}
             </p>
             {results[u.id] && (
               <JobStatus projectId={projectId} jobId={results[u.id]} />
@@ -154,8 +191,8 @@ export function ShotMediaReferences({
                 if (
                   await confirm({
                     message: zh
-                      ? "解除此镜头的片段引用？原视频会保留。"
-                      : "Remove this reference? The source video is retained.",
+                      ? "解除此镜头的素材引用？原素材会保留。"
+                      : "Remove this reference? The source media is retained.",
                   })
                 )
                   remove.mutate(u.id);

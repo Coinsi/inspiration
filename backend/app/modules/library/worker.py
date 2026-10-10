@@ -4,8 +4,8 @@ The lock survives commits and is released on worker/process death. A new worker
 can then safely resume a 'processing' record left by its predecessor.
 """
 
+import hashlib
 import logging
-import shutil
 import tempfile
 import threading
 from pathlib import Path
@@ -16,7 +16,7 @@ from app.core.database import SessionLocal, engine
 from app.models.library import MediaVersion
 from app.models.storage import Blob
 from app.modules.generation import media_engine
-from app.modules.generation.video_tools import probe_file
+from app.modules.library.media_ingest import build_preview, check_canceled, probe_media
 from app.modules.library.service import staging_path
 from app.storage import cas
 
@@ -40,103 +40,64 @@ def process(version_id, canceled=lambda: False):
                         raise ValueError("原始暂存文件缺失，请重新上传")
                     source = folder / "source"
                     blob = db.get(Blob, v.original_hash)
+                    if blob is None:
+                        raise ValueError("原始素材记录缺失，请重新上传")
                     with cas.open_range(blob) as stream, source.open("wb") as output:
-                        shutil.copyfileobj(stream, output, 1024 * 1024)
-                with source.open("rb") as stream:
-                    header = stream.read(16)
+                        while chunk := stream.read(1024 * 1024):
+                            check_canceled(canceled)
+                            output.write(chunk)
                 if source.stat().st_size != v.size_bytes:
                     raise ValueError("源文件长度发生变化，请重新上传")
-                if header[:4] == b"\x1a\x45\xdf\xa3":
-                    input_format = "matroska"
-                elif header[4:8] in (b"ftyp", b"moov", b"mdat", b"wide", b"free"):
-                    input_format = "mov"
-                else:
-                    raise ValueError("不支持的容器，请重新上传")
-                info = probe_file(
-                    source, canceled, max_duration_ms=6 * 3600 * 1000, input_format=input_format
-                )
-                if not info["has_video"]:
-                    raise ValueError("文件中没有可解码的视频画面")
+                if v.original_hash:
+                    digest = hashlib.sha256()
+                    with source.open("rb") as stream:
+                        while chunk := stream.read(1024 * 1024):
+                            check_canceled(canceled)
+                            digest.update(chunk)
+                    if digest.hexdigest() != v.original_hash:
+                        raise ValueError("原始素材内容发生变化，请重新上传")
+                info = probe_media(source, v.media_type, canceled)
+                v.has_audio = info["has_audio"]
                 v.duration_ms, v.width, v.height = (
                     info["duration_ms"],
                     info["width"],
                     info["height"],
                 )
-                mime = {
-                    ".mov": "video/quicktime",
-                    ".mkv": "video/x-matroska",
-                    ".webm": "video/webm",
-                }.get(Path(v.filename).suffix.lower(), "video/mp4")
                 original = cas.put_file(
-                    db, source, mime, duration_ms=v.duration_ms, width=v.width, height=v.height
+                    db,
+                    source,
+                    info["mime"],
+                    duration_ms=v.duration_ms,
+                    width=v.width,
+                    height=v.height,
                 )
                 v.original_hash = original.hash
-                db.commit()  # Original survives a failed proxy; retries reuse the same identity.
-                proxy, poster = folder / "proxy.mp4", folder / "poster.jpg"
-                media_engine.run(
-                    [
-                        "-protocol_whitelist",
-                        "file,pipe",
-                        "-f",
-                        input_format,
-                        "-i",
-                        str(source),
-                        "-map",
-                        "0:v:0",
-                        "-map",
-                        "0:a:0?",
-                        "-vf",
-                        "scale=w='min(1280,iw)':h='min(720,ih)':"
-                        "force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "veryfast",
-                        "-crf",
-                        "28",
-                        "-threads",
-                        "2",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "96k",
-                        "-movflags",
-                        "+faststart",
-                        str(proxy),
-                    ],
-                    canceled=canceled,
-                    timeout=6 * 3600,
-                )
-                media_engine.run(
-                    [
-                        "-protocol_whitelist",
-                        "file,pipe",
-                        "-i",
-                        str(proxy),
-                        "-frames:v",
-                        "1",
-                        "-update",
-                        "1",
-                        str(poster),
-                    ],
-                    canceled=canceled,
-                    timeout=30,
-                )
-                v.proxy_hash = cas.put_file(db, proxy, "video/mp4", duration_ms=v.duration_ms).hash
-                v.poster_hash = cas.put_file(db, poster, "image/jpeg").hash
+                db.commit()  # Keep immutable original even if deriving a preview fails.
+                previews = build_preview(source, folder, info, canceled)
+                path, mime, metadata = previews["proxy"]
+                v.proxy_hash = cas.put_file(db, path, mime, **metadata).hash
+                if previews["poster"]:
+                    path, mime, metadata = previews["poster"]
+                    v.poster_hash = cas.put_file(db, path, mime, **metadata).hash
+                else:
+                    v.poster_hash = None
+                check_canceled(canceled)
                 v.status, v.error = "ready", None
                 db.commit()
-            staging_path(v.id).unlink(missing_ok=True)
+            try:
+                staging_path(v.id).unlink(missing_ok=True)
+            except OSError:
+                # The original and previews are already durable. A cleanup error
+                # must not turn a completed import into a failed media version.
+                log.warning("Library staging cleanup failed for version %s", version_id)
         except Exception as exc:
             db.rollback()
             v = db.get(MediaVersion, version_id)
             v.status = "queued" if isinstance(exc, media_engine.Canceled) else "failed"
             # ffmpeg's detailed log includes local paths; keep user-facing diagnostics bounded.
-            v.error = "视频预览处理失败，请检查文件是否可播放、剩余磁盘空间及存储服务，再重试。"
+            v.error = "素材预览处理失败，请检查文件是否完整可读、剩余磁盘空间及存储服务，再重试。"
             if isinstance(exc, ValueError) and "请重新上传" in str(exc):
-                v.error = "视频文件缺失、不完整或容器不支持，请取消此版本后重新上传。"
+                v.error = "素材文件缺失、不完整、实际类型不符或格式不支持，请取消此版本后重新上传。"
             if isinstance(exc, media_engine.Canceled):
                 v.error = None
             db.commit()

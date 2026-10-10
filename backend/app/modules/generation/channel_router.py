@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import ProjectContext, require_action
-from app.modules.generation import channels
+from app.modules.generation import channels, presets
 
 router = APIRouter(prefix="/projects/{project_id}/model-channels", tags=["model-channels"])
 MANAGE = require_action("provider.manage")
@@ -31,6 +31,20 @@ def import_legacy(
     ctx: ProjectContext = Depends(MANAGE), db: Session = Depends(get_db, scope="function")
 ):
     return channels.import_legacy(db, ctx)
+
+
+@router.get("/presets")
+def preset_catalog(ctx: ProjectContext = Depends(MANAGE)):
+    return presets.catalog()
+
+
+@router.post("/connect")
+def connect(
+    data: presets.ConnectIn,
+    ctx: ProjectContext = Depends(MANAGE),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return presets.connect(db, ctx, data)
 
 
 @router.put("/{channel_id}")

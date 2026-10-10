@@ -114,7 +114,7 @@ def capabilities(
     db: Session = Depends(get_db, scope="function"),
 ):
     return (
-        service._provider_instance(db, ctx.project.id, name).capabilities().model_dump(mode="json")
+        service._provider_instance(db, ctx.project.id, name, user_id=ctx.user.id).capabilities().model_dump(mode="json")
     )
 
 
@@ -311,7 +311,7 @@ def list_providers(
 ):
     return [
         schemas.ProviderConfigOut.model_validate(p)
-        for p in service.list_providers(db, ctx.project.id)
+        for p in service.list_providers(db, ctx.project.id, user_id=ctx.user.id)
     ]
 
 

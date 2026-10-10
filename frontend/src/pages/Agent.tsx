@@ -95,10 +95,12 @@ export default function Agent() {
 export function AgentWorkspace({
   projectId,
   initialGoal,
+  initialRunId,
   embedded = false,
 }: {
   projectId: string;
   initialGoal?: string;
+  initialRunId?: string;
   embedded?: boolean;
 }) {
   const location = useLocation();
@@ -128,7 +130,9 @@ export function AgentWorkspace({
     queryFn: () => api.get<Run[]>(`${base}/runs?offset=${offset}`),
     refetchInterval: 3000,
   });
-  const [embeddedRun, setEmbeddedRun] = useState<string | undefined>();
+  const [embeddedRun, setEmbeddedRun] = useState<string | undefined>(
+    initialRunId,
+  );
   const selected =
     (embedded ? embeddedRun : params.get("run")) || list.data?.[0]?.id;
   const selectRun = (id: string) =>

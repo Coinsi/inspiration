@@ -1,0 +1,202 @@
+.media-player {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: hsl(var(--card));
+  color: hsl(var(--fg));
+  border: 1px solid hsl(var(--border));
+}
+.media-player-screen,
+.media-image-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 35%, hsl(var(--fg) / 0.05), transparent 75%),
+    hsl(var(--fg) / 0.025);
+}
+.media-player-screen video {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  position: absolute;
+  inset: 0;
+  object-fit: contain;
+}
+.media-play-surface {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: white;
+}
+.media-play-surface > span {
+  display: grid;
+  place-items: center;
+  height: 54px;
+  width: 54px;
+  border-radius: 50%;
+  background: #15171a80;
+  border: 1px solid #ffffff50;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 6px 24px #0002;
+  transition:
+    opacity 0.18s,
+    transform 0.18s;
+}
+.media-play-surface:hover > span {
+  transform: scale(1.06);
+}
+.media-play-surface.is-playing > span {
+  opacity: 0;
+}
+.media-play-surface.is-playing:hover > span,
+.media-play-surface:focus-visible > span {
+  opacity: 1;
+}
+.media-duration {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: #fff;
+  background: #17191b99;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.media-player-controls {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  min-height: 46px;
+  border-top: 1px solid hsl(var(--border));
+}
+.media-player-controls button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: hsl(var(--fg) / 0.75);
+}
+.media-player-controls button:hover {
+  background: hsl(var(--fg) / 0.07);
+  color: hsl(var(--fg));
+}
+.media-player-controls input {
+  min-width: 20px;
+  width: 100%;
+  height: 20px;
+  cursor: pointer;
+  accent-color: hsl(var(--primary));
+}
+.media-time {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.media-player-message {
+  padding: 10px 14px;
+  font-size: 12px;
+}
+.media-preview-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+  color: hsl(var(--fg) / 0.55);
+}
+.media-preview-empty button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.media-image-preview {
+  border-radius: 14px;
+  border: 1px solid hsl(var(--border));
+  cursor: zoom-in;
+}
+.media-image-preview .media-image-canvas {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  padding: 12px;
+}
+.media-image-preview .media-image-canvas img {
+  object-fit: contain;
+}
+.media-expand {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #ffffff30;
+  background: #15171a99;
+  backdrop-filter: blur(12px);
+  color: white;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+.media-image-preview:hover .media-expand,
+.media-image-preview:focus-visible .media-expand {
+  opacity: 1;
+}
+.media-player button:focus-visible,
+.media-image-preview:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -3px;
+}
+.media-player:fullscreen {
+  background: #101113;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+}
+.media-player:fullscreen .media-player-screen {
+  flex: 1;
+  aspect-ratio: auto;
+}
+.media-player:fullscreen .media-player-controls {
+  flex: 0 0 54px;
+  color: white;
+}
+.media-player:fullscreen .media-player-controls button {
+  color: white;
+}
+@media (hover: none) {
+  .media-expand {
+    opacity: 1;
+  }
+}
+@media (max-width: 480px) {
+  .media-player-controls {
+    gap: 5px;
+    padding-inline: 6px;
+  }
+  .media-play-surface > span {
+    width: 46px;
+    height: 46px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-play-surface > span,
+  .media-expand {
+    transition: none;
+  }
+}

@@ -86,6 +86,10 @@ import {
   type Run,
 } from "@/lib/canvas";
 
+import {
+  defaultCreationProvider,
+  creationProviderLabel,
+} from "@/lib/model-selection";
 const nodeTypes = { studio: CanvasCard };
 const empty: Graph = {
   nodes: [],
@@ -636,7 +640,7 @@ function Editor({
       setError((e as Error).message);
       return;
     }
-    const node = newNode("generate", pos.x, pos.y);
+    const node = createNode("generate", pos.x, pos.y);
     node.data = {
       ...node.data,
       label: (origin.data.label + " · 新创作").slice(0, 120),
@@ -722,6 +726,20 @@ function Editor({
       ),
     });
   }
+  function createNode(
+    kind: Kind,
+    x: number,
+    y: number,
+    requestType: "image" | "video" | "audio" = "image",
+  ) {
+    const node = newNode(kind, x, y);
+    node.data.generate.request_type = requestType;
+    node.data.generate.provider = defaultCreationProvider(
+      providers.data,
+      requestType,
+    );
+    return node;
+  }
   function add(kind: Kind, requestType: "image" | "video" | "audio" = "image") {
     if (graph.nodes.length >= 500) {
       setError("画布最多容纳500个节点，请先整理已有内容。");
@@ -734,8 +752,7 @@ function Editor({
       x: rect.left + rect.width * 0.38,
       y: rect.top + rect.height * 0.28,
     });
-    const node = newNode(kind, p.x, p.y);
-    node.data.generate.request_type = requestType;
+    const node = createNode(kind, p.x, p.y, requestType);
     if (kind === "generate")
       node.data.label = {
         image: "新的画面",
@@ -1031,10 +1048,11 @@ function Editor({
       setEdgeDrop(null);
       return;
     }
-    const node = newNode(
+    const node = createNode(
       kind === "text" ? "text" : "generate",
       position.x,
       position.y,
+      kind === "text" ? "image" : kind,
     );
     node.data = {
       ...node.data,
@@ -1073,11 +1091,9 @@ function Editor({
           : "prompt",
     };
     const chosen = qc
-      .getQueryData<Generation[]>([
-        "gens",
-        origin.data.target_type,
-        origin.data.target_id,
-      ])
+      .getQueryData<
+        Generation[]
+      >(["gens", origin.data.target_type, origin.data.target_id])
       ?.find((g) => g.is_selected);
     const next = {
       ...graph,
@@ -1303,6 +1319,7 @@ function Editor({
       )}
       <CanvasActions.Provider
         value={{
+          providerLabel: (name) => creationProviderLabel(providers.data, name),
           projectId,
           reuse,
           editImage: (source) => setImageStudio({ source }),
@@ -1313,11 +1330,9 @@ function Editor({
               .filter((n) => n.id !== id && n.data.kind !== "group")
               .map((n) => {
                 const fixed = qc
-                  .getQueryData<Generation[]>([
-                    "gens",
-                    n.data.target_type,
-                    n.data.target_id,
-                  ])
+                  .getQueryData<
+                    Generation[]
+                  >(["gens", n.data.target_type, n.data.target_id])
                   ?.find(
                     (g) =>
                       g.id === (n.data.generation_id || n.data.outputId) ||
@@ -1378,11 +1393,9 @@ function Editor({
               return;
             }
             const adopted = qc
-              .getQueryData<Generation[]>([
-                "gens",
-                source.data.target_type,
-                source.data.target_id,
-              ])
+              .getQueryData<
+                Generation[]
+              >(["gens", source.data.target_type, source.data.target_id])
               ?.find((g) => g.is_selected);
             commit({
               ...graph,
@@ -1571,7 +1584,7 @@ function Editor({
                       setToolsOpen(false);
                     }}
                   >
-                    从视频素材库选取
+                    从项目素材库选取
                   </button>
                   <button
                     disabled={busy}

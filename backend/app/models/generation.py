@@ -50,6 +50,21 @@ class ProviderConfig(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("project_id", "provider_name", name="uq_provider"),)
 
 
+class CreativeModel(Base, TimestampMixin):
+    """A stable creator-facing identity; revisions are frozen into queued jobs."""
+
+    __tablename__ = "creative_model"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    name: Mapped[str] = mapped_column(String(100))
+    modality: Mapped[str] = mapped_column(String(16))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    definition: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    __table_args__ = (Index("ix_creative_model_project", "project_id"),)
+
+
 class Quota(Base, TimestampMixin):
     __tablename__ = "quota"
 
@@ -80,6 +95,7 @@ class GenerationJob(Base, TimestampMixin):
     priority: Mapped[int] = mapped_column(Integer, default=0)
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     input_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    routing_state: Mapped[dict] = mapped_column(JSONB, default=dict)
     estimated_cost: Mapped[float | None] = mapped_column(Numeric(14, 2))
     actual_cost: Mapped[float | None] = mapped_column(Numeric(14, 2))
     cost_raw: Mapped[dict | None] = mapped_column(JSONB)

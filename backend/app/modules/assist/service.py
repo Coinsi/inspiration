@@ -23,10 +23,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _engine(db: Session, project_id: uuid.UUID, name: str | None):
+def _engine(db: Session, project_id: uuid.UUID, name: str | None, model_provider: str | None = None, user_id=None):
     if name == "mock":
         return assist_registry.create("mock")
-    pc = _llm_config(db, project_id)
+    if model_provider:
+        from app.modules.generation.channels import selected_llm
+        pc = selected_llm(db, project_id, model_provider, user_id=user_id)
+    else:
+        pc = _llm_config(db, project_id)
     chosen = name or ("cloud_llm" if pc is not None else "mock")
     kwargs = {}
     if chosen == "cloud_llm" and pc is not None:

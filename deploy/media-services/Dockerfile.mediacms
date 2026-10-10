@@ -1,0 +1,5 @@
+# Build the exact upstream Dockerfile's `base` target first. Whisper stays enabled
+# as an installable capability, but this local CPU service does not need CUDA libs.
+FROM inspiration-mediacms:1ab99af4-base
+RUN uv pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0+cpu' \
+    && uv pip install 'openai-whisper==20250625' setuptools-rust

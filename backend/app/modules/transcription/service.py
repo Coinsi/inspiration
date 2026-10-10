@@ -70,6 +70,8 @@ def out(r, detail=True):
 
 def start(db, ctx, data):
     _, v = library.version(db, ctx.project.id, data.version_id, lock=True)
+    if v.media_type == "image" or not v.duration_ms:
+        raise Conflict("请选择包含音轨的音视频素材")
     if v.status != "ready":
         raise Conflict("视频预览完成后才能转写")
     r = db.scalar(

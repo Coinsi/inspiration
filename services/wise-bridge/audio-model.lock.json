@@ -1,0 +1,41 @@
+{
+  "wise_feature_id": "microsoft/clap/2023/four-datasets",
+  "verified_at": "2026-10-04",
+  "package": {
+    "name": "msclap",
+    "version": "1.3.4",
+    "license": "MIT",
+    "wheel": "msclap-1.3.4-py3-none-any.whl",
+    "wheel_sha256": "14cfce74ce97390d7fd8096bb49ddc476c148adb11fa53283fa6532da505c3db"
+  },
+  "models": [
+    {
+      "repository": "microsoft/msclap",
+      "canonical_repository": "microsoft/msclap",
+      "revision": "c47d441165daa21986ead0850660917636a81775",
+      "license": "ms-pl",
+      "files": [
+        {"filename": "CLAP_weights_2023.pth", "size": 689950036, "sha256": "2cef4016d47d00eb28d153d522f397222057f95000e9bad6b9583c631284a1e6"}
+      ]
+    },
+    {
+      "repository": "gpt2",
+      "canonical_repository": "openai-community/gpt2",
+      "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "license": "MIT",
+      "files": [
+        {"filename": "model.safetensors", "size": 548105171, "sha256": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707"},
+        {"filename": "config.json", "size": 665, "sha256": "0daed7749b4f02b8f76240d5444551d7b08712dab4d0adb8239c56ba823bb7b4"},
+        {"filename": "tokenizer.json", "size": 1355256, "sha256": "8414cab924d8b9b33013f0d221c5862f365ee9be39c5c2bfae8a5a9e970478a6"},
+        {"filename": "tokenizer_config.json", "size": 26, "sha256": "5e04eb606e3a1583530a42e36c2a6b6615c86f34fe77e44d9ddeb43ff940931f"},
+        {"filename": "vocab.json", "size": 1042301, "sha256": "196139668be63f3b5d6574427317ae82f612a97c5d1cdaf36ed2256dbf636783"},
+        {"filename": "merges.txt", "size": 456318, "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5"}
+      ]
+    }
+  ],
+  "sources": [
+    "https://pypi.org/pypi/msclap/1.3.4/json",
+    "https://huggingface.co/microsoft/msclap/tree/c47d441165daa21986ead0850660917636a81775",
+    "https://huggingface.co/openai-community/gpt2/tree/607a30d783dfa663caf39e06633721c8d4cfcd7e"
+  ]
+}

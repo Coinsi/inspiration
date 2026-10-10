@@ -1,7 +1,9 @@
+import { PersonalModelServices } from "./PersonalModelServices";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Camera,
+  KeyRound,
   Check,
   Languages,
   LockKeyhole,
@@ -24,7 +26,11 @@ export function AccountSettings(props: {
   onSelect: (v: string) => void;
   onClose: () => void;
 }) {
-  if (!["profile", "security", "preferences"].includes(props.panel || ""))
+  if (
+    !["profile", "security", "preferences", "models"].includes(
+      props.panel || "",
+    )
+  )
     return null;
   return <SettingsContent {...props} />;
 }
@@ -95,6 +101,11 @@ function SettingsContent({
     }
   }
   const tabs = [
+    {
+      key: "models",
+      label: zh ? "模型服务" : "Model services",
+      icon: KeyRound,
+    },
     { key: "profile", label: zh ? "个人资料" : "Profile", icon: UserRound },
     { key: "security", label: zh ? "账户安全" : "Security", icon: LockKeyhole },
     {
@@ -143,6 +154,7 @@ function SettingsContent({
           ))}
         </nav>
         <section className="account-settings-content">
+          {panel === "models" && <PersonalModelServices />}
           {error && (
             <p role="alert" className="account-message error">
               {error}

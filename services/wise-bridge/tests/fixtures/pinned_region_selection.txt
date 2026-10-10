@@ -1,0 +1,17 @@
+    def _extract_image_region_features_highest_iou(
+        self, image: torch.Tensor, region: BBoxXYWH
+    ) -> Features:
+        """Implementation of :meth:`extract_image_region_features` that returns region with highest IoU."""
+        features = self.extract_image_features(image)
+        assert len(features) == 1
+        ## FIXME: once we can depend on torchvision>0.24, we can
+        ## replace _box_iou_xywh() with box_iou(..., fmt="xywh")
+        iou = _box_iou_xywh(
+            torch.stack([torch.Tensor(x.bbox) for x in features[0].metadata]),
+            torch.Tensor(region).unsqueeze(0),
+        )
+        iou_max_idx = iou.argmax()
+        return Features(
+            vectors=features[0].vectors[[iou_max_idx], :],
+            metadata=[features[0].metadata[iou_max_idx]],
+        )

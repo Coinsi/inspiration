@@ -1,0 +1,139 @@
+# Copyright 2026 University of Oxford; Apache-2.0.
+# Exact WISE load_search_indices method from fcfa443fbb46eb361bb19151339338616838a5b5.
+# Test fixture only; keep whitespace intact for the pinned function hash check.
+class PinnedWiseProject:
+    def load_search_indices(
+        self,
+        preferred_index_type: str = "IndexFlatIP",
+        default_nprobe: int = 32,
+    ):
+        """
+        Load all available search indices by default
+        `search_indices` is a dictionary of SearchIndex objects, where the key is the
+        feature_extractor_id and value is a SearchIndex object
+        """
+        if self._search_indices is not None:
+            return self._search_indices
+
+        search_indices: dict[ModalityType, dict[str, SearchIndex]] = {}
+        project_assets = self.discover_assets()
+
+        fts_search_index = None
+        if self.enable_fts():
+            fts_search_index = FTSSearch(self, wise_db.project_metadata_obj)
+
+        for modality_type in project_assets:
+            for feature_extractor_id in project_assets[modality_type]:
+                if modality_type not in search_indices:
+                    search_indices[modality_type] = {}
+
+                search_indices[modality_type][feature_extractor_id] = (
+                    FeatureSearchIndex(
+                        modality_type,
+                        feature_extractor_id,
+                        project_assets[modality_type][feature_extractor_id],
+                    )
+                )
+                asset = project_assets[modality_type][feature_extractor_id]
+                index_type_to_load = preferred_index_type
+
+                if index_type_to_load:
+                    # check if the preferred index type is available
+                    preferred_index_filename = search_indices[modality_type][
+                        feature_extractor_id
+                    ].get_index_filename(index_type_to_load)
+                    if not os.path.exists(preferred_index_filename):
+                        logger.warning(
+                            "Index file not found for preferred index type %s."
+                            " Will try to load any other available index.",
+                            index_type_to_load,
+                        )
+                        index_type_to_load = None
+
+                if not index_type_to_load:
+                    # load any available index
+                    available_indices = [
+                        f for f in asset["index_files"] if f.endswith(".faiss")
+                    ]
+                    if available_indices:
+                        # extract index type from filename, e.g. "video-IndexFlatIP.faiss" -> "IndexFlatIP"
+                        index_type_to_load = Path(
+                            available_indices[0]
+                        ).stem.split("-")[1]
+                        logger.info(
+                            "Loading available index of type %s",
+                            index_type_to_load,
+                        )
+                    else:
+                        logger.error(
+                            "No index files found for %s and %s",
+                            modality_type.value,
+                            feature_extractor_id,
+                        )
+                        del search_indices[modality_type][feature_extractor_id]
+                        continue
+
+                logger.info(
+                    "Loading faiss index from %s",
+                    search_indices[modality_type][
+                        feature_extractor_id
+                    ].get_index_filename(index_type_to_load),
+                )
+                if not search_indices[modality_type][
+                    feature_extractor_id
+                ].load_index(index_type_to_load):
+                    logger.error(
+                        "Failed to load %s index: %s",
+                        modality_type.value,
+                        feature_extractor_id,
+                    )
+                    del search_indices[modality_type][feature_extractor_id]
+                    continue
+                if hasattr(
+                    search_indices[modality_type][feature_extractor_id].index,
+                    "nprobe",
+                ):
+                    # See https://github.com/facebookresearch/faiss/blob/43d86e30736ede853c384b24667fc3ab897d6ba9/faiss/IndexIVF.h#L184C8-L184C42
+                    search_indices[modality_type][
+                        feature_extractor_id
+                    ].index.parallel_mode = 1
+                    search_indices[modality_type][
+                        feature_extractor_id
+                    ].index.nprobe = default_nprobe
+
+                    if not search_indices[modality_type][
+                        feature_extractor_id
+                    ].is_internal_search_supported:
+                        logger.info(
+                            "This faiss index does not support internal search."
+                            " To enable internal search, please re-create the"
+                            " index by running `python -m wise create-index"
+                            " --project-dir '%s' --modality-type %s "
+                            " --index-type %s --overwrite`",
+                            self._project_dir,
+                            modality_type.value,
+                            search_indices[modality_type][
+                                feature_extractor_id
+                            ].index_type,
+                        )
+            # TODO: Fix this to handle audio when support gets added
+            if fts_search_index is not None and modality_type in {
+                ModalityType.IMAGE,
+                ModalityType.VIDEO,
+            }:
+                search_indices[modality_type][
+                    "wise/metadata"
+                ] = fts_search_index
+
+        is_audio_only_project = (
+            ModalityType.VIDEO not in search_indices
+            and ModalityType.AUDIO in search_indices
+            and len(search_indices[MediaType.AUDIO]) > 0
+        )
+        if fts_search_index is not None and is_audio_only_project:
+            search_indices[ModalityType.AUDIO][
+                "wise/metadata"
+            ] = fts_search_index
+
+        self._search_indices = search_indices
+        return search_indices

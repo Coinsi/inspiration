@@ -413,6 +413,18 @@ export interface GenJob {
   request_type: string;
   created_at: string;
   updated_at: string;
+  routing_state?: {
+    phase?: string;
+    channel_name?: string;
+    model_name?: string;
+    cost_points?: number | null;
+    attempts?: {
+      phase: string;
+      channel_name: string;
+      message: string;
+      at?: string;
+    }[];
+  };
   input_snapshot: {
     skills?: {
       id: string;
@@ -437,11 +449,12 @@ export interface Generation {
     library_origin?: {
       media_id: string;
       version_id: string;
+      media_type?: "video" | "image" | "audio";
       usage_id: string;
       ordinal: number;
       name: string;
-      start_ms: number;
-      end_ms: number;
+      start_ms: number | null;
+      end_ms: number | null;
     };
     character_preset?: {
       mode: string;

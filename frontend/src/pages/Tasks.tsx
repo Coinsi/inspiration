@@ -27,7 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { MediaVideo } from "@/components/MediaVideo";
 import { MediaAudio } from "@/components/MediaAudio";
-import { ZoomableImage } from "@/components/ImageViewer";
+import { MediaPreview } from "@/components/MediaPreview";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { useI18n } from "@/lib/i18n";
@@ -372,7 +372,7 @@ function TaskPage({ projectId }: { projectId: string }) {
                         ? zh
                           ? "Mock · 测试"
                           : "Mock · Test"
-                        : j.provider}
+                        : j.model_name || j.provider}
                   </span>
                   <time>
                     {new Date(j.created_at).toLocaleString(
@@ -532,6 +532,7 @@ function TaskDetail({
           <div className="task-output-screen">
             {result.output_type === "video" ? (
               <MediaVideo
+                presentation="studio"
                 src={blobUrl(projectId, result.output_blob_hash!)}
                 label={zh ? "任务视频结果" : "Task video result"}
               />
@@ -541,12 +542,11 @@ function TaskDetail({
                 src={blobUrl(projectId, result.output_blob_hash!)}
               />
             ) : (
-              <ZoomableImage
+              <MediaPreview
                 key={result.id}
                 filename={`result-${result.id.slice(0, 8)}`}
-                alt={zh ? "任务图片结果" : "Task image result"}
+                label={zh ? "任务图片结果" : "Task image result"}
                 src={blobUrl(projectId, result.output_blob_hash!)}
-                className="h-full w-full object-contain"
               />
             )}
           </div>
@@ -598,6 +598,29 @@ function TaskDetail({
           </span>
         </div>
       )}
+      {!!j.routing_state?.attempts?.length && (
+        <section className="rounded-xl border border-border p-4 space-y-3">
+          <h4 className="text-sm font-medium">模型调用记录</h4>
+          {j.routing_state.attempts.map((a, i) => (
+            <div key={i} className="text-xs space-y-1">
+              <strong>{a.channel_name}</strong>
+              <p className="text-muted-foreground">{a.message}</p>
+              {a.at && (
+                <time className="text-muted-foreground">
+                  {new Date(a.at).toLocaleString()}
+                </time>
+              )}
+            </div>
+          ))}
+          {["dispatching", "submission_unknown"].includes(
+            j.routing_state.phase || "",
+          ) && (
+            <p className="text-xs text-danger">
+              上游是否已接单尚不明确，已阻止自动换渠道和重发，请先核对上游任务。
+            </p>
+          )}
+        </section>
+      )}
       {!!j.input_snapshot.skills?.length && (
         <section className="rounded-xl border border-border p-4 space-y-3">
           <h4 className="text-sm font-medium">本次使用的技能</h4>
@@ -641,7 +664,14 @@ function TaskDetail({
           {data.can_retry && (
             <Button disabled={busy} onClick={() => onAction("retry")}>
               <RefreshCw size={14} />
-              {zh ? "按原始输入重试" : "Retry original input"}
+              {j.routing_state &&
+              ["accepted", "generated"].includes(j.routing_state.phase || "")
+                ? zh
+                  ? "恢复原任务结果"
+                  : "Recover original result"
+                : zh
+                  ? "按原始输入重试"
+                  : "Retry original input"}
             </Button>
           )}
         </div>
