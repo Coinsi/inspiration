@@ -1,14 +1,24 @@
+import { ShotNameDialog } from "@/components/ShotNameDialog";
+import { useShotContext } from "@/lib/useShotContext";
+import { SelectField } from "@/components/ui/select-field";
+import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import {
+  useParams,
+  useSearchParams,
+  useNavigate,
+  Navigate,
+  Link,
+} from "react-router-dom";
 import GenerationPanel from "@/components/GenerationPanel";
 import ReviewPanel from "@/components/ReviewPanel";
 import ShotAssetRefs from "@/components/ShotAssetRefs";
 import {
+  Pencil,
   Filter,
   X,
   ArrowLeft,
-  Search,
   Images,
   Clapperboard,
   ChevronLeft,
@@ -53,6 +63,9 @@ const DOT: Record<string, string> = {
 
 export default function Shots() {
   const { projectId } = useParams();
+  const [params] = useSearchParams();
+  if (!params.get("shot") && params.get("view") !== "status")
+    return <Navigate to={`/projects/${projectId}/storyboard`} replace />;
   return <ShotsWorkspace key={projectId} />;
 }
 function ShotsWorkspace() {
@@ -64,6 +77,8 @@ function ShotsWorkspace() {
   const requestedTab = search.get("tab");
   const { t: tr, lang } = useI18n();
   const [open, setOpen] = useState<Shot | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const context = useShotContext(projectId!);
   const [mtab, setMtab] = useState("overview");
   const [compose, setCompose] = useState<ComposeResult | null>(null);
   const openIdRef = useRef("");
@@ -72,6 +87,10 @@ function ShotsWorkspace() {
   const [referencesOpen, setReferencesOpen] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
+  const [scriptFilter, setScriptFilter] = usePersistentState<string>(
+    `sb.script.${projectId}`,
+    "",
+  );
   const [boardLimit, setBoardLimit] = useState(40);
   const [railLimit, setRailLimit] = useState(60);
   const [referenceTab, setReferenceTab] = useState("assets");
@@ -131,13 +150,43 @@ function ShotsWorkspace() {
     },
   });
 
+  const boardShots = (shots ?? []).filter(
+    (s) =>
+      !scriptFilter ||
+      (scriptFilter === "other"
+        ? !context.data?.scenes[s.scene_id]
+        : context.data?.scenes[s.scene_id]?.script.id === scriptFilter),
+  );
   // 看板计数 / 总数从(可能已筛选的)镜头列表派生,确保与筛选一致
   const counts = ORDER.reduce<Record<string, number>>((a, st) => {
-    a[st] = (shots ?? []).filter((s) => s.production_status === st).length;
+    a[st] = boardShots.filter((s) => s.production_status === st).length;
     return a;
   }, {});
-  const total = shots?.length ?? 0;
-  const currentIndex = (shots ?? []).findIndex((s) => s.id === open?.id);
+  const total = boardShots.length;
+  const sceneShots = (shots ?? [])
+    .filter((s) => s.scene_id === open?.scene_id)
+    .sort((a, b) => a.ordinal - b.ordinal);
+  const currentIndex = sceneShots.findIndex((s) => s.id === open?.id);
+  const currentScript = open
+    ? context.data?.scenes[open.scene_id]?.script
+    : undefined;
+  const relatedShots = (shots ?? []).filter((s) =>
+    currentScript
+      ? context.data?.scenes[s.scene_id]?.script.id === currentScript.id
+      : s.novel_id === open?.novel_id,
+  );
+  const sceneOptions = Array.from(
+    new Map(
+      relatedShots.map((s) => [
+        s.scene_id,
+        {
+          value: s.scene_id,
+          label:
+            s.scene_title || (lang === "zh" ? "未命名场景" : "Untitled scene"),
+        },
+      ]),
+    ).values(),
+  );
 
   useEffect(() => {
     if (currentIndex >= railLimit) setRailLimit(currentIndex + 20);
@@ -204,40 +253,59 @@ function ShotsWorkspace() {
   }, [open?.id]);
   function closeWorkspace() {
     setReferencesOpen(false);
-    if (search.get("from") === "storyboard") {
-      navigate(`${base}/storyboard`);
+    if (search.get("view") !== "status") {
+      navigate(`${base}/storyboard?scene=${open?.scene_id || ""}`);
       return;
     }
     openIdRef.current = "";
     setOpen(null);
-    setSearch({}, { replace: true });
+    setSearch({ view: "status" }, { replace: true });
     requestAnimationFrame(() => {
       const main = document.querySelector("main");
       if (main) main.scrollTop = boardScroll.current;
     });
   }
-  const visibleShots = (shots ?? []).filter((s) =>
+  const visibleShots = sceneShots.filter((s) =>
     `${s.title} ${s.code} ${s.description} ${s.scene_title ?? ""} ${s.chapter_title ?? ""} ${s.novel_title ?? ""}`
       .toLowerCase()
       .includes(shotQuery.trim().toLowerCase()),
   );
   const byStatus = (st: string) =>
-    (shots ?? []).filter((s) => s.production_status === st);
+    boardShots.filter((s) => s.production_status === st);
 
   useEffect(() => {
     setOpen((current) =>
       current ? shots?.find((s) => s.id === current.id) || current : null,
     );
   }, [shots]);
+  if (
+    requestedShot &&
+    !open &&
+    !loadError &&
+    (isPending || shots?.some((s) => s.id === requestedShot))
+  )
+    return (
+      <div className="p-6 text-sm text-muted-foreground" role="status">
+        {tr("common.loading")}
+      </div>
+    );
   return (
     <div className={`shots-studio p-4 md:p-6 ${open ? "is-creating" : ""}`}>
       <h1 hidden={!!open} className="text-xl font-semibold mb-1">
-        {tr("shots.title")}
+        {lang === "zh" ? "制作进度" : "Production progress"}
       </h1>
       <p hidden={!!open} className="text-sm text-muted-foreground mb-4">
         {tr("shots.subtitle").replace("{n}", String(total))}
       </p>
 
+      {!open && (
+        <Link
+          className="studio-link mb-4 inline-block"
+          to={`${base}/storyboard`}
+        >
+          {lang === "zh" ? "← 返回分镜创作" : "← Back to storyboard"}
+        </Link>
+      )}
       {/* 筛选:按小说 / 章节 */}
       <div
         className={`flex flex-wrap items-center gap-2 mb-4 ${open ? "!hidden" : ""}`}
@@ -245,47 +313,74 @@ function ShotsWorkspace() {
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Filter className="h-3.5 w-3.5" /> {tr("shots.filter")}
         </span>
-        <select
-          value={novelId}
-          onChange={(e) => {
-            setNovelId(e.target.value);
+        <SelectField
+          label={lang === "zh" ? "选择剧本" : "Choose script"}
+          value={scriptFilter}
+          onChange={(value) => {
+            setScriptFilter(value);
+            setNovelId("");
             setChapterId("");
           }}
-          className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-        >
-          <option value="">{tr("shots.allNovels")}</option>
-          {novels?.map((n) => (
-            <option key={n.id} value={n.id}>
-              {n.title || n.code}
-            </option>
-          ))}
-        </select>
-        <select
-          value={chapterId}
-          onChange={(e) => setChapterId(e.target.value)}
-          disabled={!novelId}
-          className="h-8 rounded-md border border-border bg-bg px-2 text-sm disabled:opacity-50"
-        >
-          <option value="">{tr("shots.allChapters")}</option>
-          {chapters.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.title ?? tr("nar.chapterN").replace("{n}", String(c.ordinal))}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="制作状态筛选"
-          className="h-8 rounded-md border bg-bg px-2 text-sm"
+          options={[
+            {
+              value: "",
+              label:
+                lang === "zh" ? "全部剧本与故事" : "All scripts and stories",
+            },
+            ...(context.data?.scripts || []).map((s) => ({
+              value: s.id,
+              label: s.title,
+            })),
+            {
+              value: "other",
+              label: lang === "zh" ? "其他来源的场景" : "Other scene sources",
+            },
+          ]}
+        />
+        <SelectField
+          label={tr("shots.allNovels")}
+          value={novelId}
+          onChange={(value) => {
+            setNovelId(value);
+            setChapterId("");
+          }}
+          options={[
+            { value: "", label: tr("shots.allNovels") },
+            ...(novels || []).map((n) => ({
+              value: n.id,
+              label: n.title || "未命名故事",
+            })),
+          ]}
+        />
+        {novelId && (
+          <SelectField
+            label={tr("shots.allChapters")}
+            value={chapterId}
+            onChange={setChapterId}
+            options={[
+              { value: "", label: tr("shots.allChapters") },
+              ...chapters.map((c) => ({
+                value: c.id,
+                label:
+                  c.title ||
+                  tr("nar.chapterN").replace("{n}", String(c.ordinal)),
+              })),
+            ]}
+          />
+        )}
+        <SelectField
+          label={lang === "zh" ? "制作状态筛选" : "Production status"}
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="">全部制作状态</option>
-          {ORDER.map((st) => (
-            <option key={st} value={st}>
-              {tr(`status.${st}`)}
-            </option>
-          ))}
-        </select>
+          onChange={setStatusFilter}
+          options={[
+            {
+              value: "",
+              label: lang === "zh" ? "全部制作状态" : "All statuses",
+            },
+            ...ORDER.map((st) => ({ value: st, label: tr(`status.${st}`) })),
+          ]}
+        />
+
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -402,7 +497,9 @@ function ShotsWorkspace() {
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="text-[11px] font-code text-muted-foreground">
-                                  {s.code}
+                                  {s.scene_title ||
+                                    s.novel_title ||
+                                    "未命名场景"}
                                 </span>
                                 {s.created_at && (
                                   <span className="font-code text-[10px] text-faint shrink-0">
@@ -464,23 +561,42 @@ function ShotsWorkspace() {
                     ? "返回分镜"
                     : "返回看板"}
                 </button>
-                <label className="shot-search">
-                  <Search size={15} />
-                  <input
-                    aria-label="搜索创作镜头"
-                    placeholder="查找镜头、章节…"
-                    value={shotQuery}
-                    onChange={(e) => {
-                      setShotQuery(e.target.value);
-                      setRailLimit(60);
+                <div className="shot-scope-heading">
+                  <span>
+                    {currentScript?.title ||
+                      open.novel_title ||
+                      (lang === "zh" ? "当前创作" : "Current work")}
+                  </span>
+                  <SelectField
+                    label={lang === "zh" ? "切换场景" : "Switch scene"}
+                    value={open.scene_id}
+                    options={sceneOptions}
+                    onChange={(id) => {
+                      const first = relatedShots
+                        .filter((s) => s.scene_id === id)
+                        .sort((a, b) => a.ordinal - b.ordinal)[0];
+                      if (first) {
+                        setShotQuery("");
+                        openShot(first, true);
+                      }
                     }}
                   />
-                </label>
+                </div>
+                <SearchField
+                  className="shot-search"
+                  label="搜索创作镜头"
+                  placeholder="查找当前场景的镜头…"
+                  value={shotQuery}
+                  onValueChange={(value) => {
+                    setShotQuery(value);
+                    setRailLimit(60);
+                  }}
+                />
                 <div className="shot-rail-list">
                   {visibleShots.slice(0, railLimit).map((s) => (
                     <button
                       key={s.id}
-                      aria-label={`打开镜头 ${s.code}`}
+                      aria-label={`打开镜头 ${s.title || "未命名镜头"}`}
                       aria-current={s.id === open.id ? "true" : undefined}
                       onClick={() => openShot(s, true)}
                     >
@@ -497,7 +613,9 @@ function ShotsWorkspace() {
                       </span>
                       <span>
                         <strong>{s.title || "未命名镜头"}</strong>
-                        <small>{s.code}</small>
+                        <small className="line-clamp-2">
+                          {s.description || "暂无内容描述"}
+                        </small>
                         <small>
                           {s.scene_title ||
                             s.chapter_title ||
@@ -531,7 +649,10 @@ function ShotsWorkspace() {
               >
                 <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
                   <span className="flex items-center gap-2">
-                    <span className="font-code text-sm">{open.code}</span>
+                    <span className="text-xs text-muted-foreground truncate max-w-64">
+                      {open.scene_title ||
+                        (lang === "zh" ? "当前场景" : "Current scene")}
+                    </span>
                     <Badge variant="primary">
                       {tr(`status.${open.production_status}`)}
                     </Badge>
@@ -544,20 +665,26 @@ function ShotsWorkspace() {
                       }
                       disabled={currentIndex <= 0}
                       onClick={() =>
-                        shots && openShot(shots[currentIndex - 1], true)
+                        sceneShots[currentIndex - 1] &&
+                        openShot(sceneShots[currentIndex - 1], true)
                       }
                     >
                       <ChevronLeft size={16} />
                     </button>
                     <span className="text-[10px] text-faint">
-                      {currentIndex >= 0 ? currentIndex + 1 : "—"}/{total}
+                      {currentIndex >= 0 ? currentIndex + 1 : "—"}/
+                      {sceneShots.length}
                     </span>
                     <button
                       className="studio-icon-button disabled:opacity-30"
                       aria-label={lang === "zh" ? "下一个镜头" : "Next shot"}
-                      disabled={currentIndex < 0 || currentIndex >= total - 1}
+                      disabled={
+                        currentIndex < 0 ||
+                        currentIndex >= sceneShots.length - 1
+                      }
                       onClick={() =>
-                        shots && openShot(shots[currentIndex + 1], true)
+                        sceneShots[currentIndex + 1] &&
+                        openShot(sceneShots[currentIndex + 1], true)
                       }
                     >
                       <ChevronRight size={16} />
@@ -580,39 +707,24 @@ function ShotsWorkspace() {
                   </div>
                 </div>
 
-                <h2
-                  className="px-4 pt-4 text-base font-semibold truncate shrink-0"
-                  title={open.title || open.description || open.code}
-                >
-                  {open.title || open.description || open.code}
-                </h2>
-
-                {(open.created_at ||
-                  open.novel_title ||
-                  open.chapter_title) && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-2 text-[11px] shrink-0">
-                    {open.created_at && (
-                      <span className="font-code text-faint">
-                        🕒 {fmtDate(open.created_at)}
-                      </span>
-                    )}
-                    {open.novel_title && (
-                      <span className="text-primary">
-                        📖 {open.novel_title}
-                      </span>
-                    )}
-                    {(open.chapter_title || open.chapter_ordinal != null) && (
-                      <span className="text-accent">
-                        🔖{" "}
-                        {open.chapter_title ??
-                          tr("nar.chapterN").replace(
-                            "{n}",
-                            String(open.chapter_ordinal),
-                          )}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <div className="shot-title-row">
+                  <h2>
+                    {open.title ||
+                      (lang === "zh" ? "未命名镜头" : "Untitled shot")}
+                  </h2>
+                  <button
+                    className="studio-icon-button"
+                    aria-label={lang === "zh" ? "重命名镜头" : "Rename shot"}
+                    onClick={() => setRenaming(true)}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                </div>
+                <p className="shot-context-path">
+                  {[currentScript?.title || open.novel_title, open.scene_title]
+                    .filter(Boolean)
+                    .join(" / ")}
+                </p>
 
                 <div className="px-4 pt-2 shrink-0">
                   <Tabs
@@ -755,11 +867,23 @@ function ShotsWorkspace() {
           </div>
         </>
       )}
+      {open && renaming && (
+        <ShotNameDialog
+          projectId={projectId!}
+          shot={open}
+          onClose={() => setRenaming(false)}
+          onSaved={(s) =>
+            setOpen((current) =>
+              current?.id === s.id ? { ...current, title: s.title } : current,
+            )
+          }
+        />
+      )}
       {open && (
         <Modal
           open={referencesOpen}
           onClose={() => setReferencesOpen(false)}
-          title={`参考素材 · ${open.title || open.code}`}
+          title={`参考素材 · ${open.title || "未命名镜头"}`}
           width={1040}
         >
           <div className="shot-reference-dialog">

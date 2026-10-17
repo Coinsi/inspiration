@@ -13,13 +13,14 @@ from sqlalchemy import select
 from app.core import audit
 from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
-from app.models.generation import ModelChannel, ProviderConfig
+from app.models.generation import CreativeModel, GenerationJob, ModelChannel, ProviderConfig
 from app.models.identity import Project
 from app.modules.generation.model_catalog import Price
 
 PROTOCOLS = {
     "gpt_image": {"name": "OpenAI Images 兼容", "types": ["image"]},
     "openai_video": {"name": "OpenAI Videos 兼容", "types": ["video"]},
+    "video_v1": {"name": "Video v1 JSON（文生视频）", "types": ["video"]},
     "ark_image": {"name": "火山方舟图片", "types": ["image"]},
     "ark_video": {"name": "火山方舟视频", "types": ["video"]},
     "minimax_video": {"name": "MiniMax 海螺视频", "types": ["video"]},
@@ -70,6 +71,7 @@ class ModelIn(BaseModel):
     protocol: Literal[
         "gpt_image",
         "openai_video",
+        "video_v1",
         "cloud_llm",
         "jimeng",
         "mock",
@@ -102,6 +104,10 @@ class ModelIn(BaseModel):
             raise ValueError("蒙版编辑需要支持参考图的 Images 协议")
         if self.protocol == "openai_video" and self.max_reference_images > 1:
             raise ValueError("Videos 协议最多接收一张起始参考图")
+        if self.protocol == "video_v1" and self.max_reference_images:
+            raise ValueError("Video v1 当前接入仅支持文生视频，参考图上限请设为 0")
+        if self.protocol == "video_v1" and not self.parameters.get("duration"):
+            raise ValueError("Video v1 必须配置时长选项，避免使用上游默认时长")
         limits = {"ark_image": 14, "ark_video": 2, "minimax_video": 1}
         if self.protocol in limits and self.max_reference_images > limits[self.protocol]:
             raise ValueError("参考图上限超出该接口支持的范围")
@@ -116,7 +122,7 @@ class ModelIn(BaseModel):
             allowed = {"duration", "size"}
         if self.protocol == "ark_image":
             allowed = {"size"}
-        if self.protocol == "ark_video":
+        if self.protocol in ("ark_video", "video_v1"):
             allowed = {"duration", "resolution", "aspect_ratio"}
         if self.protocol == "minimax_video":
             allowed = {"duration", "resolution"}
@@ -297,6 +303,8 @@ def save_model(db, ctx, channel_id, data, model_id=None):
                     "is_default": False,
                     "revision": other.config.get("revision", 1) + 1,
                 }
+    old_name = row.config.get("display_name", row.provider_name)
+    old_modality = row.config.get("modality")
     row.kind = "llm" if data.modality == "text" else "generation"
     row.enabled = data.enabled
     # Explicit allowlist: credentials never enter config, API output, logs or task snapshots.
@@ -318,6 +326,19 @@ def save_model(db, ctx, channel_id, data, model_id=None):
     }
     row.endpoint = None
     row.credentials_encrypted = None
+    # Keep a simple, same-name default in sync; preserve intentionally named or multi-route groups.
+    for linked in db.scalars(select(CreativeModel).where(
+        CreativeModel.project_id == ctx.project.id
+    ).with_for_update()):
+        routes = linked.definition.get("routes", [])
+        if (len(routes) == 1 and str(routes[0].get("profile_id")) == str(row.id)
+                and linked.name == old_name and linked.modality == old_modality):
+            linked.name = data.name
+            if linked.modality != data.modality:
+                # Changed capabilities invalidate the old group until it is configured again.
+                linked.enabled = False
+                linked.definition = {**linked.definition, "is_default": False}
+            linked.revision += 1
     db.flush()
     audit.record(
         db,
@@ -424,6 +445,7 @@ def provider_view(db, row):
 def selected_llm(db, project_id, name, user_id=None):
     if name.startswith("personal_"):
         from app.modules.generation.personal import text_config
+
         return text_config(db, name, user_id)
     """Resolve an explicit, project-owned text model. Never silently use another default."""
     from app.modules.generation import model_catalog as catalog
@@ -550,3 +572,54 @@ def discover(db, ctx, channel_id):
         raise
     except Exception as exc:
         raise ProviderError("无法读取模型目录，请检查地址、密钥或手动添加模型") from exc
+
+
+def remove_channel(db, ctx, channel_id, revision):
+    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    row = channel(db, ctx.project.id, channel_id, True)
+    if row.revision != revision:
+        raise Conflict("连接已更新，请刷新后重新删除")
+    profiles = [
+        p
+        for p in db.scalars(
+            select(ProviderConfig)
+            .where(ProviderConfig.project_id == ctx.project.id)
+            .with_for_update()
+        )
+        if p.config.get("channel_id") == str(row.id)
+    ]
+    ids = {str(p.id) for p in profiles}
+    names = {p.provider_name for p in profiles}
+    for job in db.scalars(
+        select(GenerationJob).where(
+            GenerationJob.project_id == ctx.project.id,
+            GenerationJob.status.in_(["pending", "submitted", "running"]),
+        )
+    ):
+        candidates = job.input_snapshot.get("routing", {}).get("candidates", [])
+        if job.provider in names or any(r.get("channel_id") == str(row.id) for r in candidates):
+            raise Conflict("此服务仍有生成任务正在执行，请等待完成或取消任务后再删除")
+    for model in db.scalars(
+        select(CreativeModel).where(CreativeModel.project_id == ctx.project.id).with_for_update()
+    ):
+        previous = model.definition.get("routes", [])
+        remaining = [r for r in previous if str(r.get("profile_id")) not in ids]
+        if len(remaining) != len(previous):
+            model.definition = {**model.definition, "routes": remaining}
+            model.revision += 1
+            if not any(r.get("enabled", True) for r in remaining):
+                model.enabled = False
+                model.definition = {**model.definition, "is_default": False}
+    for profile in profiles:
+        db.delete(profile)
+    db.delete(row)
+    audit.record(
+        db,
+        action="model_channel.remove",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="model_channel",
+        target_id=channel_id,
+        detail={"model_count": len(profiles)},
+    )
+    db.flush()

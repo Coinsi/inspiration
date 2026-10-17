@@ -113,7 +113,7 @@
 .members-role {
   font-size: 12px;
 }
-.members-role select {
+.members-role .studio-select-trigger {
   background: hsl(var(--bg));
   border: 1px solid hsl(var(--border));
   border-radius: 7px;
@@ -205,7 +205,7 @@
   font-size: 13px;
 }
 .members-add-form input,
-.members-add-form select {
+.members-add-form .studio-select-trigger {
   padding: 11px;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
@@ -242,7 +242,7 @@
     padding: 16px 12px;
     gap: 9px;
   }
-  .members-role select {
+  .members-role .studio-select-trigger {
     max-width: 95px;
   }
   .members-guide > div {

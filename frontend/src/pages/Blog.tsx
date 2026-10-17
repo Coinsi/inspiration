@@ -1,7 +1,8 @@
+import { SearchField } from "@/components/ui/search-field";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   BlogCard,
@@ -73,19 +74,17 @@ export default function Blog() {
               filter({ q: search.trim() });
             }}
           >
-            <label className="sr-only" htmlFor="blog-search">
-              搜索文章
-            </label>
-            <input
+            <SearchField
+              className="min-w-0 flex-1"
               id="blog-search"
+              label="搜索文章"
+              onClear={() => filter({ q: "" })}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onValueChange={(value) => setSearch(value)}
               placeholder="寻找一个灵感…"
               maxLength={150}
             />
-            <button aria-label="搜索文章">
-              <Search size={16} />
-            </button>
+            <button aria-label="搜索文章">搜索</button>
           </form>
         </div>
         {query.isLoading ? (

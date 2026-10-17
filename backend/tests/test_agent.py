@@ -56,6 +56,10 @@ def test_review_apply_feedback_and_duplicate_approval(studio, monkeypatch):
     tick(run, 4)
     state = client.get(path).json()
     assert state["status"] == "waiting_review"
+    activity = f"/api/v1/projects/{ids['project']}/activity/agent/{run['id']}"
+    proposed = client.get(activity).json()
+    assert proposed["summary"]["status"] == "needs_review"
+    assert proposed["changes"][0]["state"] == "proposed"
     with sessions() as db:
         assert db.get(Shot, uuid.UUID(ids["shot"])).title == "Test shot"
     decision = f"{path}/steps/{state['steps'][-1]['id']}/decision"
@@ -64,6 +68,11 @@ def test_review_apply_feedback_and_duplicate_approval(studio, monkeypatch):
     assert client.post(decision, json={"action": "reject"}).status_code == 409
     tick(run)
     assert client.get(path).json()["status"] == "succeeded"
+    saved = client.get(activity).json()
+    assert saved["changes"][0]["state"] == "applied"
+    assert saved["changes"][0]["before"]["fields"]["title"] == "Test shot"
+    assert saved["changes"][0]["after"]["fields"]["title"] == "金色海岸"
+    assert len([a for a in saved["history"] if a["label"] == "已批准提议"]) == 1
     with sessions() as db:
         assert db.get(Shot, uuid.UUID(ids["shot"])).title == "金色海岸"
 

@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, blobUrl, type Generation, type GenJob } from "@/lib/api";
@@ -131,13 +132,13 @@ export function CharacterTools({
           </div>
           <label className="block text-sm">
             {zh ? "角色预设" : "Character preset"}
-            <select
+            <StudioSelect
               aria-label={zh ? "角色预设" : "Character preset"}
               className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
               value={preset}
               disabled={busy || !catalog.data}
-              onChange={(e) => {
-                setPreset(e.target.value);
+              onValueChange={(selectedValue) => {
+                setPreset(selectedValue);
                 reset();
               }}
             >
@@ -146,7 +147,7 @@ export function CharacterTools({
                   {zh ? p.label : p.label_en}
                 </option>
               ))}
-            </select>
+            </StudioSelect>
           </label>
           <label className="block text-sm">
             {zh ? "补充要求（可选）" : "Additional instructions (optional)"}

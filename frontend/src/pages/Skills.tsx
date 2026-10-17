@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -8,7 +10,6 @@ import {
   Plus,
   Save,
   Sparkles,
-  Search,
   Heart,
   Library,
   UserRound,
@@ -109,13 +110,21 @@ function SkillWorkspace({
   );
   const [recoveredNotice, setRecoveredNotice] = useState(!!recovered);
   const [editorTab, setEditorTab] = useState("content");
+  const [editorAdvanced, setEditorAdvanced] = useState(false);
   const [storageError, setStorageError] = useState(false);
   const [draft, setDraft] = useState<Skill | null>(recovered?.draft ?? null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   const busyRef = useRef(false);
-  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(baseline);
+  const dirty =
+    !!draft && JSON.stringify(draft) !== JSON.stringify(baseline ?? blank);
+  const editorTabs = [
+    ["content", "创作方法"],
+    ["files", "配套文件"],
+    ["tools", "工具依赖"],
+    ...(draft?.id ? [["history", "版本历史"]] : []),
+  ];
   useEffect(() => {
     try {
       if (dirty)
@@ -141,6 +150,7 @@ function SkillWorkspace({
     setRecoveredNotice(false);
     setHistoryOffset(0);
     setEditorTab("content");
+    setEditorAdvanced(false);
     setReading(null);
   }
   async function choose(value: Skill) {
@@ -415,30 +425,17 @@ function SkillWorkspace({
           })}
         </div>
         <div className="knowledge-toolbar-actions">
-          <label className="knowledge-search">
-            <Search size={16} />
-            <input
-              aria-label="搜索技能"
-              value={search}
-              maxLength={200}
-              placeholder="搜索技能或创作方法…"
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setOffset(0);
-              }}
-            />
-            {search && (
-              <button
-                aria-label="清除搜索"
-                onClick={() => {
-                  setSearch("");
-                  setOffset(0);
-                }}
-              >
-                ×
-              </button>
-            )}
-          </label>
+          <SearchField
+            label="搜索技能"
+            value={search}
+            maxLength={200}
+            placeholder="搜索技能名称或创作方法"
+            onValueChange={(value) => {
+              setSearch(value);
+              setOffset(0);
+            }}
+            className="w-full sm:w-64"
+          />
           <Button
             variant="outline"
             disabled={busy || !canEdit}
@@ -486,17 +483,17 @@ function SkillWorkspace({
                 <Archive size={14} />
                 {archived ? "已归档" : "归档"}
               </button>
-              <select
+              <StudioSelect
                 aria-label="技能排序"
                 value={sort}
-                onChange={(e) => {
-                  setSort(e.target.value);
+                onValueChange={(selectedValue) => {
+                  setSort(selectedValue);
                   setOffset(0);
                 }}
               >
                 <option value="updated">最近更新</option>
                 <option value="name">名称排序</option>
-              </select>
+              </StudioSelect>
             </>
           )}
           {hasFilters && (
@@ -774,63 +771,77 @@ function SkillWorkspace({
       )}
       <SkillOverlay
         open={!!draft}
-        drawer
+        className="knowledge-editor"
         dismissDisabled={busy}
         title={draft?.id ? `编辑技能 · 版本 ${draft.revision}` : "创建技能"}
-        subtitle="整理你的创作方法"
+        subtitle="把常用的创作方法，整理成可复用的技能"
         onClose={() => void closeEditor()}
       >
         <div className="knowledge-editor-notices">{notices}</div>
-        <div
-          className="knowledge-editor-tabs"
-          role="tablist"
-          aria-label="技能编辑分区"
-        >
-          {[
-            ["content", "方法说明"],
-            ["files", "配套文件"],
-            ["tools", "工具依赖"],
-            ["history", "版本历史"],
-          ].map(([k, v]) => (
-            <button
-              role="tab"
-              aria-selected={editorTab === k}
-              id={`skill-editor-tab-${k}`}
-              aria-controls={`skill-editor-panel-${k}`}
-              tabIndex={editorTab === k ? 0 : -1}
-              key={k}
-              onClick={() => setEditorTab(k)}
-              onKeyDown={(event) => {
-                const tabs = ["content", "files", "tools", "history"];
-                if (
-                  !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
-                    event.key,
-                  )
-                )
-                  return;
-                event.preventDefault();
-                const index =
-                  event.key === "Home"
-                    ? 0
-                    : event.key === "End"
-                      ? 3
-                      : (tabs.indexOf(k) +
-                          (event.key === "ArrowRight" ? 1 : -1) +
-                          tabs.length) %
-                        tabs.length;
-                setEditorTab(tabs[index]);
-                document
-                  .getElementById(`skill-editor-tab-${tabs[index]}`)
-                  ?.focus();
-              }}
-            >
-              {v}
-              {k === "files" && draft?.files?.length ? (
-                <span>{draft.files.length}</span>
-              ) : null}
-            </button>
-          ))}
+        <div className="knowledge-editor-options">
+          <span>
+            {editorAdvanced
+              ? "按需补充文件和工具，正文始终保留"
+              : "先写清楚：何时使用，以及怎么做"}
+          </span>
+          <button
+            type="button"
+            aria-expanded={editorAdvanced}
+            onClick={() => {
+              setEditorAdvanced((value) => !value);
+              setEditorTab("content");
+            }}
+          >
+            {editorAdvanced ? "收起高级设置" : "配套文件与高级设置"}
+          </button>
         </div>
+        {editorAdvanced && (
+          <div
+            className="knowledge-editor-tabs"
+            role="tablist"
+            aria-label="技能编辑分区"
+          >
+            {editorTabs.map(([k, v]) => (
+              <button
+                role="tab"
+                aria-selected={editorTab === k}
+                id={`skill-editor-tab-${k}`}
+                aria-controls={`skill-editor-panel-${k}`}
+                tabIndex={editorTab === k ? 0 : -1}
+                key={k}
+                onClick={() => setEditorTab(k)}
+                onKeyDown={(event) => {
+                  const tabs = editorTabs.map(([key]) => key);
+                  if (
+                    !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                      event.key,
+                    )
+                  )
+                    return;
+                  event.preventDefault();
+                  const index =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? tabs.length - 1
+                        : (tabs.indexOf(k) +
+                            (event.key === "ArrowRight" ? 1 : -1) +
+                            tabs.length) %
+                          tabs.length;
+                  setEditorTab(tabs[index]);
+                  document
+                    .getElementById(`skill-editor-tab-${tabs[index]}`)
+                    ?.focus();
+                }}
+              >
+                {v}
+                {k === "files" && draft?.files?.length ? (
+                  <span>{draft.files.length}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        )}
         {draft && (
           <fieldset
             disabled={busy || !canEdit}
@@ -840,11 +851,14 @@ function SkillWorkspace({
               hidden={editorTab !== "content"}
               role="tabpanel"
               id="skill-editor-panel-content"
-              aria-labelledby="skill-editor-tab-content"
+              aria-labelledby={
+                editorAdvanced ? "skill-editor-tab-content" : undefined
+              }
+              aria-label={editorAdvanced ? undefined : "创作方法"}
               className="knowledge-editor-section"
             >
               <div className="knowledge-editor-section-top">
-                <h3>方法与说明</h3>
+                <h3>技能内容</h3>
                 <label className="studio-link cursor-pointer text-xs">
                   <FileUp size={14} />
                   导入 Markdown
@@ -875,53 +889,60 @@ function SkillWorkspace({
                   />
                 </label>
               </div>
-              <p role="status" className="text-xs text-muted-foreground">
-                {dirty
-                  ? storageError
-                    ? "有未保存修改 · 本机草稿保存失败"
-                    : "有未保存修改 · 已保留本机草稿"
-                  : "已与保存版本同步"}
-              </p>
-              <label className="block text-xs space-y-2">
-                <span>技能名称</span>
-                <input
-                  className={field}
-                  value={draft.name}
-                  maxLength={120}
-                  onChange={(e) => edit({ name: e.target.value })}
-                />
-              </label>
-              <label className="block text-xs space-y-2">
-                <span>适用任务</span>
-                <textarea
-                  aria-label="适用任务"
-                  disabled={busy}
-                  className={field}
-                  value={draft.description}
-                  maxLength={1000}
-                  onChange={(e) => edit({ description: e.target.value })}
-                />
-              </label>
+              <div className="knowledge-editor-basics">
+                <label className="block text-xs space-y-2">
+                  <span>技能名称</span>
+                  <input
+                    className={field}
+                    value={draft.name}
+                    maxLength={120}
+                    placeholder="例如：电影感分镜设计"
+                    data-autofocus
+                    onChange={(e) => edit({ name: e.target.value })}
+                  />
+                </label>
+                <label className="block text-xs space-y-2">
+                  <span>适用任务</span>
+                  <textarea
+                    aria-label="适用任务"
+                    disabled={busy}
+                    className={field}
+                    value={draft.description}
+                    maxLength={1000}
+                    rows={2}
+                    placeholder="例如：把一段故事改写成有节奏、有画面感的分镜"
+                    onChange={(e) => edit({ description: e.target.value })}
+                  />
+                </label>
+              </div>
               <label className="block text-xs space-y-2">
                 <span>方法与步骤</span>
                 <textarea
                   aria-label="方法与步骤"
                   disabled={busy}
-                  className={`${field} min-h-64 resize-y leading-7`}
+                  className={`${field} knowledge-instructions resize-y leading-7`}
                   value={draft.instructions}
                   maxLength={20000}
+                  placeholder={
+                    "写下你希望 AI 遵循的方法，例如：\n1. 先确定情绪、人物目标与关键转折。\n2. 为每个镜头写清景别、动作和镜头运动。\n3. 按镜头顺序输出，并检查前后衔接。"
+                  }
                   onChange={(e) => edit({ instructions: e.target.value })}
                 />
               </label>
-              <label className="block text-xs space-y-2">
-                <span>来源与作者</span>
-                <input
-                  className={field}
-                  value={draft.source}
-                  maxLength={1000}
-                  onChange={(e) => edit({ source: e.target.value })}
-                />
-              </label>
+              <details className="knowledge-editor-source">
+                <summary>
+                  来源与作者 <span>选填</span>
+                </summary>
+                <label className="block text-xs space-y-2">
+                  <span>来源与作者</span>
+                  <input
+                    className={field}
+                    value={draft.source}
+                    maxLength={1000}
+                    onChange={(e) => edit({ source: e.target.value })}
+                  />
+                </label>
+              </details>
             </div>
             <div
               hidden={editorTab !== "files"}
@@ -1114,10 +1135,14 @@ function SkillWorkspace({
               )}
             </div>
             <div className="knowledge-editor-footer">
-              <span>
+              <span role="status">
                 {dirty
-                  ? "有未保存修改"
-                  : `已保存 · 版本 ${draft.revision ?? 1}`}
+                  ? storageError
+                    ? "有未保存修改 · 本机草稿保存失败"
+                    : "未保存 · 草稿已保留在本机"
+                  : draft.id
+                    ? `已保存 · 版本 ${draft.revision ?? 1}`
+                    : "填写名称、适用任务和方法后即可保存"}
               </span>
               <div className="flex flex-wrap gap-2">
                 <Button

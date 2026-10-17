@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Folder, FolderPlus, Move, Pencil, Trash2 } from "lucide-react";
@@ -129,19 +130,19 @@ export function LibraryOrganization({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Folder className="h-4 w-4 shrink-0 text-primary" />
-        <select
+        <StudioSelect
           aria-label={zh ? "当前素材目录" : "Current video folder"}
           className="min-w-0 max-w-full flex-1 rounded-lg border bg-background p-2 text-sm"
           value={value}
           disabled={folders.isPending || folders.isError || busy}
-          onChange={(e) => onSelect(e.target.value)}
+          onValueChange={(selectedValue) => onSelect(selectedValue)}
         >
           <option value="all">
             {zh ? "全部目录中的视频" : "Videos in all folders"}
           </option>
           <option value="root">{zh ? "未归档视频" : "Unfiled videos"}</option>
           {options()}
-        </select>
+        </StudioSelect>
         <Button
           size="sm"
           variant="outline"
@@ -335,12 +336,14 @@ export function LibraryOrganization({
                     ? "父目录"
                     : "Parent folder"}
               </span>
-              <select
+              <StudioSelect
                 aria-label={zh ? "目标目录" : "Destination folder"}
                 className="w-full rounded-lg border bg-background p-2 text-sm"
                 value={form.parent}
                 disabled={busy}
-                onChange={(e) => setForm({ ...form, parent: e.target.value })}
+                onValueChange={(selectedValue) =>
+                  setForm({ ...form, parent: selectedValue })
+                }
               >
                 <option value="">
                   {form.mode === "move"
@@ -352,7 +355,7 @@ export function LibraryOrganization({
                       : "Top-level folder"}
                 </option>
                 {options(form.id)}
-              </select>
+              </StudioSelect>
             </label>
             {form.mode === "move" && (
               <p className="text-sm text-muted-foreground">

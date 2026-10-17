@@ -18,7 +18,12 @@ type Model = {
   enabled: boolean;
   is_default: boolean;
   available_routes: number;
-  routes: { channel_name: string; profile_id: string }[];
+  routes: {
+    channel_name: string;
+    profile_id: string;
+    available: boolean;
+    reason: string;
+  }[];
 };
 type Profile = {
   id: string;
@@ -44,6 +49,7 @@ type Choice = {
   ready: boolean;
   source: "model" | "profile";
   service: string;
+  unavailableReason: string;
 };
 const groups = [
   {
@@ -105,7 +111,11 @@ export function DefaultModels({
   });
   const catalog = models.data || [];
   const bound = new Set(
-    catalog.flatMap((m) => m.routes.map((r) => r.profile_id)),
+    catalog
+      .filter((m) => m.enabled)
+      .flatMap((m) =>
+        m.routes.filter((r) => r.available).map((r) => r.profile_id),
+      ),
   );
   const choices: Choice[] = [
     ...catalog.map((m) => ({
@@ -115,6 +125,9 @@ export function DefaultModels({
       selected: m.is_default,
       ready: m.enabled && m.available_routes > 0,
       source: "model" as const,
+      unavailableReason: !m.enabled
+        ? "模型已停用"
+        : m.routes.find((r) => r.reason)?.reason || "暂无可用线路",
       service: [...new Set(m.routes.map((r) => r.channel_name))].join(" / "),
     })),
     ...(channels.data?.channels || []).flatMap((c) =>
@@ -132,6 +145,11 @@ export function DefaultModels({
             m.enabled &&
             (m.protocol === "mock" || !!(c.endpoint && c.has_token)),
           source: "profile" as const,
+          unavailableReason: !c.enabled
+            ? "服务已停用"
+            : !m.enabled
+              ? "模型已停用"
+              : "服务尚未配置地址或密钥",
           service: c.name,
         })),
     ),
@@ -246,11 +264,7 @@ export function DefaultModels({
                         options[next]?.focus();
                         options[next]?.click();
                       }}
-                      title={
-                        item.ready
-                          ? item.service
-                          : "服务未连接或已停用，请在服务连接中完善配置"
-                      }
+                      title={item.ready ? item.service : item.unavailableReason}
                       className={`default-model-option ${item.selected ? "is-selected" : ""}`}
                       onClick={() => choose.mutate(item)}
                     >
@@ -260,7 +274,7 @@ export function DefaultModels({
                       <span className="default-model-copy">
                         <strong>{item.name}</strong>
                         <small>{item.service || "项目模型"}</small>
-                        {!item.ready && <em>待完善连接</em>}
+                        {!item.ready && <em>{item.unavailableReason}</em>}
                       </span>
                       <span className="default-model-check">
                         {choose.isPending &&

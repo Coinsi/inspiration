@@ -1,3 +1,7 @@
+import { ShotNameDialog } from "@/components/ShotNameDialog";
+import { useShotContext } from "@/lib/useShotContext";
+import { SelectField } from "@/components/ui/select-field";
+import { SearchField } from "@/components/ui/search-field";
 import { useWorkspaceScroll } from "@/lib/useWorkspaceScroll";
 import { ShotMedia } from "@/components/ShotMedia";
 import { Modal } from "@/components/ui/modal";
@@ -6,15 +10,15 @@ import {
   ArrowDown,
   ArrowUp,
   Clapperboard,
-  Filter,
   GripVertical,
   Loader2,
   Plus,
+  Pencil,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -127,6 +131,13 @@ function StoryboardContent() {
   const { projectId } = useParams();
   const base = `/projects/${projectId}`;
   const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const context = useShotContext(projectId!);
+  const [scriptFilter, setScriptFilter] = usePersistentState<string>(
+    `sb.script.${projectId}`,
+    "",
+  );
+  const [renaming, setRenaming] = useState<Shot | null>(null);
   const { t: tr, lang } = useI18n();
   const toast = useToast();
   const confirm = useConfirm();
@@ -176,7 +187,7 @@ function StoryboardContent() {
     (!!novelId && !!savedChapterId && novelQuery.isPending);
 
   const {
-    data: scenes,
+    data: allScenes,
     isLoading: scenesLoading,
     isError: scenesError,
     refetch: retryScenes,
@@ -191,16 +202,54 @@ function StoryboardContent() {
     },
     enabled: !scopePending,
   });
+  const scenes = allScenes?.filter(
+    (s) =>
+      !scriptFilter ||
+      (scriptFilter === "other"
+        ? !context.data?.scenes[s.id]
+        : context.data?.scenes[s.id]?.script.id === scriptFilter),
+  );
+  useEffect(() => {
+    const requested = params.get("scene");
+    if (!requested || !allScenes || !context.data) return;
+    if (allScenes.some((s) => s.id === requested)) {
+      setScriptFilter(context.data.scenes[requested]?.script.id || "other");
+      setSceneId(requested);
+      const next = new URLSearchParams(params);
+      next.delete("scene");
+      setParams(next, { replace: true });
+    } else if (novelId || chapterId) {
+      setNovelId("");
+      setChapterId("");
+    }
+  }, [params, allScenes, context.data, novelId, chapterId]);
   const sceneId =
-    !scopePending && !scenesError
+    !scopePending && !scenesError && (!scriptFilter || !!context.data)
       ? (scenes?.find((s) => s.id === savedSceneId)?.id ??
         scenes?.[0]?.id ??
         null)
       : null;
   useEffect(() => {
-    if (scenes && !scopePending && !scenesError && savedSceneId !== sceneId)
+    if (
+      !params.get("scene") &&
+      (!scriptFilter || context.data) &&
+      scenes &&
+      !scopePending &&
+      !scenesError &&
+      savedSceneId !== sceneId
+    )
       setSceneId(sceneId);
-  }, [scenes, sceneId, savedSceneId, scopePending, scenesError, setSceneId]);
+  }, [
+    scenes,
+    sceneId,
+    savedSceneId,
+    scopePending,
+    scenesError,
+    setSceneId,
+    params,
+    scriptFilter,
+    context.data,
+  ]);
   const scene = scenes?.find((s) => s.id === sceneId) ?? null;
 
   const {
@@ -274,7 +323,8 @@ function StoryboardContent() {
       startBreakdown({
         projectId: projectId!,
         sceneId,
-        sceneName: scene.title || scene.code,
+        sceneName:
+          scene.title || (lang === "zh" ? "未命名场景" : "Untitled scene"),
       });
   };
 
@@ -311,7 +361,7 @@ function StoryboardContent() {
 
   return (
     <div className="flex min-h-full flex-col p-4 md:p-7 lg:p-8">
-      <div className="page-heading mb-6">
+      <div className="page-heading mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <Clapperboard className="h-5 w-5 text-primary" />
           <div>
@@ -325,6 +375,12 @@ function StoryboardContent() {
             </p>
           </div>
         </div>
+        <Link
+          className="studio-link shrink-0 text-xs"
+          to={`${base}/shots?view=status`}
+        >
+          {lang === "zh" ? "查看制作进度 →" : "Production progress →"}
+        </Link>
       </div>
 
       {(novelsQuery.isError || novelQuery.isError) && (
@@ -346,39 +402,63 @@ function StoryboardContent() {
 
       {/* 筛选 */}
       <div className="mb-5 flex shrink-0 flex-wrap items-center gap-2 border-b pb-4">
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Filter className="h-3.5 w-3.5" /> {tr("shots.filter")}
-        </span>
-        <select
-          aria-label={tr("shots.allNovels")}
+        <SelectField
+          label={lang === "zh" ? "选择剧本" : "Choose script"}
+          value={scriptFilter}
+          disabled={!context.data}
+          options={[
+            {
+              value: "",
+              label:
+                lang === "zh" ? "全部剧本与故事" : "All scripts and stories",
+            },
+            ...(context.data?.scripts || []).map((s) => ({
+              value: s.id,
+              label: s.title,
+            })),
+            {
+              value: "other",
+              label: lang === "zh" ? "其他来源的场景" : "Other scene sources",
+            },
+          ]}
+          onChange={(value) => {
+            setScriptFilter(value);
+            setNovelId("");
+            setChapterId("");
+            setSceneSearch("");
+          }}
+        />
+        <SelectField
+          label={tr("shots.allNovels")}
           value={novelId}
-          onChange={(e) => {
-            setNovelId(e.target.value);
+          onChange={(value) => {
+            setNovelId(value);
             setChapterId("");
           }}
-          className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-        >
-          <option value="">{tr("shots.allNovels")}</option>
-          {novels?.map((n) => (
-            <option key={n.id} value={n.id}>
-              {n.title || n.code}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={tr("shots.allChapters")}
-          value={chapterId}
-          onChange={(e) => setChapterId(e.target.value)}
-          disabled={!novelId}
-          className="h-8 rounded-md border border-border bg-bg px-2 text-sm disabled:opacity-50"
-        >
-          <option value="">{tr("shots.allChapters")}</option>
-          {chapters.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.title ?? tr("nar.chapterN").replace("{n}", String(c.ordinal))}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: tr("shots.allNovels") },
+            ...(novels || []).map((n) => ({
+              value: n.id,
+              label: n.title || "未命名故事",
+            })),
+          ]}
+        />
+        {novelId && (
+          <SelectField
+            label={tr("shots.allChapters")}
+            value={chapterId}
+            onChange={setChapterId}
+            options={[
+              { value: "", label: tr("shots.allChapters") },
+              ...chapters.map((c) => ({
+                value: c.id,
+                label:
+                  c.title ||
+                  tr("nar.chapterN").replace("{n}", String(c.ordinal)),
+              })),
+            ]}
+          />
+        )}
         {(novelId || chapterId) && (
           <button
             onClick={() => {
@@ -405,12 +485,12 @@ function StoryboardContent() {
             </span>
           </div>
           <div className="p-2">
-            <Input
-              aria-label={lang === "zh" ? "查找场景" : "Find scenes"}
+            <SearchField
+              className="w-full"
+              label={lang === "zh" ? "查找场景" : "Find scenes"}
               placeholder={lang === "zh" ? "查找场景…" : "Find scenes…"}
               value={sceneSearch}
-              onChange={(e) => setSceneSearch(e.target.value)}
-              className="h-8 text-xs"
+              onValueChange={(value) => setSceneSearch(value)}
             />
           </div>
           <div className="max-h-52 lg:max-h-[65vh] min-h-0 flex-1 space-y-1 overflow-auto p-2">
@@ -449,19 +529,25 @@ function StoryboardContent() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">
-                        {sc.title || sc.code}
+                        {sc.title ||
+                          (lang === "zh" ? "未命名场景" : "Untitled scene")}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-xs text-faint">
-                        <span className="font-code">{sc.code}</span>
-                        {sc.chapter_ordinal != null && (
-                          <span>
-                            ·{" "}
-                            {tr("nar.chapterN").replace(
-                              "{n}",
-                              String(sc.chapter_ordinal),
-                            )}
-                          </span>
-                        )}
+                        <span className="truncate">
+                          {context.data?.scenes[sc.id]?.script.title ||
+                            sc.novel_title ||
+                            (lang === "zh" ? "其他来源" : "Other source")}
+                        </span>
+                        {!context.data?.scenes[sc.id] &&
+                          sc.chapter_ordinal != null && (
+                            <span className="shrink-0 whitespace-nowrap">
+                              ·{" "}
+                              {tr("nar.chapterN").replace(
+                                "{n}",
+                                String(sc.chapter_ordinal),
+                              )}
+                            </span>
+                          )}
                       </div>
                     </div>
                     <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 font-code text-xs text-muted-foreground">
@@ -493,7 +579,10 @@ function StoryboardContent() {
         <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex min-h-14 flex-wrap shrink-0 items-center gap-2 border-b border-border p-3 text-sm font-medium">
             <span className="flex-1 truncate">
-              {scene ? scene.title || scene.code : tr("sb.selectScene")}
+              {scene
+                ? scene.title ||
+                  (lang === "zh" ? "未命名场景" : "Untitled scene")
+                : tr("sb.selectScene")}
             </span>
             <span
               role="status"
@@ -626,7 +715,9 @@ function StoryboardContent() {
                     <div className="space-y-3 p-3">
                       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                         <span className="font-code">
-                          {String(i + 1).padStart(2, "0")} · {s.code}
+                          {lang === "zh"
+                            ? `第 ${i + 1} 个镜头`
+                            : `Shot ${i + 1}`}
                         </span>
                         <span>
                           {sbVal(s, "duration_sec")
@@ -636,9 +727,19 @@ function StoryboardContent() {
                               : "No duration"}
                         </span>
                       </div>
-                      <h3 className="truncate text-sm font-medium">
-                        {s.title || s.code}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {s.title ||
+                            (lang === "zh" ? "未命名镜头" : "Untitled shot")}
+                        </h3>
+                        <button
+                          className="studio-icon-button"
+                          aria-label={`${lang === "zh" ? "重命名镜头" : "Rename shot"} ${s.title || ""}`}
+                          onClick={() => setRenaming(s)}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
                       <p className="line-clamp-2 min-h-10 break-words text-xs leading-5 text-muted-foreground">
                         {s.description ||
                           (lang === "zh"
@@ -721,7 +822,9 @@ function StoryboardContent() {
                             <GripVertical className="h-4 w-4 cursor-grab" />
                           </span>
                           <span className="flex-1 font-code text-xs">
-                            {String(i + 1).padStart(2, "0")} · {s.code}
+                            {lang === "zh"
+                              ? `第 ${i + 1} 个镜头`
+                              : `Shot ${i + 1}`}
                           </span>
                           <button
                             disabled={i === 0 || reorder.isPending}
@@ -759,12 +862,16 @@ function StoryboardContent() {
                         <div className="flex items-center gap-2">
                           <Input
                             aria-label={tr("sb.shotTitle")}
+                            maxLength={255}
                             defaultValue={s.title ?? ""}
                             onBlur={(e) => {
-                              if (e.target.value !== (s.title ?? ""))
+                              if (
+                                e.target.value.trim() &&
+                                e.target.value.trim() !== (s.title ?? "")
+                              )
                                 patchShot.mutate({
                                   id: s.id,
-                                  body: { title: e.target.value },
+                                  body: { title: e.target.value.trim() },
                                 });
                             }}
                             placeholder={tr("sb.shotTitle")}
@@ -812,20 +919,19 @@ function StoryboardContent() {
                         {/* 分镜规格下拉 */}
                         <div className="flex flex-wrap gap-1.5">
                           {SELECTS.map((f) => (
-                            <select
+                            <SelectField
                               key={f.key}
-                              value={sbVal(s, f.key)}
-                              onChange={(e) => setSb(s, f.key, e.target.value)}
-                              title={label(f, lang)}
-                              className="h-7 rounded-md border border-border bg-bg px-1.5 text-xs"
-                            >
-                              <option value="">{label(f, lang)}</option>
-                              {f.options.map((o) => (
-                                <option key={o.v} value={o.v}>
-                                  {label(o, lang)}
-                                </option>
-                              ))}
-                            </select>
+                              label={label(f, lang)}
+                              value={String(sbVal(s, f.key))}
+                              onChange={(value) => setSb(s, f.key, value)}
+                              options={[
+                                { value: "", label: label(f, lang) },
+                                ...f.options.map((o) => ({
+                                  value: o.v,
+                                  label: label(o, lang),
+                                })),
+                              ]}
+                            />
                           ))}
                         </div>
 
@@ -877,10 +983,19 @@ function StoryboardContent() {
           </div>
         </div>
       </div>
+      {renaming && (
+        <ShotNameDialog
+          projectId={projectId!}
+          shot={renaming}
+          onClose={() => setRenaming(null)}
+        />
+      )}
       {preview && (
         <Modal
           open
-          title={preview.title || preview.code}
+          title={
+            preview.title || (lang === "zh" ? "未命名镜头" : "Untitled shot")
+          }
           onClose={() => setPreview(null)}
           width={960}
         >
@@ -890,7 +1005,7 @@ function StoryboardContent() {
             </div>
             <div className="min-w-0 space-y-3">
               <p className="text-xs text-muted-foreground">
-                {preview.code} · {tr(`status.${preview.production_status}`)}
+                {scene?.title} · {tr(`status.${preview.production_status}`)}
               </p>
               <p className="whitespace-pre-wrap break-words text-sm leading-7">
                 {preview.description}

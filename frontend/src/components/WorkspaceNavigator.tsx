@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { ArrowUpRight, Search, X } from "lucide-react";
+import { ArrowUpRight, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDialogFocus } from "@/components/ui/useDialogFocus";
 import { WORKSPACE_DESTINATIONS } from "@/lib/workspace-navigation";
 import { useI18n } from "@/lib/i18n";
+import { SearchField } from "@/components/ui/search-field";
 
 export function WorkspaceNavigator({
   projectId,
@@ -37,45 +38,41 @@ export function WorkspaceNavigator({
         aria-labelledby="navigator-title"
         className="w-full max-w-xl overflow-hidden rounded-2xl border bg-card shadow-2xl"
       >
-        <div className="flex items-center gap-3 border-b p-4">
-          <Search className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <h2
-              id="navigator-title"
-              className="mb-1 text-xs text-muted-foreground"
-            >
+        <div className="border-b p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 id="navigator-title" className="text-sm font-medium">
               {zh
                 ? "快速导航 · 当前项目"
                 : "Quick navigation · current project"}
             </h2>
-            <input
-              autoFocus
-              aria-label={zh ? "查找功能" : "Find a tool"}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={
-                zh
-                  ? "前往素材、分镜、剪辑、模型设置…"
-                  : "Find assets, storyboard, editing, settings…"
-              }
-              className="w-full bg-transparent text-sm outline-none"
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  ref.current
-                    ?.querySelector<HTMLAnchorElement>("[data-destination]")
-                    ?.focus();
-                }
-              }}
-            />
+            <button
+              onClick={onClose}
+              aria-label={zh ? "关闭快速导航" : "Close quick navigation"}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-elevated"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            aria-label={zh ? "关闭快速导航" : "Close quick navigation"}
-            className="rounded-lg p-2 text-muted-foreground hover:bg-elevated"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <SearchField
+            autoFocus
+            data-autofocus
+            label={zh ? "查找功能" : "Find a tool"}
+            value={search}
+            onValueChange={setSearch}
+            placeholder={
+              zh
+                ? "前往素材、分镜、剪辑、模型设置…"
+                : "Find assets, storyboard, editing, settings…"
+            }
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                ref.current
+                  ?.querySelector<HTMLAnchorElement>("[data-destination]")
+                  ?.focus();
+              }
+            }}
+          />
         </div>
         <div
           className="max-h-[52vh] overflow-y-auto p-2"
@@ -101,7 +98,7 @@ export function WorkspaceNavigator({
             <Link
               key={item.to}
               data-destination
-              to={`/projects/${projectId}/${item.to}`}
+              to={`/projects/${projectId}/${item.to}${item.to === "shots" ? "?view=status" : ""}`}
               onClick={onClose}
               className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm hover:bg-elevated focus-visible:bg-elevated"
             >
@@ -123,8 +120,8 @@ export function WorkspaceNavigator({
         </div>
         <p className="border-t px-4 py-3 text-xs text-faint">
           {zh
-            ? "↑ ↓ 选择 · Enter 打开 · Esc 关闭。这里查找功能入口。"
-            : "↑ ↓ select · Enter open · Esc close. Search workspace tools here."}
+            ? "↑ ↓ 选择 · Enter 打开 · 输入时 Esc 清空，再按关闭"
+            : "↑ ↓ select · Enter open · Esc clears the search, then closes"}
         </p>
       </div>
     </div>

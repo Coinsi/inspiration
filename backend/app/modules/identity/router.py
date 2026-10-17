@@ -145,6 +145,20 @@ def upload_cover(
     return covers.change(db, ctx, file)
 
 
+@router.post("/projects/{project_id}/profile", response_model=schemas.ProjectOut, tags=["project"])
+def update_project_profile(
+    name: str = Form(..., min_length=1, max_length=255, pattern=r"\S"),
+    description: str = Form("", max_length=10000),
+    remove_cover: bool = Form(False),
+    file: UploadFile | None = File(None),
+    ctx: ProjectContext = Depends(require_action("project.manage")),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.identity import covers
+
+    return covers.update_profile(db, ctx, name, description, file, remove_cover)
+
+
 @router.delete("/projects/{project_id}/cover", response_model=schemas.ProjectOut, tags=["project"])
 def remove_cover(
     ctx: ProjectContext = Depends(require_action("project.manage")),

@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -85,22 +87,22 @@ export function ImageReferencePicker({
             : "Only selected, resized previews are sent"}
         </span>
       </div>
-      <input
-        className="h-9 w-full rounded-md border bg-bg px-3 text-sm"
-        aria-label={zh ? "查找参考资产" : "Find reference assets"}
+      <SearchField
+        className="w-full"
+        label={zh ? "查找参考资产" : "Find reference assets"}
         placeholder={
           zh ? "查找角色、场景或道具…" : "Find characters, scenes or props…"
         }
         value={search}
         disabled={disabled}
-        onChange={(e) => setSearch(e.target.value)}
+        onValueChange={(value) => setSearch(value)}
       />
-      <select
+      <StudioSelect
         aria-label={zh ? "参考图来源" : "Reference source"}
         className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
         value={assetId}
         disabled={disabled}
-        onChange={(e) => setAssetId(e.target.value)}
+        onValueChange={(selectedValue) => setAssetId(selectedValue)}
       >
         <option value="">
           {zh ? "当前对象的图片" : "Images from this object"}
@@ -118,7 +120,7 @@ export function ImageReferencePicker({
               {a.name} · {a.code}
             </option>
           ))}
-      </select>
+      </StudioSelect>
       {assets.isError && (
         <p role="alert" className="text-xs text-danger">
           {zh ? "资产列表加载失败" : "Asset list unavailable"}{" "}

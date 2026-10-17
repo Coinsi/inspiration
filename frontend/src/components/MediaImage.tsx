@@ -8,38 +8,66 @@ export function MediaImage({
   src,
   alt,
   className,
+  onDimensions,
 }: {
   src?: string | null;
   alt: string;
   className?: string;
+  onDimensions?: (width: number, height: number) => void;
 }) {
-  return <MediaImageContent key={src ?? "empty"} src={src} alt={alt} className={className} />;
+  return (
+    <MediaImageContent
+      key={src ?? "empty"}
+      src={src}
+      alt={alt}
+      className={className}
+      onDimensions={onDimensions}
+    />
+  );
 }
 function MediaImageContent({
   src,
   alt,
   className,
+  onDimensions,
 }: {
   src?: string | null;
   alt: string;
   className?: string;
+  onDimensions?: (width: number, height: number) => void;
 }) {
   const { lang } = useI18n();
-  const [state, setState] = useState<"loading" | "loaded" | "error">(src ? "loading" : "error");
+  const [state, setState] = useState<"loading" | "loaded" | "error">(
+    src ? "loading" : "error",
+  );
   useEffect(() => {
     if (!src || state !== "loading") return;
     const timer = window.setTimeout(() => setState("error"), 12000);
     return () => window.clearTimeout(timer);
   }, [src, state]);
   return (
-    <div className={cn("relative h-full w-full overflow-hidden bg-elevated", className)}>
+    <div
+      className={cn(
+        "relative h-full w-full overflow-hidden bg-elevated",
+        className,
+      )}
+    >
       {src && (
         <img
           src={src}
           alt={alt}
-          onLoad={() => setState("loaded")}
+          onLoad={(e) => {
+            setState("loaded");
+            onDimensions?.(
+              e.currentTarget.naturalWidth,
+              e.currentTarget.naturalHeight,
+            );
+          }}
           onError={() => setState("error")}
-          className={cn("h-full w-full object-cover", state !== "loaded" && "opacity-0")}
+          className={cn(
+            "h-full w-full object-cover",
+            state !== "loaded" && "opacity-0",
+          )}
         />
       )}
       {state !== "loaded" && (

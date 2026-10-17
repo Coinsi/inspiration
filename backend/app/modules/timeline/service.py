@@ -79,7 +79,7 @@ def _replace_items(db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, ite
         ti = TimelineItem(
             timeline_id=t.id,
             shot_id=it.shot_id,
-            generation_id=it.generation_id,
+            generation_id=it.generation_id or validate_target(db, ctx.project.id, "shot", it.shot_id).selected_generation_id,
             ordinal=i,
             in_point_ms=it.in_point_ms,
             out_point_ms=it.out_point_ms,

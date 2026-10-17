@@ -143,7 +143,7 @@
 .settings-row p {
   margin-top: 5px;
 }
-.settings-row select {
+.settings-row .studio-select-trigger {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--bg));

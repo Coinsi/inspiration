@@ -1,8 +1,11 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Activity,
+  ArrowLeft,
   ArrowUpRight,
   Clock3,
   Download,
@@ -10,7 +13,6 @@ import {
   Image,
   Music2,
   RefreshCw,
-  Search,
   X,
 } from "lucide-react";
 import { api, blobUrl, downloadBlob, type GenJob } from "@/lib/api";
@@ -21,6 +23,7 @@ import {
   mediaExtension,
   taskLabel,
   taskSource,
+  taskError,
   type TaskCatalog,
   type TaskWorkspace,
 } from "@/lib/task-center";
@@ -31,6 +34,7 @@ import { MediaPreview } from "@/components/MediaPreview";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm";
 import { useI18n } from "@/lib/i18n";
+import { ActivityDetail } from "@/components/ActivityDetail";
 import "./tasks.css";
 
 export default function Tasks() {
@@ -48,7 +52,10 @@ function TaskPage({ projectId }: { projectId: string }) {
       4166,
       Math.max(0, Math.floor(Number(search.get("page")) || 0)),
     ),
-    open = search.get("job") || "";
+    open = search.get("job") || search.get("task") || "",
+    kind = search.get("job")
+      ? "generation"
+      : search.get("kind") || "generation";
   const [draft, setDraft] = useState(term),
     detailRef = useRef<HTMLElement>(null);
   useEffect(() => setDraft(term), [term]);
@@ -60,6 +67,12 @@ function TaskPage({ projectId }: { projectId: string }) {
     confirm = useConfirm(),
     qc = useQueryClient(),
     base = `/projects/${projectId}`;
+  const returnTo = search.get("return")?.startsWith(`${base}/`)
+    ? search.get("return")!
+    : "";
+  const fromConversation =
+    returnTo.split("?")[0] === `${base}/workbench` &&
+    new URLSearchParams(returnTo.split("?")[1]).has("conversation");
   const navigate = (patch: Record<string, string>) =>
     setSearch((previous) => {
       const next = new URLSearchParams(previous);
@@ -67,20 +80,32 @@ function TaskPage({ projectId }: { projectId: string }) {
         if (value) next.set(key, value);
         else next.delete(key);
       }
+      if (
+        ["status", "operation", "search", "page"].some((key) => key in patch)
+      ) {
+        next.delete("job");
+        next.delete("task");
+        next.delete("kind");
+      }
       return next;
     });
-  const select = (id: string) => navigate({ job: id });
+  const select = (id: string, taskKind = "generation") =>
+    navigate({
+      job: taskKind === "generation" ? id : "",
+      task: taskKind !== "generation" ? id : "",
+      kind: taskKind !== "generation" ? taskKind : "",
+    });
   const query = useQuery({
     queryKey: ["jobs", projectId, "catalog", status, operation, term, page],
     queryFn: () =>
       api.get<TaskCatalog>(
-        `${base}/jobs/catalog?${new URLSearchParams({ status, operation, search: term, offset: String(page * 24), limit: "24" })}`,
+        `${base}/activity?${new URLSearchParams({ status, operation, search: term, offset: String(page * 24), limit: "24" })}`,
       ),
     refetchInterval: 5000,
   });
   const detail = useQuery({
     queryKey: ["task-workspace", projectId, open],
-    enabled: !!open,
+    enabled: !!open && kind === "generation",
     queryFn: () => api.get<TaskWorkspace>(`${base}/jobs/${open}/workspace`),
     refetchInterval: (q) =>
       q.state.data &&
@@ -131,6 +156,15 @@ function TaskPage({ projectId }: { projectId: string }) {
   const filters = [
     { key: "", label: zh ? "全部" : "All", count: all },
     {
+      key: "attention",
+      label: zh ? "需要处理" : "Needs attention",
+      count: counts
+        ? (counts.failed || 0) +
+          (counts.paused || 0) +
+          (counts.needs_review || 0)
+        : undefined,
+    },
+    {
       key: "active",
       label: zh ? "进行中" : "In progress",
       count: counts
@@ -155,6 +189,18 @@ function TaskPage({ projectId }: { projectId: string }) {
   ];
   return (
     <div className="task-page">
+      {returnTo && (
+        <div className="task-return-bar">
+          <Link to={returnTo}>
+            <ArrowLeft size={16} />
+            {zh
+              ? fromConversation
+                ? "返回对话"
+                : "返回创作"
+              : "Back to creation"}
+          </Link>
+        </div>
+      )}
       <header className="task-page-header">
         <div>
           <span className="task-eyebrow">
@@ -166,7 +212,7 @@ function TaskPage({ projectId }: { projectId: string }) {
           </h1>
           <p>
             {zh
-              ? "查看生成与导出进度，找回结果，接着创作。"
+              ? "所有创作进度、保存结果和恢复入口，在这里找到。"
               : "Track generation and exports, find results, and continue creating."}
           </p>
         </div>
@@ -175,7 +221,10 @@ function TaskPage({ projectId }: { projectId: string }) {
           disabled={query.isFetching}
           onClick={() => {
             void query.refetch();
-            if (open) void detail.refetch();
+            if (open && kind === "generation") void detail.refetch();
+            void qc.invalidateQueries({
+              queryKey: ["activity-detail", projectId],
+            });
           }}
         >
           <RefreshCw
@@ -185,22 +234,6 @@ function TaskPage({ projectId }: { projectId: string }) {
           {zh ? "刷新任务" : "Refresh tasks"}
         </Button>
       </header>
-      <nav
-        className="task-related"
-        aria-label={zh ? "其他创作任务" : "Other creative tasks"}
-      >
-        {[
-          ["transcriptions", zh ? "转写与字幕" : "Transcription"],
-          ["canvas", zh ? "画布运行" : "Canvas runs"],
-          ["agent", zh ? "创作助理" : "Assistant"],
-          ["library", zh ? "素材处理" : "Library processing"],
-        ].map(([path, label]) => (
-          <Link key={path} to={`${base}/${path}`}>
-            {label}
-            <ArrowUpRight size={12} />
-          </Link>
-        ))}
-      </nav>
       <div className="task-toolbar">
         <form
           onSubmit={(e) => {
@@ -208,24 +241,29 @@ function TaskPage({ projectId }: { projectId: string }) {
             navigate({ search: draft.trim(), page: "" });
           }}
         >
-          <Search size={16} />
-          <input
-            aria-label={zh ? "搜索任务" : "Search tasks"}
+          <SearchField
+            label={zh ? "搜索任务" : "Search tasks"}
             placeholder={
               zh
-                ? "搜索镜头、资产、时间线或任务编号"
+                ? "搜索创作、素材或任务编号"
                 : "Search source names or task IDs"
             }
             value={draft}
             maxLength={200}
-            onChange={(e) => setDraft(e.target.value)}
+            onValueChange={setDraft}
+            onClear={() => navigate({ search: "", page: "" })}
+            className="flex-1"
           />
-          <button type="submit">{zh ? "搜索" : "Search"}</button>
+          <Button type="submit" variant="outline">
+            {zh ? "搜索" : "Search"}
+          </Button>
         </form>
-        <select
+        <StudioSelect
           aria-label={zh ? "任务类型" : "Task type"}
           value={operation}
-          onChange={(e) => navigate({ operation: e.target.value, page: "" })}
+          onValueChange={(selectedValue) =>
+            navigate({ operation: selectedValue, page: "" })
+          }
         >
           <option value="">{zh ? "全部任务类型" : "All task types"}</option>
           {Object.entries(OPERATIONS).map(([key, label]) => (
@@ -233,7 +271,7 @@ function TaskPage({ projectId }: { projectId: string }) {
               {label[zh ? 0 : 1]}
             </option>
           ))}
-        </select>
+        </StudioSelect>
         {(term || operation || status) && (
           <button
             className="task-reset"
@@ -306,7 +344,7 @@ function TaskPage({ projectId }: { projectId: string }) {
                 {zh
                   ? term || status || operation
                     ? "调整搜索或筛选条件后再试。"
-                    : "镜头生成、素材上传和成片导出会保留在这里。"
+                    : "对话、生成、画布、素材处理与导出记录都会保留在这里。"
                   : "Generate media or adjust your filters."}
               </p>
               {page > 0 ? (
@@ -325,14 +363,16 @@ function TaskPage({ projectId }: { projectId: string }) {
           )}
           {query.data?.items.map((j) => (
             <button
-              key={j.id}
+              key={`${j.kind}:${j.id}`}
               data-task-id={j.id}
               className={`task-row ${open === j.id ? "is-selected" : ""}`}
               aria-pressed={open === j.id}
-              onClick={() => select(j.id)}
+              onClick={() => select(j.id, j.kind)}
             >
               <span className={`task-type-icon status-${j.status}`}>
-                {j.operation === "render" || j.request_type === "video" ? (
+                {j.kind !== "generation" ? (
+                  <Activity />
+                ) : j.operation === "render" || j.request_type === "video" ? (
                   <Film />
                 ) : j.request_type === "audio" ? (
                   <Music2 />
@@ -354,13 +394,15 @@ function TaskPage({ projectId }: { projectId: string }) {
                   )}
                 </h3>
                 <p className={j.error ? "text-danger" : ""}>
-                  {j.error ||
+                  {(j.error ? taskError(j.error, zh) : null) ||
                     (j.has_warnings
                       ? zh
                         ? "结果参数有差异，查看详情"
                         : "Result parameters differ; view details"
                       : j.last_event) ||
-                    (zh ? "暂无执行日志" : "No event log")}
+                    (zh
+                      ? "查看结果、影响范围与恢复方式"
+                      : "View results, scope and recovery")}
                 </p>
                 <footer>
                   <span>
@@ -443,6 +485,13 @@ function TaskPage({ projectId }: { projectId: string }) {
                   : "Choose a task to inspect its results and activity."}
               </p>
             </div>
+          ) : kind !== "generation" ? (
+            <ActivityDetail
+              key={`${kind}:${open}`}
+              projectId={projectId}
+              kind={kind}
+              id={open}
+            />
           ) : detail.error ? (
             <div role="alert" className="task-error">
               {(detail.error as Error).message}
@@ -489,6 +538,13 @@ function TaskDetail({
     { summary: s, job: j } = data,
     [index, setIndex] = useState(0),
     toast = useToast();
+  const [originParams] = useSearchParams();
+  const conversationOrigin = originParams.get("return");
+  const materialReturn = conversationOrigin?.startsWith(
+    `/projects/${projectId}/workbench?`,
+  )
+    ? conversationOrigin
+    : `/projects/${projectId}/tasks?${originParams}`;
   const result =
       data.outputs[Math.min(index, Math.max(0, data.outputs.length - 1))],
     source = s.target_available
@@ -530,7 +586,11 @@ function TaskDetail({
           aria-label={zh ? "任务结果" : "Task results"}
         >
           <div className="task-output-screen">
-            {result.output_type === "video" ? (
+            {result.provider === "mock" ? (
+              <p className="task-result-empty">
+                离线测试占位内容，不是真实模型生成结果。
+              </p>
+            ) : result.output_type === "video" ? (
               <MediaVideo
                 presentation="studio"
                 src={blobUrl(projectId, result.output_blob_hash!)}
@@ -598,6 +658,47 @@ function TaskDetail({
           </span>
         </div>
       )}
+      {result &&
+      j.status === "succeeded" &&
+      result.output_type !== "audio" &&
+      !["upload", "local", "library"].includes(result.provider) ? (
+        <section className="activity-section">
+          <h4>结果与采用</h4>
+          <p>结果已保存到素材库。生成与重试不会自动替换作品中已采用的画面。</p>
+          <Link
+            className="task-source-link"
+            to={`/projects/${projectId}/materials?generation=${result.id}&return=${encodeURIComponent(materialReturn)}`}
+          >
+            查看素材与采用位置
+            <ArrowUpRight size={14} />
+          </Link>
+        </section>
+      ) : result ? (
+        <p className="text-sm text-muted-foreground">
+          结果保留在当前任务，可下载或回到创作位置继续使用。
+        </p>
+      ) : null}
+      {!!data.changes?.length && (
+        <section className="activity-section">
+          <h4>采用修改记录</h4>
+          <ol className="activity-history">
+            {data.changes.map((change) => (
+              <li key={change.id}>
+                <span>
+                  {change.replaced ? "替换采用画面" : "采用画面"} ·{" "}
+                  {change.target.path ? (
+                    <Link to={change.target.path}>{change.target.label} ↗</Link>
+                  ) : (
+                    change.target.label
+                  )}
+                </span>
+                <time>{new Date(change.at).toLocaleString()}</time>
+              </li>
+            ))}
+          </ol>
+          {data.more_changes && <p>显示最近 30 条修改。</p>}
+        </section>
+      )}
       {!!j.routing_state?.attempts?.length && (
         <section className="rounded-xl border border-border p-4 space-y-3">
           <h4 className="text-sm font-medium">模型调用记录</h4>
@@ -642,7 +743,7 @@ function TaskDetail({
       )}
       {j.error && (
         <p role="alert" className="task-error">
-          {j.error}
+          {taskError(j.error, zh)}
         </p>
       )}
       {j.cost_raw?.warnings?.map((w, i) => (
@@ -729,6 +830,12 @@ function TaskDetail({
           {zh ? "任务信息与原始输入" : "Task information & original input"}
         </summary>
         <dl>
+          {j.error && (
+            <>
+              <dt>{zh ? "原始错误" : "Original error"}</dt>
+              <dd>{j.error}</dd>
+            </>
+          )}
           <dt>{zh ? "任务编号" : "Task ID"}</dt>
           <dd>{j.id}</dd>
           <dt>{zh ? "预估 / 记录点数" : "Estimated / recorded points"}</dt>

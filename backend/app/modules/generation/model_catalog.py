@@ -270,7 +270,12 @@ def select_default(db, ctx, data):
             (
                 m
                 for m in rows(db, ctx.project.id)
-                if any(r["profile_id"] == str(data.id) for r in m.definition.get("routes", []))
+                if m.enabled
+                and m.modality == profile.config.get("modality")
+                and any(
+                    r["profile_id"] == str(data.id) and r.get("enabled", True)
+                    for r in m.definition.get("routes", [])
+                )
             ),
             None,
         )
@@ -373,7 +378,7 @@ def plan(db, row, req):
     for c in candidates:
         caps = Capabilities(**c["capabilities"])
         reason = mismatch(req, caps)
-        if c["model_profile"].get("protocol") == "openai_video" and req.count != 1:
+        if c["model_profile"].get("protocol") in ("openai_video", "video_v1") and req.count != 1:
             reason = "该视频协议每次只生成一个视频"
         if not reason:
             from app.adapters.contracts import generation_registry

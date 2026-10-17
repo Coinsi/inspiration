@@ -240,7 +240,7 @@ function ProjectPane({
               <p>{project.data.description || "还没有填写项目简介"}</p>
               {admin && (
                 <Button variant="outline" onClick={() => setCover(true)}>
-                  管理项目封面
+                  编辑项目资料
                 </Button>
               )}
             </div>

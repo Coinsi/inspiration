@@ -16,6 +16,7 @@ from app.modules.director.router import router as director_router
 from app.modules.evidence.router import router as evidence_router
 from app.modules.transcription.router import router as transcription_router
 from app.modules.agent.router import router as agent_router
+from app.modules.conversation.router import router as conversation_router
 from app.modules.canvas.router import router as canvas_router
 from app.modules.asset.router import router as asset_router
 from app.modules.assist.router import router as assist_router
@@ -36,16 +37,21 @@ from app.modules.timeline.router import router as timeline_router
 
 @asynccontextmanager
 async def lifespan(app):
+    from app.core.health import background_workers
+
+    background_workers.clear()
     processing_stop = None
     if settings.library_processing_enabled:
         from app.modules.library.processing_worker import start as start_processing
 
         processing_stop = start_processing()
+        background_workers["media_processing"] = processing_stop.is_alive
     library_stop = None
     if settings.library_worker_enabled:
         from app.modules.library.worker import start
 
         library_stop = start()
+        background_workers["library"] = library_stop.is_alive
     if settings.generation_executor == "local" and not settings.celery_eager:
         from app.modules.generation.jobs import recover_local
 
@@ -55,13 +61,16 @@ async def lifespan(app):
     if settings.transcription_worker_enabled:
         from app.modules.transcription.worker import start as start_transcription
         transcription_stop = start_transcription()
+        background_workers["transcription"] = transcription_stop.is_alive
     if settings.agent_worker_enabled:
         from app.modules.agent.worker import start as start_agent
         agent_stop = start_agent()
+        background_workers["agent"] = agent_stop.is_alive
     canvas_stop = None
     if settings.canvas_worker_enabled:
         from app.modules.canvas.worker import start as start_canvas
         canvas_stop = start_canvas()
+        background_workers["canvas"] = canvas_stop.is_alive
     try:
         yield
     finally:
@@ -75,6 +84,7 @@ async def lifespan(app):
             await to_thread(canvas_stop)
         if library_stop:
             await to_thread(library_stop)
+        background_workers.clear()
 
 
 app = FastAPI(
@@ -107,6 +117,11 @@ app.include_router(director_router, prefix="/api/v1")
 app.include_router(evidence_router, prefix="/api/v1")
 app.include_router(transcription_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
+app.include_router(conversation_router, prefix="/api/v1")
+from app.modules.conversation.works import router as works_router
+app.include_router(works_router, prefix="/api/v1")
+from app.modules.activity.router import router as activity_router
+app.include_router(activity_router, prefix="/api/v1")
 app.include_router(canvas_router, prefix="/api/v1")
 app.include_router(asset_router, prefix="/api/v1")
 app.include_router(narrative_router, prefix="/api/v1")

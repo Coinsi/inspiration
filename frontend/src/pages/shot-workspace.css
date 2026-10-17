@@ -26,22 +26,7 @@
   font-size: 13px;
   padding: 5px 9px;
 }
-.shot-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid hsl(var(--border));
-  padding: 8px;
-  border-radius: 9px;
-  color: hsl(var(--muted));
-}
-.shot-search input {
-  background: transparent;
-  outline: none;
-  width: 100%;
-  min-width: 0;
-  font-size: 12px;
-}
+
 .shot-rail-list {
   overflow-y: auto;
   min-height: 0;
@@ -192,8 +177,8 @@
   gap: 10px;
   margin: 14px 0;
 }
-.reference-tools input,
-.reference-tools select {
+.reference-tools > input,
+.reference-tools .studio-select-trigger {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--bg));
@@ -201,7 +186,7 @@
   min-width: 0;
   font-size: 13px;
 }
-.reference-tools input {
+.reference-tools > .search-field {
   flex: 1;
 }
 @media (min-width: 1100px) {
@@ -252,4 +237,72 @@
     padding-bottom: 8px;
     gap: 8px;
   }
+}
+.shot-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 0;
+  flex-shrink: 0;
+}
+.shot-title-row h2 {
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.shot-context-path {
+  font-size: 12px;
+  line-height: 1.7;
+  color: hsl(var(--muted));
+  padding: 8px 16px 0;
+  flex-shrink: 0;
+}
+.shot-scope-heading {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.shot-scope-heading > span {
+  font-size: 12px;
+  line-height: 1.7;
+  color: hsl(var(--muted));
+  overflow-wrap: anywhere;
+}
+.generation-default-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.generation-default-summary > div:first-child {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+}
+.generation-default-summary span,
+.generation-default-summary small {
+  font-size: 11px;
+  color: hsl(var(--muted));
+}
+.generation-default-summary strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.generation-settings-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+.generation-settings-fields[hidden] {
+  display: none;
+}
+
+.shot-creation-main .generation-parameters {
+  order: 0;
+  padding-top: 0;
+  border-top: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid hsl(var(--border) / 0.65);
 }

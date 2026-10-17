@@ -7,7 +7,7 @@ from PIL import Image
 from sqlalchemy import select, text
 
 from app.core import audit
-from app.core.errors import CapabilityUnsupported, Conflict
+from app.core.errors import CapabilityUnsupported, Conflict, Forbidden
 from app.models.identity import Project
 from app.modules.identity import schemas, service
 from app.storage import cas
@@ -80,6 +80,39 @@ def change(db, ctx, file=None):
         target_type="project",
         target_id=project.id,
         detail={"cover": project.cover_blob_hash},
+    )
+    db.flush()
+    return project
+
+
+def update_profile(db, ctx, name, description, file=None, remove_cover=False):
+    """Save project details and an optional cover change in one transaction."""
+    if file is not None and remove_cover:
+        raise CapabilityUnsupported("更换与移除封面不能同时提交")
+    data = read_cover(file)
+    payload = schemas.ProjectIn(name=name, description=description.strip() or None)
+    project = db.scalar(
+        select(Project)
+        .where(Project.id == ctx.project.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None or project.deleted_at is not None:
+        raise Forbidden("项目不存在或无权访问")
+    project.name = payload.name
+    project.description = payload.description
+    if file is not None:
+        project.cover_blob_hash = store(db, data)
+    elif remove_cover:
+        project.cover_blob_hash = None
+    audit.record(
+        db,
+        action="project.update",
+        user_id=ctx.user.id,
+        project_id=project.id,
+        target_type="project",
+        target_id=project.id,
+        detail={"name": project.name, "cover_changed": file is not None or remove_cover},
     )
     db.flush()
     return project

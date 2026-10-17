@@ -1,0 +1,228 @@
+.library-viewer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 12px 12px;
+}
+.library-viewer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  height: min(680px, calc(90dvh - 58px));
+  min-height: 0;
+}
+.library-viewer-media {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--bg));
+}
+.library-preview-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+}
+.library-preview-stage > div {
+  width: 100%;
+  max-height: 100%;
+}
+.library-preview-stage .library-image-preview {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.library-preview-stage .library-image-plane {
+  height: 100%;
+}
+.library-preview-stage img {
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.library-preview-stage video {
+  max-height: calc(90dvh - 230px);
+  object-fit: contain;
+}
+.library-preview-caption {
+  min-height: 48px;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 20px;
+  color: hsl(var(--muted));
+  font-size: 11px;
+}
+.library-viewer-info {
+  min-width: 0;
+  overflow-y: auto;
+  border-left: 1px solid hsl(var(--border));
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.library-viewer-heading > span {
+  font-size: 11px;
+  color: hsl(var(--muted));
+}
+.library-viewer-heading h3 {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.library-version-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.library-viewer-facts {
+  display: grid;
+  gap: 12px;
+  font-size: 12px;
+}
+.library-viewer-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.library-viewer-facts dt {
+  color: hsl(var(--muted));
+}
+.library-viewer-facts dd {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.library-viewer-actions {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+.library-download {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  min-height: 36px;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+.library-download:hover {
+  background: hsl(var(--elevated));
+}
+.library-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  color: hsl(var(--muted));
+}
+.library-preview-empty p {
+  font-size: 14px;
+}
+.library-preview-empty span {
+  font-size: 12px;
+}
+.library-use-panel[hidden] {
+  display: none;
+}
+.library-use-panel {
+  min-width: 0;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 20px;
+}
+@media (max-width: 760px) {
+  .library-viewer-body {
+    overflow-y: auto;
+  }
+  .library-viewer {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+  }
+  .library-viewer-media {
+    flex-shrink: 0;
+  }
+  .library-preview-stage {
+    height: 36dvh;
+    flex: none;
+    padding: 16px;
+  }
+  .library-preview-stage video {
+    max-height: 24dvh;
+  }
+  .library-viewer-info {
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid hsl(var(--border));
+    padding: 20px;
+  }
+}
+.library-tool-list {
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 16px;
+}
+.library-tool-list h4 {
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--muted));
+  margin-bottom: 8px;
+}
+.library-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  color: hsl(var(--fg));
+  transition: background 0.15s;
+}
+.library-tool-row > span {
+  flex: 1;
+}
+.library-tool-row > svg {
+  flex-shrink: 0;
+  color: hsl(var(--muted));
+}
+.library-tool-row:hover {
+  background: hsl(var(--elevated));
+}
+.library-tool-row:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.library-annotation-source {
+  margin-bottom: 20px;
+  font-size: 12px;
+  color: hsl(var(--muted));
+  overflow-wrap: anywhere;
+}
+
+.library-original-filename dt {
+  flex-shrink: 0;
+}
+.library-original-filename dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

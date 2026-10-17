@@ -13,7 +13,7 @@ from app.models.generation import GenerationJob
 from app.modules.generation import model_catalog as catalog
 
 
-RESUMABLE_PROTOCOLS = {"openai_video", "ark_video", "minimax_video"}
+RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video"}
 
 
 class SubmissionRejected(ProviderError):

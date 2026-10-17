@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookMarked,
@@ -5,7 +7,6 @@ import {
   Loader2,
   Pencil,
   Plus,
-  Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -198,21 +199,19 @@ function StoryBibleWorkspace() {
         </div>
       </header>
       <div className="story-bible-tools">
-        <label className="story-search">
-          <Search size={16} />
-          <input
-            aria-label="搜索设定"
-            placeholder="搜索设定名称或内容"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </label>
-        <select
+        <SearchField
+          className="min-w-[180px] flex-1"
+          label="搜索设定"
+          placeholder="搜索设定名称或内容"
+          value={q}
+          onValueChange={(value) => setQ(value)}
+        />
+        <StudioSelect
           aria-label="设定来源小说"
           value={novelId ?? ""}
           disabled={startExtract.isPending || cancelExtract.isPending}
-          onChange={(e) => {
-            setNovelId(e.target.value || null);
+          onValueChange={(selectedValue) => {
+            setNovelId(selectedValue || null);
             clearFilters();
           }}
         >
@@ -222,7 +221,7 @@ function StoryBibleWorkspace() {
               {n.title}
             </option>
           ))}
-        </select>
+        </StudioSelect>
         <input
           aria-label="按来源章节筛选"
           aria-invalid={filterInvalid}
@@ -277,17 +276,19 @@ function StoryBibleWorkspace() {
             </label>
             <label>
               并行章节
-              <select
+              <StudioSelect
                 value={concurrency}
                 disabled={running || startExtract.isPending}
-                onChange={(e) => setConcurrency(Number(e.target.value))}
+                onValueChange={(selectedValue) =>
+                  setConcurrency(Number(selectedValue))
+                }
               >
                 {[1, 2, 4, 8].map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
             <Button
               disabled={
@@ -647,18 +648,18 @@ function SettingEditor({
         </label>
         <label>
           分类
-          <select
+          <StudioSelect
             aria-label="分类"
             value={category}
             disabled={busy}
-            onChange={(e) => setCategory(e.target.value)}
+            onValueChange={(selectedValue) => setCategory(selectedValue)}
           >
             {categories.map((c) => (
               <option key={c} value={c}>
                 {catLabel(c)}
               </option>
             ))}
-          </select>
+          </StudioSelect>
         </label>
         <label>
           设定正文

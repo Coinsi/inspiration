@@ -8,6 +8,7 @@ from app.core.deps import ProjectContext
 from app.core.errors import Conflict, Forbidden, NotFound
 from app.core.permissions import require
 from app.models.agent import AgentRun
+from app.models.conversation import ConversationMessage
 from app.models.identity import Membership, Project, User
 from app.modules.agent import tools
 from app.modules.assist.targets import get_adapter
@@ -22,6 +23,16 @@ def get_run(db, ctx, run_id, lock=False):
         q = q.with_for_update().execution_options(populate_existing=True)
     r = db.scalar(q)
     if not r:
+        raise NotFound("Agent 任务不存在")
+    linked = db.scalar(
+        select(ConversationMessage.id)
+        .where(
+            ConversationMessage.execution_kind == "project_agent",
+            ConversationMessage.execution_id == r.id,
+        )
+        .limit(1)
+    )
+    if linked and r.created_by != ctx.user.id:
         raise NotFound("Agent 任务不存在")
     return r
 
@@ -84,6 +95,7 @@ def create(db, ctx, data):
         return out(prior)
     if data.model_provider:
         from app.modules.generation.channels import selected_llm
+
         selected_llm(db, ctx.project.id, data.model_provider, user_id=ctx.user.id)
     for target in data.scope:
         adapter = get_adapter(target.target_type)
@@ -93,6 +105,7 @@ def create(db, ctx, data):
 
     if data.skill_versions:
         from app.modules.skill.service import selected_versions
+
         if {s.id for s in data.skill_versions} != set(data.skills):
             raise Conflict("所选技能与版本不一致，请重新选择")
         selected_skills = selected_versions(db, ctx.project.id, data.skill_versions)
@@ -174,12 +187,36 @@ def review(db, ctx, run_id, step_id, data):
     db.flush()
     if job:
         jobs.dispatch(db, job)
+    from app.modules.conversation.execution import publish
+
+    publish(db, r)
     return out(r)
 
 
 def control(db, ctx, run_id, data):
     r = get_run(db, ctx, run_id, True)
     owner(ctx, r)
+    if data.action == "resume":
+        from app.models.conversation import Conversation
+
+        message = db.scalar(
+            select(ConversationMessage).where(
+                ConversationMessage.execution_kind == "project_agent",
+                ConversationMessage.execution_id == r.id,
+            )
+        )
+        if message:
+            conversation = db.get(Conversation, message.conversation_id)
+            newer = db.scalar(
+                select(ConversationMessage.id)
+                .where(
+                    ConversationMessage.conversation_id == message.conversation_id,
+                    ConversationMessage.ordinal > message.ordinal,
+                )
+                .limit(1)
+            )
+            if conversation.archived_at or newer:
+                raise Conflict("旧任务或归档对话不能继续执行，请回到对话发送新的需求")
     if data.action == "pause":
         if r.status not in ("queued", "thinking", "running", "waiting_job"):
             raise Conflict("当前任务不能暂停")
@@ -224,6 +261,9 @@ def control(db, ctx, run_id, data):
         target_id=r.id,
     )
     db.flush()
+    from app.modules.conversation.execution import publish
+
+    publish(db, r)
     return out(r)
 
 

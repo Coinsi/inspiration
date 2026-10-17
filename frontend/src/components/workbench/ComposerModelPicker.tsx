@@ -1,3 +1,4 @@
+import { SearchField } from "@/components/ui/search-field";
 import { verificationLabel } from "../PersonalModelServices";
 import {
   useEffect,
@@ -7,13 +8,7 @@ import {
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Search,
-  Settings2,
-} from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Settings2 } from "lucide-react";
 import type { ProviderConfig } from "@/lib/api";
 import { ModelBrandIcon } from "./ModelBrandIcon";
 
@@ -47,8 +42,7 @@ function badges(model: ProviderConfig) {
 }
 function price(model: ProviderConfig) {
   const value = model.config.price as
-    | { mode?: string; amount?: number }
-    | undefined;
+    { mode?: string; amount?: number } | undefined;
   if (
     !value ||
     !["per_request", "per_second"].includes(value.mode || "") ||
@@ -253,16 +247,13 @@ export function ComposerModelPicker({
               list[next]?.focus();
             }}
           >
-            <label className="composer-model-search">
-              <Search size={16} />
-              <input
-                aria-label="搜索模型"
-                placeholder="搜索模型、系列或服务"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <span>Esc 关闭</span>
-            </label>
+            <SearchField
+              className="composer-model-search"
+              label="搜索模型"
+              placeholder="搜索模型、系列或服务"
+              value={search}
+              onValueChange={(value) => setSearch(value)}
+            />
             {error ? (
               <p className="composer-model-empty" role="alert">
                 {error}

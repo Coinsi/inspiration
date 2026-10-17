@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Grid2X2, Loader2, Check } from "lucide-react";
@@ -186,29 +187,33 @@ export function CanvasGridSplit({
           <div className="canvas-grid-dimensions">
             <label>
               行数
-              <select
+              <StudioSelect
                 aria-label="拆分行数"
                 value={rows}
                 disabled={busy || !!result}
-                onChange={(e) => configure(Number(e.target.value), columns)}
+                onValueChange={(selectedValue) =>
+                  configure(Number(selectedValue), columns)
+                }
               >
                 {[1, 2, 3, 4].map((n) => (
                   <option key={n}>{n}</option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
             <label>
               列数
-              <select
+              <StudioSelect
                 aria-label="拆分列数"
                 value={columns}
                 disabled={busy || !!result}
-                onChange={(e) => configure(rows, Number(e.target.value))}
+                onValueChange={(selectedValue) =>
+                  configure(rows, Number(selectedValue))
+                }
               >
                 {[1, 2, 3, 4].map((n) => (
                   <option key={n}>{n}</option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
           </div>
           <div className="canvas-grid-summary">

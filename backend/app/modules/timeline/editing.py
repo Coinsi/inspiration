@@ -12,6 +12,9 @@ from app.modules.timeline import schemas, service
 
 
 def lock(db, project_id, timeline_id):
+    from app.models.identity import Project
+    # Match adoption's lock order so replacing a shot cannot race a timeline save.
+    db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     t = db.scalar(
         select(Timeline)
         .where(

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Upload, X } from "lucide-react";
-import { api, apiUpload, blobUrl, type Project } from "@/lib/api";
+import { apiUpload, blobUrl, type Project } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { Modal } from "./ui/modal";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { useToast } from "./ui/toast";
 
 export function ProjectDialog({
   project,
@@ -16,8 +19,11 @@ export function ProjectDialog({
   onSaved: (p: Project) => void;
 }) {
   const zh = useI18n().lang === "zh";
-  const [name, setName] = useState(""),
-    [description, setDescription] = useState("");
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { refresh } = useAuth();
+  const [name, setName] = useState(project?.name ?? ""),
+    [description, setDescription] = useState(project?.description ?? "");
   const [file, setFile] = useState<File | null>(null),
     [removed, setRemoved] = useState(false);
   const [preview, setPreview] = useState(""),
@@ -63,7 +69,7 @@ export function ProjectDialog({
     setRemoved(false);
   }
   async function save() {
-    if (pending.current || (!project && !name.trim())) return;
+    if (pending.current || !name.trim()) return;
     pending.current = true;
     setBusy(true);
     setError("");
@@ -71,16 +77,27 @@ export function ProjectDialog({
       const form = new FormData();
       if (file) form.append("file", file);
       let saved: Project;
-      if (project)
-        saved = file
-          ? await apiUpload<Project>(`/projects/${project.id}/cover`, form)
-          : await api.del<Project>(`/projects/${project.id}/cover`);
-      else {
+      if (project) {
+        form.append("name", name.trim());
+        form.append("description", description.trim());
+        form.append("remove_cover", String(removed));
+        saved = await apiUpload<Project>(
+          `/projects/${project.id}/profile`,
+          form,
+        );
+      } else {
         form.append("name", name.trim());
         form.append("description", description.trim());
         form.append("request_key", key.current);
         saved = await apiUpload<Project>("/projects/with-cover", form);
       }
+      qc.setQueryData(["project", saved.id], saved);
+      qc.setQueryData<Project[]>(["projects"], (old) =>
+        old?.map((p) => (p.id === saved.id ? saved : p)),
+      );
+      void qc.invalidateQueries({ queryKey: ["projects"] });
+      void refresh();
+      toast.push(zh ? "项目已保存" : "Project saved", "success");
       onSaved(saved);
       onClose();
     } catch (e) {
@@ -96,8 +113,8 @@ export function ProjectDialog({
       title={
         project
           ? zh
-            ? "项目封面"
-            : "Project cover"
+            ? "编辑项目"
+            : "Edit project"
           : zh
             ? "新建项目"
             : "New project"
@@ -121,8 +138,53 @@ export function ProjectDialog({
               ? "给故事起个名字，从这里开始创作。"
               : "Give your story a name and start creating."}
         </p>
+        <label className="block space-y-2 text-sm">
+          <span>{zh ? "项目名称" : "Project name"}</span>
+          <Input
+            autoFocus
+            required
+            maxLength={255}
+            disabled={busy}
+            placeholder={
+              zh ? "例如：雨夜重逢" : "For example: A rainy night reunion"
+            }
+            value={name}
+            onChange={(e) => {
+              change();
+              setName(e.target.value);
+            }}
+          />
+        </label>
+        <label className="block space-y-2 text-sm">
+          <span>
+            {zh ? "项目简介" : "Description"}
+            <small className="ml-2 text-muted-foreground">
+              {zh ? "选填" : "Optional"}
+            </small>
+          </span>
+          <textarea
+            maxLength={10000}
+            disabled={busy}
+            rows={3}
+            value={description}
+            onChange={(e) => {
+              change();
+              setDescription(e.target.value);
+            }}
+            placeholder={
+              zh
+                ? "简单写下这个故事，或你想实现的画面…"
+                : "A little about your story or vision…"
+            }
+          />
+        </label>
         <div
           className="project-cover-upload"
+          style={
+            project
+              ? { maxWidth: 280, alignSelf: "center", width: "100%" }
+              : undefined
+          }
           onDragOver={(e) => {
             e.preventDefault();
           }}
@@ -196,50 +258,6 @@ export function ProjectDialog({
             ? "推荐横向 16:9 图片，支持 JPG / PNG / WebP，最大 10 MB。"
             : "Landscape 16:9 recommended. JPG / PNG / WebP, up to 10 MB."}
         </p>
-        {!project && (
-          <>
-            <label className="block space-y-2 text-sm">
-              <span>{zh ? "项目名称" : "Project name"}</span>
-              <Input
-                autoFocus
-                required
-                maxLength={255}
-                disabled={busy}
-                placeholder={
-                  zh ? "例如：雨夜重逢" : "For example: A rainy night reunion"
-                }
-                value={name}
-                onChange={(e) => {
-                  change();
-                  setName(e.target.value);
-                }}
-              />
-            </label>
-            <label className="block space-y-2 text-sm">
-              <span>
-                {zh ? "项目简介" : "Description"}
-                <small className="ml-2 text-muted-foreground">
-                  {zh ? "选填" : "Optional"}
-                </small>
-              </span>
-              <textarea
-                maxLength={10000}
-                disabled={busy}
-                rows={3}
-                value={description}
-                onChange={(e) => {
-                  change();
-                  setDescription(e.target.value);
-                }}
-                placeholder={
-                  zh
-                    ? "简单写下这个故事，或你想实现的画面…"
-                    : "A little about your story or vision…"
-                }
-              />
-            </label>
-          </>
-        )}
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
@@ -256,7 +274,15 @@ export function ProjectDialog({
           </Button>
           <Button
             type="submit"
-            disabled={busy || (project ? !file && !removed : !name.trim())}
+            disabled={
+              busy ||
+              !name.trim() ||
+              (!!project &&
+                !file &&
+                !removed &&
+                name.trim() === project.name &&
+                description.trim() === (project.description ?? ""))
+            }
           >
             {busy
               ? zh
@@ -264,8 +290,8 @@ export function ProjectDialog({
                 : "Saving…"
               : project
                 ? zh
-                  ? "保存封面"
-                  : "Save cover"
+                  ? "保存修改"
+                  : "Save changes"
                 : zh
                   ? "创建项目"
                   : "Create project"}

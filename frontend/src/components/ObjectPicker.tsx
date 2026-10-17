@@ -1,5 +1,6 @@
+import { SearchField } from "@/components/ui/search-field";
 import { useState, type ReactNode } from "react";
-import { Search, Plus, Check } from "lucide-react";
+import { Plus, Check } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +13,8 @@ export function ObjectPicker({
   error,
   onRetry,
   renderPreview,
+  title = "选择创作对象",
+  closeOnSelect = false,
 }: {
   items: { id: string; name: string; context: string }[];
   selected: string[];
@@ -21,6 +24,8 @@ export function ObjectPicker({
   error?: boolean;
   onRetry?: () => void;
   renderPreview?: (id: string) => ReactNode;
+  title?: string;
+  closeOnSelect?: boolean;
 }) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState("");
@@ -36,28 +41,27 @@ export function ObjectPicker({
         onClick={() => setOpen(true)}
       >
         <Plus size={14} />
-        选择创作对象{selected.length ? ` · 已选 ${selected.length}` : ""}
+        {title}
+        {selected.length ? ` · 已选 ${selected.length}` : ""}
       </Button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="选择创作对象"
+        title={title}
         width={760}
       >
-        <label className="flex gap-2 items-center border rounded-lg px-3 py-2 mb-4">
-          <Search size={16} />
-          <input
-            autoFocus
-            aria-label="搜索创作对象"
-            placeholder="搜索名称、镜头编号或章节…"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setLimit(40);
-            }}
-            className="bg-transparent outline-none min-w-0 flex-1 text-sm"
-          />
-        </label>
+        <SearchField
+          autoFocus
+          data-autofocus
+          label="搜索创作对象"
+          placeholder="搜索名称、镜头编号或章节"
+          value={query}
+          onValueChange={(value) => {
+            setQuery(value);
+            setLimit(40);
+          }}
+          className="mb-4"
+        />
         <div className="max-h-[50vh] overflow-auto space-y-2">
           {loading ? (
             <p>正在读取对象…</p>
@@ -74,7 +78,10 @@ export function ObjectPicker({
                 key={i.id}
                 disabled={disabled || selected.includes(i.id)}
                 aria-label={`选择对象 ${i.context} ${i.name}`}
-                onClick={() => onSelect(i.id)}
+                onClick={() => {
+                  onSelect(i.id);
+                  if (closeOnSelect) setOpen(false);
+                }}
                 className="w-full text-left flex items-center justify-between gap-3 p-4 border rounded-lg hover:bg-elevated disabled:opacity-60"
               >
                 {renderPreview && (

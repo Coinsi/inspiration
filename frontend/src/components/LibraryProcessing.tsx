@@ -68,7 +68,10 @@ export function useLibraryProviders(projectId: string) {
   });
 }
 
-export function optionalModelReason(reason: string | null | undefined, zh: boolean) {
+export function optionalModelReason(
+  reason: string | null | undefined,
+  zh: boolean,
+) {
   const labels: Record<string, [string, string]> = {
     capability_disabled: ["尚未启用", "Not enabled"],
     service_unavailable: ["暂时无法核对模型状态", "Model status unavailable"],
@@ -165,7 +168,10 @@ export function OptionalModelsStatus({
               ? zh
                 ? "已就绪"
                 : "Ready"
-              : optionalModelReason(provider.optional_models?.[cap]?.reason, zh)}
+              : optionalModelReason(
+                  provider.optional_models?.[cap]?.reason,
+                  zh,
+                )}
           </p>
         ))}
         <p className="leading-5">
@@ -330,6 +336,11 @@ function ProcessingRunRow({
         )}
       </div>
       <div className="library-processing-run-actions">
+        <Link
+          to={`/projects/${projectId}/tasks?kind=processing&task=${run.id}`}
+        >
+          {zh ? "任务与结果 ↗" : "Task & results ↗"}
+        </Link>
         {active && run.operation !== "delete" && (
           <Button
             variant="ghost"
@@ -698,10 +709,13 @@ export function LibraryProcessingControl({
                   <span className="text-muted-foreground">
                     {zh ? " · 无音轨" : " · No audio track"}
                   </span>
-                ) : selectedProvider && !availableCapabilities.includes(cap) && (
-                  <span className="text-muted-foreground">
-                    {zh ? " · 尚未启用" : " · Not enabled"}
-                  </span>
+                ) : (
+                  selectedProvider &&
+                  !availableCapabilities.includes(cap) && (
+                    <span className="text-muted-foreground">
+                      {zh ? " · 尚未启用" : " · Not enabled"}
+                    </span>
+                  )
                 )}
               </label>
             ))}

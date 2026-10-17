@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useWorkspaceScroll } from "@/lib/useWorkspaceScroll";
 import { MaterialTabs } from "@/components/MaterialTabs";
 import { MediaImage } from "@/components/MediaImage";
@@ -287,12 +289,16 @@ function AssetsContent() {
             </>
           ) : (
             <>
-              <Input
-                aria-label={tr("assets.search")}
-                placeholder={zh ? "搜索角色、场景或道具…" : "Search materials…"}
+              <SearchField
+                label={tr("assets.search")}
+                placeholder={
+                  zh
+                    ? "搜索角色、场景或道具"
+                    : "Search characters, scenes or props"
+                }
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className="w-64 max-w-full"
+                onValueChange={setQ}
+                className="w-72 max-w-full"
               />
               <div className="flex rounded-lg border bg-card p-0.5">
                 {(
@@ -382,17 +388,17 @@ function AssetsContent() {
         >
           <label className="block space-y-2 text-sm">
             <span>{tr("assets.colType")}</span>
-            <select
+            <StudioSelect
               className="h-9 w-full rounded-md border bg-surface px-3"
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onValueChange={(selectedValue) => setType(selectedValue)}
             >
               {ASSET_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {tr(`asset.${t}`)}
                 </option>
               ))}
-            </select>
+            </StudioSelect>
           </label>
           <label className="block space-y-2 text-sm">
             <span>{tr("assets.colName")}</span>
@@ -473,12 +479,12 @@ function AssetsContent() {
             </button>
           )}
           {view !== "graph" && (
-            <select
+            <StudioSelect
               aria-label={zh ? "素材排序" : "Sort assets"}
               className="h-8 max-w-full rounded-md border bg-bg px-2"
               value={`${sortKey}.${sortDir}`}
-              onChange={(e) => {
-                const [k, d] = e.target.value.split(".");
+              onValueChange={(selectedValue) => {
+                const [k, d] = selectedValue.split(".");
                 setSortKey(k as typeof sortKey);
                 setSortDir(d as typeof sortDir);
               }}
@@ -513,7 +519,7 @@ function AssetsContent() {
               <option value="type.desc">
                 {zh ? "类型 Z → A" : "Type Z → A"}
               </option>
-            </select>
+            </StudioSelect>
           )}
         </div>
       </div>

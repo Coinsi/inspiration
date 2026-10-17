@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import "./cuts.css";
 import { Film, Plus, X } from "lucide-react";
 import { TimelineStudio } from "@/components/TimelineStudio";
@@ -187,10 +188,10 @@ export default function Cuts() {
             {/* 定剪冻结基线 */}
             <Panel title={tr("cuts.baselineFreeze")}>
               <div className="space-y-2">
-                <select
+                <StudioSelect
                   className="h-9 w-full rounded-md border border-border bg-bg px-2 text-sm"
                   value={tlId}
-                  onChange={(e) => setTlId(e.target.value)}
+                  onValueChange={(selectedValue) => setTlId(selectedValue)}
                 >
                   <option value="">{tr("cuts.selectTl")}</option>
                   {timelines?.map((t) => (
@@ -198,22 +199,22 @@ export default function Cuts() {
                       {t.name}
                     </option>
                   ))}
-                </select>
+                </StudioSelect>
                 <div className="flex gap-2">
                   <Input
                     placeholder={tr("cuts.cutName")}
                     value={cutName}
                     onChange={(e) => setCutName(e.target.value)}
                   />
-                  <select
+                  <StudioSelect
                     className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
                     value={cutKind}
-                    onChange={(e) => setCutKind(e.target.value)}
+                    onValueChange={(selectedValue) => setCutKind(selectedValue)}
                   >
                     <option value="rough">{tr("cuts.rough")}</option>
                     <option value="fine">{tr("cuts.fine")}</option>
                     <option value="final">{tr("cuts.final")}</option>
-                  </select>
+                  </StudioSelect>
                 </div>
                 <Button
                   className="w-full"

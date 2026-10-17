@@ -10,6 +10,7 @@ export function MediaSegmentPlayer({
   end,
   label,
   autoPlay = false,
+  showRangeControls = true,
   onMark,
   region,
 }: {
@@ -18,6 +19,7 @@ export function MediaSegmentPlayer({
   end: number;
   label: string;
   autoPlay?: boolean;
+  showRangeControls?: boolean;
   onMark?: (kind: "start" | "end", ms: number) => void;
   region?: RegionMatch | null;
 }) {
@@ -100,7 +102,11 @@ export function MediaSegmentPlayer({
             : "Preview unavailable. Try again later."}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div
+        className="flex flex-wrap gap-2"
+        hidden={!showRangeControls}
+        style={!showRangeControls ? { display: "none" } : undefined}
+      >
         {region && region.matched_at_ms !== null && (
           <Button
             size="sm"

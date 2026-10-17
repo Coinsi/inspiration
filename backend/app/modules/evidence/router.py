@@ -108,12 +108,16 @@ def get(db, ctx, id):
 
 @router.get("/identities")
 def identities(
+    asset_id: uuid.UUID | None = None,
     q: str = Query("", max_length=120),
     offset: int = Query(0, ge=0),
     ctx: ProjectContext = READ,
     db: Session = DB,
 ):
     query = select(StoryIdentity).where(StoryIdentity.project_id == ctx.project.id)
+    if asset_id:
+        asset(db, ctx, asset_id)
+        query = query.where(StoryIdentity.asset_id == asset_id)
     if q:
         query = query.where(StoryIdentity.name.icontains(q, autoescape=True))
     return [
@@ -184,6 +188,8 @@ def suggestions(data: schemas.Suggest, ctx: ProjectContext = READ, db: Session =
 
 @router.get("")
 def listing(
+    asset_id: uuid.UUID | None = None,
+    version_id: uuid.UUID | None = None,
     identity_id: uuid.UUID | None = None,
     with_identity: uuid.UUID | None = None,
     unknown: bool = False,
@@ -194,6 +200,18 @@ def listing(
     db: Session = DB,
 ):
     where = [IdentityEvidence.project_id == ctx.project.id, LibraryMedia.deleted_at.is_(None)]
+    if asset_id:
+        asset(db, ctx, asset_id)
+        where.append(
+            IdentityEvidence.identity_id.in_(
+                select(StoryIdentity.id).where(
+                    StoryIdentity.project_id == ctx.project.id, StoryIdentity.asset_id == asset_id
+                )
+            )
+        )
+    if version_id:
+        library.version(db, ctx.project.id, version_id)
+        where.append(IdentityEvidence.version_id == version_id)
     if identity_id:
         identity(db, ctx, identity_id)
         where.append(IdentityEvidence.identity_id == identity_id)

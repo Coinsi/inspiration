@@ -26,7 +26,7 @@
   padding: 10px 20px 0;
   flex-shrink: 0;
 }
-.canvas-page-header select {
+.canvas-page-header .studio-select-trigger {
   font-size: 12px;
   height: 32px;
   padding-block: 4px;
@@ -479,14 +479,6 @@
   gap: 22px;
   min-height: 350px;
 }
-.canvas-picker-search {
-  width: 100%;
-  padding: 9px 12px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--bg));
-  border-radius: 9px;
-  font-size: 12px;
-}
 .canvas-object-list {
   max-height: 440px;
   overflow: auto;
@@ -566,7 +558,7 @@
     font-size: 12px;
     white-space: nowrap;
   }
-  .canvas-page-header select {
+  .canvas-page-header .studio-select-trigger {
     max-width: 135px;
   }
   .canvas-page-header button {
@@ -799,7 +791,7 @@
   font-size: 12px;
   color: hsl(var(--muted));
 }
-.canvas-grid-dimensions select {
+.canvas-grid-dimensions .studio-select-trigger {
   width: 100%;
   margin-top: 6px;
   padding: 8px;
@@ -1021,7 +1013,7 @@
   white-space: nowrap;
   color: hsl(var(--muted));
 }
-.canvas-selection-actions select {
+.canvas-selection-actions .studio-select-trigger {
   background: hsl(var(--card));
   color: hsl(var(--fg));
   font-size: 12px;
@@ -1151,7 +1143,7 @@
   min-width: 0;
 }
 .canvas-library-controls input,
-.canvas-library-controls select {
+.canvas-library-controls .studio-select-trigger {
   display: block;
   width: 100%;
   min-width: 0;

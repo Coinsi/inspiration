@@ -207,6 +207,7 @@ export interface RefImage {
 }
 
 export interface Novel {
+  cover_blob_hash?: string | null;
   id: string;
   code: string;
   title: string;
@@ -223,6 +224,7 @@ export interface NovelDetail extends Novel {
   chapters: Chapter[];
 }
 export interface Script {
+  cover_blob_hash?: string | null;
   id: string;
   code: string;
   title: string;

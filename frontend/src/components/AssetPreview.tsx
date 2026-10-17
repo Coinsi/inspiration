@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api, blobUrl, type Asset, type RefImage } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
 import { MediaPreview } from "@/components/MediaPreview";
@@ -17,6 +17,8 @@ export function AssetPreview({
 }) {
   const { lang, t } = useI18n(),
     zh = lang === "zh";
+  const location = useLocation();
+  const returnPath = encodeURIComponent(location.pathname + location.search);
   const base = `/projects/${projectId}/assets/${asset.id}`;
   const refs = useQuery({
     queryKey: ["asset-refimg", asset.id],
@@ -77,12 +79,23 @@ export function AssetPreview({
             ))}
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
-            <Link className="studio-link" to={base}>
+            <Link className="studio-link" to={`${base}?return=${returnPath}`}>
               {zh ? "打开完整详情" : "Open details"} →
             </Link>
-            <Link className="studio-link" to={`${base}?tab=gen`}>
+            <Link
+              className="studio-link"
+              to={`${base}?tab=gen&return=${returnPath}`}
+            >
               {zh ? "生成与版本" : "Generate & versions"} →
             </Link>
+            {asset.type === "character" && (
+              <Link
+                className="studio-link"
+                to={`/projects/${projectId}/evidence?asset=${asset.id}&return=${returnPath}`}
+              >
+                {zh ? "查看关联片段" : "Related clips"} →
+              </Link>
+            )}
           </div>
         </div>
       </div>

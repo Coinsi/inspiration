@@ -20,6 +20,7 @@ class AgentRun(Base, TimestampMixin):
     model_provider: Mapped[str | None] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(32), default="queued")
     scope: Mapped[list] = mapped_column(JSONB)
+    input_context: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     skill_snapshot: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     max_turns: Mapped[int] = mapped_column(Integer, default=12)
     turns: Mapped[int] = mapped_column(Integer, default=0)

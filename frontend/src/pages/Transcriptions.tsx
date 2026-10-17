@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -48,7 +49,7 @@ function Workspace({ projectId }: { projectId: string }) {
     qc = useQueryClient();
   const [version, setVersion] = useState(params.get("version") ?? ""),
     [language, setLanguage] = useState("zh"),
-    [selected, setSelected] = useState(""),
+    [selected, setSelected] = useState(params.get("run") ?? ""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const selectedVersion = useLibraryVersion(projectId, version),
@@ -153,12 +154,12 @@ function Workspace({ projectId }: { projectId: string }) {
             </div>
             <label className="space-y-2 text-xs">
               音轨语言
-              <select
+              <StudioSelect
                 aria-label="转写语言"
                 className={field}
                 value={language}
                 disabled={busy}
-                onChange={(e) => setLanguage(e.target.value)}
+                onValueChange={(selectedValue) => setLanguage(selectedValue)}
               >
                 {[
                   ["zh", "中文"],
@@ -174,7 +175,7 @@ function Workspace({ projectId }: { projectId: string }) {
                     {l}
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
             <Button
               disabled={busy || v?.status !== "ready"}
@@ -202,11 +203,11 @@ function Workspace({ projectId }: { projectId: string }) {
       {runs.data && runs.data.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">转写记录</span>
-          <select
+          <StudioSelect
             aria-label="转写记录"
             className={`${field} max-w-md`}
             value={runId}
-            onChange={(e) => setSelected(e.target.value)}
+            onValueChange={(selectedValue) => setSelected(selectedValue)}
           >
             {runs.data.map((r, i) => (
               <option key={r.id} value={r.id}>
@@ -217,7 +218,7 @@ function Workspace({ projectId }: { projectId: string }) {
                 条 · {r.language ?? "自动语言"}
               </option>
             ))}
-          </select>
+          </StudioSelect>
           <Button
             variant="ghost"
             disabled={

@@ -20,13 +20,23 @@ export function MediaVideo({
   src,
   label,
   presentation = "native",
+  poster,
+  onDimensions,
 }: {
   src: string;
   label: string;
   presentation?: "native" | "studio";
+  poster?: string;
+  onDimensions?: (width: number, height: number) => void;
 }) {
   return presentation === "studio" ? (
-    <VideoContent key={src} src={src} label={label} />
+    <VideoContent
+      key={src}
+      src={src}
+      label={label}
+      poster={poster}
+      onDimensions={onDimensions}
+    />
   ) : (
     <NativeVideo key={src} src={src} label={label} />
   );
@@ -53,7 +63,17 @@ function NativeVideo({ src, label }: { src: string; label: string }) {
     />
   );
 }
-function VideoContent({ src, label }: { src: string; label: string }) {
+function VideoContent({
+  src,
+  label,
+  poster,
+  onDimensions,
+}: {
+  src: string;
+  label: string;
+  poster?: string;
+  onDimensions?: (width: number, height: number) => void;
+}) {
   const zh = useI18n().lang === "zh";
   const video = useRef<HTMLVideoElement>(null),
     root = useRef<HTMLDivElement>(null);
@@ -127,11 +147,18 @@ function VideoContent({ src, label }: { src: string; label: string }) {
             <video
               ref={video}
               src={src}
+              poster={poster}
               aria-label={label}
               preload="metadata"
               playsInline
               muted={muted}
-              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onLoadedMetadata={(e) => {
+                setDuration(e.currentTarget.duration);
+                onDimensions?.(
+                  e.currentTarget.videoWidth,
+                  e.currentTarget.videoHeight,
+                );
+              }}
               onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}

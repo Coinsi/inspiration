@@ -1,12 +1,17 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import {
+  NarrativeCover,
+  NarrativeCoverEditor,
+} from "@/components/NarrativeCover";
+import { ScriptNameDialog } from "@/components/ScriptNameDialog";
+import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpRight,
   Clapperboard,
   FileText,
   Plus,
-  Search,
   ScrollText,
-  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -30,6 +35,7 @@ function ScriptLibrary() {
   const confirm = useConfirm();
   const { t: tr, lang } = useI18n();
   const [query, setQuery] = useState("");
+  const [nameDialog, setNameDialog] = useState<Script | "new" | null>(null);
   const [sort, setSort] = useState("newest");
   const scripts = useQuery({
     queryKey: ["scripts", projectId],
@@ -37,15 +43,6 @@ function ScriptLibrary() {
   });
   const fmtTime = (iso: string) =>
     new Date(iso).toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US");
-  const create = useMutation({
-    mutationFn: () =>
-      api.post<Script>(`${base}/scripts`, { title: tr("scripts.untitled") }),
-    onSuccess: (s) => {
-      void qc.invalidateQueries({ queryKey: ["scripts", projectId] });
-      navigate(`${base}/scripts/${s.id}`);
-    },
-    onError: (e) => toast.push(e.message, "error"),
-  });
   const del = useMutation({
     mutationFn: (id: string) => api.del(`${base}/scripts/${id}`),
     onSuccess: () => {
@@ -67,6 +64,14 @@ function ScriptLibrary() {
     );
   return (
     <div className="writing-library">
+      {nameDialog && (
+        <ScriptNameDialog
+          projectId={projectId!}
+          script={nameDialog === "new" ? undefined : nameDialog}
+          onClose={() => setNameDialog(null)}
+          onCreated={(s) => navigate(`${base}/scripts/${s.id}`)}
+        />
+      )}
       <header className="writing-library-header">
         <div>
           <span className="writing-eyebrow">STORY & SCREENPLAY</span>
@@ -81,30 +86,28 @@ function ScriptLibrary() {
             <ScrollText size={16} />
             {tr("scripts.fromChapter")}
           </Button>
-          <Button onClick={() => create.mutate()} disabled={create.isPending}>
+          <Button onClick={() => setNameDialog("new")}>
             <Plus size={16} />
             {tr("scripts.new")}
           </Button>
         </div>
       </header>
       <div className="writing-library-toolbar">
-        <label className="writing-search">
-          <Search size={16} />
-          <input
-            aria-label="搜索剧本"
-            placeholder="搜索剧本名称或编号"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <select
+        <SearchField
+          label="搜索剧本"
+          placeholder="搜索剧本名称或编号"
+          value={query}
+          onValueChange={setQuery}
+          className="w-full sm:w-72"
+        />
+        <StudioSelect
           aria-label="剧本排序"
           value={sort}
-          onChange={(e) => setSort(e.target.value)}
+          onValueChange={(selectedValue) => setSort(selectedValue)}
         >
           <option value="newest">最近创建</option>
           <option value="title">按名称</option>
-        </select>
+        </StudioSelect>
         <span className="writing-result-count">
           {scripts.data
             ? `${visible.length} / ${scripts.data.length} 部剧本`
@@ -123,22 +126,21 @@ function ScriptLibrary() {
           </Button>
         </div>
       ) : visible.length ? (
-        <div className="writing-script-grid">
+        <div className="writing-script-grid narrative-cover-grid">
           {visible.map((s) => (
             <article className="writing-script-card" key={s.id}>
               <Link
                 className="writing-script-link"
                 to={`${base}/scripts/${s.id}`}
               >
-                <div className="writing-script-cover">
-                  <span className="writing-eyebrow">SCREENPLAY</span>
-                  <FileText size={30} strokeWidth={1} />
-                  <h2>{s.title || tr("nar.untitled")}</h2>
-                  <span>
-                    {(s.block_count ?? 0) > 0
-                      ? "继续打磨你的故事"
-                      : "等待写下第一个画面"}
-                  </span>
+                <NarrativeCover
+                  projectId={projectId!}
+                  kind="script"
+                  title={s.title}
+                  hash={s.cover_blob_hash}
+                />
+                <div className="narrative-card-title">
+                  <h2 title={s.title}>{s.title || tr("nar.untitled")}</h2>
                 </div>
                 <div className="writing-script-meta">
                   <span>
@@ -150,13 +152,16 @@ function ScriptLibrary() {
                 </div>
                 <span className="sr-only">打开剧本</span>
               </Link>
-              <footer>
-                <span>创建于 {fmtTime(s.created_at)}</span>
-                <button
-                  type="button"
-                  aria-label={`删除剧本：${s.title}`}
-                  disabled={del.isPending}
-                  onClick={async () => {
+              <NarrativeCoverEditor
+                projectId={projectId!}
+                kind="script"
+                id={s.id}
+                title={s.title}
+                hash={s.cover_blob_hash}
+                actions={{
+                  rename: () => setNameDialog(s),
+                  removing: del.isPending,
+                  remove: async () => {
                     if (
                       await confirm({
                         title: tr("nar.deleteScript"),
@@ -169,10 +174,11 @@ function ScriptLibrary() {
                       })
                     )
                       del.mutate(s.id);
-                  }}
-                >
-                  <Trash2 size={15} />
-                </button>
+                  },
+                }}
+              />
+              <footer>
+                <span title="创建日期">{fmtTime(s.created_at)}</span>
               </footer>
             </article>
           ))}
@@ -188,8 +194,7 @@ function ScriptLibrary() {
           </p>
           <Button
             variant="outline"
-            onClick={() => (query ? setQuery("") : create.mutate())}
-            disabled={create.isPending}
+            onClick={() => (query ? setQuery("") : setNameDialog("new"))}
           >
             {query ? "清除搜索" : tr("scripts.new")}
           </Button>

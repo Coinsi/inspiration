@@ -1,15 +1,10 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { ArrowUp, Clapperboard, FolderOpen, Sparkles } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
-import { Modal } from "@/components/ui/modal";
-const EmbeddedAgent = lazy(() =>
-  import("@/pages/Agent").then((module) => ({
-    default: module.AgentWorkspace,
-  })),
-);
+import { useNavigate } from "react-router-dom";
 import { type Project } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/usePersistentState";
-import { WorkbenchComposer } from "@/components/workbench/WorkbenchComposer";
+import { ConversationWorkspace } from "@/components/workbench/ConversationWorkspace";
 
 export function CreativeLaunch({
   projectId,
@@ -21,7 +16,7 @@ export function CreativeLaunch({
   onCreate?: () => void;
 }) {
   if (projectId)
-    return <WorkbenchComposer key={projectId} projectId={projectId} />;
+    return <ConversationWorkspace key={projectId} projectId={projectId} />;
   return <LegacyCreativeLaunch projects={projects} onCreate={onCreate} />;
 }
 
@@ -41,11 +36,7 @@ function LegacyCreativeLaunch({
     "",
   );
   const [chosen, setChosen] = usePersistentState("creative.project", "");
-  const [session, setSession] = useState<{
-    project: string;
-    goal: string;
-  } | null>(null);
-  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const target =
     projectId ||
     (projects?.some((p) => p.id === chosen) ? chosen : projects?.[0]?.id);
@@ -62,33 +53,12 @@ function LegacyCreativeLaunch({
       ];
   const launch = () => {
     if (!target || !goal.trim()) return;
-    setSession((current) =>
-      current?.project === target && current.goal === goal.trim()
-        ? current
-        : { project: target, goal: goal.trim() },
-    );
-    setOpen(true);
+    navigate(`/projects/${target}/workbench?view=chat`, {
+      state: { creativeGoal: goal.trim() },
+    });
   };
   return (
     <div className="creative-launch">
-      {session && (
-        <Modal
-          keepMounted
-          open={open}
-          onClose={() => setOpen(false)}
-          title={zh ? "创作助理" : "Creative assistant"}
-          width={1100}
-        >
-          <Suspense fallback={<p role="status">正在准备创作空间…</p>}>
-            <EmbeddedAgent
-              key={`${session.project}:${session.goal}`}
-              projectId={session.project}
-              initialGoal={session.goal}
-              embedded
-            />
-          </Suspense>
-        </Modal>
-      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -118,17 +88,17 @@ function LegacyCreativeLaunch({
           {!projectId && !!projects?.length && (
             <label className="creative-project">
               <FolderOpen size={14} />
-              <select
+              <StudioSelect
                 aria-label={zh ? "创作所在项目" : "Creative project"}
                 value={target}
-                onChange={(e) => setChosen(e.target.value)}
+                onValueChange={(selectedValue) => setChosen(selectedValue)}
               >
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
           )}
           {!projectId && projects?.length === 0 && (
@@ -144,7 +114,7 @@ function LegacyCreativeLaunch({
             type="submit"
             className="creative-send"
             disabled={!target || !goal.trim()}
-            aria-label={zh ? "带入创作助理" : "Open in creative assistant"}
+            aria-label={zh ? "进入创作对话" : "Open conversation"}
           >
             <ArrowUp size={21} />
           </button>
@@ -167,8 +137,8 @@ function LegacyCreativeLaunch({
       </div>
       <p className="creative-note">
         {zh
-          ? "在当前工作台选择创作对象并开始，修改会先交给你审阅。"
-          : "Review your idea in the assistant before starting."}
+          ? "进入项目工作台继续讨论，想法会先保留为草稿。"
+          : "Continue in your project workspace. Your idea will be kept as a draft."}
       </p>
     </div>
   );

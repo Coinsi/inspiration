@@ -148,4 +148,5 @@ def start():
         stop.set()
         thread.join(timeout=5)
 
+    shutdown.is_alive = thread.is_alive
     return shutdown

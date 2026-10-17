@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -198,12 +199,12 @@ export function CanvasLibraryPanel({
       <div className="canvas-library-controls">
         <label>
           所属镜头
-          <select
+          <StudioSelect
             aria-label="片段所属镜头"
             value={shot}
             disabled={busy || running}
-            onChange={(e) => {
-              setShot(e.target.value);
+            onValueChange={(selectedValue) => {
+              setShot(selectedValue);
               setJob("");
               setResult(null);
             }}
@@ -214,7 +215,7 @@ export function CanvasLibraryPanel({
                 {s.title || s.code}
               </option>
             ))}
-          </select>
+          </StudioSelect>
         </label>
         {chosen.data?.media_type !== "image" && (
           <>
@@ -254,12 +255,12 @@ export function CanvasLibraryPanel({
         )}
         <label>
           用于
-          <select
+          <StudioSelect
             aria-label="片段输出类型"
             value={type}
             disabled={busy || running}
-            onChange={(e) => {
-              setType(e.target.value as typeof type);
+            onValueChange={(selectedValue) => {
+              setType(selectedValue as typeof type);
               setJob("");
               setResult(null);
             }}
@@ -277,7 +278,7 @@ export function CanvasLibraryPanel({
             {chosen.data?.media_type !== "image" && (
               <option value="audio">音频片段</option>
             )}
-          </select>
+          </StudioSelect>
         </label>
       </div>
       {error && (

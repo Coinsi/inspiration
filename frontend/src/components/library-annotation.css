@@ -1,0 +1,199 @@
+.annotation-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  font-size: 13px;
+}
+.annotation-editor,
+.annotation-history {
+  min-width: 0;
+}
+.annotation-tabs {
+  display: flex;
+  padding: 3px;
+  border-radius: 9px;
+  background: hsl(var(--elevated));
+  margin-bottom: 20px;
+  gap: 4px;
+}
+.annotation-tabs button {
+  flex: 1;
+  border-radius: 7px;
+  padding: 8px;
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.annotation-tabs button[aria-pressed="true"] {
+  background: hsl(var(--card));
+  color: hsl(var(--fg));
+  box-shadow: 0 1px 3px #00000012;
+}
+.annotation-form {
+  display: grid;
+  gap: 16px;
+}
+.annotation-help {
+  font-size: 12px;
+  line-height: 1.7;
+  color: hsl(var(--muted));
+}
+.annotation-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.annotation-range label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.annotation-range input,
+.annotation-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-size: 13px;
+}
+.annotation-form textarea {
+  resize: vertical;
+  min-height: 120px;
+  max-height: 260px;
+  line-height: 1.7;
+}
+.annotation-form-footer,
+.annotation-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.annotation-form-footer > span,
+.annotation-pagination > span {
+  font-size: 11px;
+  color: hsl(var(--muted));
+}
+.annotation-history {
+  border-left: 1px solid hsl(var(--border));
+  padding-left: 28px;
+}
+.annotation-history > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  margin-bottom: 16px;
+}
+.annotation-history h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.annotation-history > header > span {
+  font-size: 11px;
+  color: hsl(var(--muted));
+}
+.annotation-records {
+  max-height: 400px;
+  overflow-y: auto;
+}
+.annotation-record {
+  padding: 16px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.annotation-record:first-child {
+  padding-top: 0;
+}
+.annotation-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: hsl(var(--muted));
+  font-variant-numeric: tabular-nums;
+}
+.annotation-record-meta > span:last-child {
+  background: hsl(var(--elevated));
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.annotation-record > p {
+  margin: 10px 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.annotation-record footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: hsl(var(--muted));
+}
+.annotation-record footer button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.annotation-record footer button:hover {
+  background: hsl(var(--elevated));
+  color: hsl(var(--danger));
+}
+.annotation-empty {
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  color: hsl(var(--muted));
+}
+.annotation-empty > span {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.annotation-file {
+  display: flex;
+  min-height: 148px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px dashed hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--bg));
+}
+.annotation-file strong {
+  font-weight: 500;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.annotation-file > span {
+  font-size: 11px;
+  color: hsl(var(--muted));
+}
+.annotation-file:hover {
+  border-color: hsl(var(--primary));
+}
+@media (max-width: 640px) {
+  .annotation-workspace {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .annotation-history {
+    border-left: 0;
+    border-top: 1px solid hsl(var(--border));
+    padding-left: 0;
+    padding-top: 16px;
+  }
+}

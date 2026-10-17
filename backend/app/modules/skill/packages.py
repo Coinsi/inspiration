@@ -114,7 +114,7 @@ def parse_package(payload, filename, directory=""):
             "导入的创作方法",
         )
     )[:1000]
-    from app.modules.agent.tools import CATALOG
+    from app.modules.tools.registry import CATALOG
 
     required_tools = metadata.get("inspiration_required_tools", [])
     if (

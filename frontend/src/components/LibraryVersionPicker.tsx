@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
@@ -78,22 +80,22 @@ export function LibraryVersionPicker({
       role="group"
       aria-label={`${label}选择器`}
     >
-      <input
-        className={field}
-        aria-label={`${label}：搜索`}
+      <SearchField
+        className="w-full"
+        label={`${label}：搜索`}
         placeholder={zh ? "搜索素材名称" : "Search media names"}
-        type="search"
+
         maxLength={255}
         value={input}
         disabled={disabled}
-        onChange={(e) => setInput(e.target.value)}
+        onValueChange={(value) => setInput(value)}
       />
-      <select
+      <StudioSelect
         className={field}
         aria-label={label}
         value={value}
         disabled={disabled || waiting || catalog.isError}
-        onChange={(e) => onChange(e.target.value)}
+        onValueChange={(selectedValue) => onChange(selectedValue)}
       >
         <option value="">
           {zh ? "选择已处理的素材" : "Choose ready media"}
@@ -116,7 +118,7 @@ export function LibraryVersionPicker({
             {name(v)}
           </option>
         ))}
-      </select>
+      </StudioSelect>
       {catalog.isError ? (
         <div role="alert" className="text-xs text-danger">
           {zh ? "素材列表读取失败。" : "Could not load media."}

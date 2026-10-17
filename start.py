@@ -251,6 +251,8 @@ class Launcher:
         self.env = {**os.environ, "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
         self.started: list[subprocess.Popen] = []
         self.docker: str | None = None
+        self.service_results: dict[str, str] = {}
+        self.reused_backend = False
 
     def command(self, args, *, cwd=None, timeout=120, capture=False, check=True):
         options = {
@@ -297,18 +299,7 @@ class Launcher:
         if not self.python.exists():
             say("[准备] 创建后端 Python 环境……")
             self.command([sys.executable, "-m", "venv", str(self.backend / ".venv")])
-        installed = self.command(
-            [
-                str(self.python),
-                "-c",
-                "import fastapi, uvicorn, sqlalchemy, alembic, psycopg, "
-                "pydantic_settings, celery, redis, minio",
-            ],
-            check=False,
-        )
-        if installed.returncode:
-            say("[准备] 首次安装后端依赖，可能需要几分钟……")
-            self.command([str(self.python), "-m", "pip", "install", "-e", ".[dev]"], timeout=900)
+        self.prepare_backend()
         env_file = self.backend / ".env"
         if not env_file.exists():
             content = (self.backend / ".env.example").read_text(encoding="utf-8")
@@ -323,6 +314,72 @@ class Launcher:
         if result.returncode:
             raise StartupError("无法读取 backend/.env，请检查配置格式；不会覆盖您的配置。")
         return json.loads(result.stdout)
+
+    def prepare_backend(self):
+        """Check declared requirements, including extras, before trusting an existing venv."""
+        manifest = self.backend / "pyproject.toml"
+        fingerprint = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        stamp = self.python.parent.parent / ".inspiration-dependencies"
+        # Evaluate the current manifest, not potentially stale editable-install metadata.
+        probe = """
+import sys, tomllib
+from importlib.metadata import version, PackageNotFoundError
+from pip._vendor.packaging.requirements import Requirement
+with open('pyproject.toml', 'rb') as stream:
+    project = tomllib.load(stream)['project']
+requirements = project['dependencies'] + project.get('optional-dependencies', {}).get('dev', [])
+for raw in requirements:
+    req = Requirement(raw)
+    if req.marker and not req.marker.evaluate():
+        continue
+    try:
+        installed = version(req.name)
+    except PackageNotFoundError:
+        sys.exit(1)
+    if not req.specifier.contains(installed, prereleases=True):
+        sys.exit(1)
+import fastapi, uvicorn, sqlalchemy, alembic, psycopg, pydantic_settings
+import celery, redis, minio, PIL, yaml, imageio_ffmpeg, httpx, pgvector
+import jwt, bcrypt, multipart, email_validator, app
+"""
+        def valid():
+            checked = self.command([str(self.python), "-c", probe], check=False, capture=True)
+            if checked.returncode:
+                return False
+            return self.command(
+                [str(self.python), "-m", "pip", "check"], check=False, capture=True
+            ).returncode == 0
+
+        changed = stamp.exists() and stamp.read_text(encoding="utf-8").strip() != fingerprint
+        if not changed and valid():
+            stamp.write_text(fingerprint, encoding="utf-8")
+            return
+        if port_open("127.0.0.1", 8000):
+            raise StartupError(
+                "后端依赖需要同步，但 8000 端口仍在使用。请等当前任务完成后停止后端及其 worker，"
+                "再重新启动；不会在运行中替换 Python 依赖。"
+            )
+        say("[准备] 同步后端依赖……")
+        self.command([str(self.python), "-m", "pip", "install", "-e", ".[dev]"], timeout=900)
+        if not valid():
+            raise StartupError("后端依赖安装后检查未通过，请检查 Python 环境及依赖版本。")
+        stamp.write_text(fingerprint, encoding="utf-8")
+
+    def summary(self):
+        labels = {
+            "ok": "接口检查通过（不代表模型推理已验证）",
+            "unavailable": "未就绪", "not_configured": "未配置", "disabled": "未启用",
+        }
+        degraded = any(value == "unavailable" for value in self.service_results.values())
+        say("\n基础工作台已就绪；部分服务未就绪。" if degraded else "\n基础工作台已就绪。")
+        for name, status in self.service_results.items():
+            description = labels.get(status, status)
+            if name in {"media_processing", "library", "transcription", "agent", "canvas"} and status == "ok":
+                description = "任务线程存活（不代表每个任务已成功）"
+            say(f"  {name}：{description}")
+        if self.reused_backend:
+            say("[需确认] 本次复用了旧后端，无法确认它已加载最新代码和 .env。"
+                "如刚更新过代码或配置，请等任务完成后重启后端及 worker。")
 
     def prepare_frontend(self):
         """代码更新后同步依赖；只存在 Vite 不代表所有懒加载页面都可用。"""
@@ -480,8 +537,10 @@ class Launcher:
                 "stderr": subprocess.STDOUT,
             }
             if os.name == "nt":
+                # DETACHED_PROCESS can let venv child interpreters allocate a console.
+                # CREATE_NO_WINDOW keeps the service and inherited child console hidden.
                 options["creationflags"] = (
-                    subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
                 )
             else:
                 options["start_new_session"] = True
@@ -608,16 +667,20 @@ class Launcher:
     def processing_services(self, config):
         """Optional isolated stacks; absence must not break the creative workspace."""
         if not config.get("library_processing_enabled"):
+            self.service_results.update(wise="disabled", mediacms="disabled")
             return
         for name in ("wise", "mediacms"):
             url = config.get(f"library_{name}_url")
             if not url:
+                self.service_results[name] = "not_configured"
                 continue
+            self.service_results[name] = "unavailable"
             token = config.get(f"library_{name}_token")
             try:
                 if not token:
                     raise StartupError("缺少服务认证配置，请检查 backend/.env。")
                 self.ensure_processing_service(name, url, token)
+                self.service_results[name] = "ok"
             except StartupError as error:
                 say(f"[提示] {name} 自动处理未就绪：{error} 参见 {PROCESSING_README}。")
             except (OSError, ValueError, TypeError, KeyError):
@@ -994,6 +1057,7 @@ class Launcher:
     def start(self):
         config = self.prepare()
         api_exists = self.existing(8000, "后端", lambda: api_ready(config["app_name"]))
+        self.reused_backend = api_exists
         web_exists = self.existing(5173, "前端", web_ready)
         self.dependencies(config)
         self.optional_services(config)
@@ -1073,8 +1137,15 @@ class Launcher:
             raise StartupError(
                 "后端已启动，但依赖检查未通过，请查看 /health/ready 和运行日志。"
             ) from exc
+        if diagnostic.get("status") != "ok":
+            raise StartupError("后端依赖或后台任务检查未通过，请查看 /health/ready。")
+        if "background_workers" not in diagnostic:
+            self.service_results["后台任务健康检查（旧后端需重启）"] = "unavailable"
+        for name, status in diagnostic.get("background_workers", {}).items():
+            self.service_results[name] = status
         for name, status in diagnostic.get("optional", {}).items():
-            if status != "ok":
+            self.service_results[name] = status
+            if status == "unavailable":
                 say(f"[提示] {name} 服务未就绪，相关自动处理暂不可用。")
 
     def cleanup_failed_start(self):
@@ -1108,7 +1179,8 @@ def main(argv=None) -> int:
         launcher.runtime.mkdir(exist_ok=True)
         with startup_lock(launcher.runtime / "start.lock"):
             launcher.start()
-        say(f"\n启动成功！\n网页：{WEB_URL}\n接口文档：{API_URL}/docs")
+        launcher.summary()
+        say(f"网页：{WEB_URL}\n接口文档：{API_URL}/docs")
         say(f"日志：{launcher.runtime}\n关闭此窗口不会停止服务，再次双击可复用已运行的服务。")
         if not args.no_browser:
             try:

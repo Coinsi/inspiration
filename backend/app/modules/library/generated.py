@@ -4,10 +4,11 @@ Using Generation as the collection entry makes publication atomic with job succe
 includes historical results and keeps every existing media reference stable.
 """
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 
 from app.core.errors import NotFound
 from app.models.generation import Generation, GenerationJob
+from app.models.material import GeneratedMaterialState
 from app.models.storage import Blob
 
 
@@ -38,10 +39,22 @@ def entry(db, g, job, blob):
             reference_available = False
     profile = (job.input_snapshot or {}).get("model_profile") or {}
     routing = (g.input_refs or {}).get("routing") or {}
+    from app.models.creation import Creation
+    from app.models.work import CreativeWork
+
+    creation = db.get(Creation, g.target_id) if g.target_type == "creation" else None
+    work = db.get(CreativeWork, creation.work_id) if creation and creation.work_id else None
+    metadata = db.get(GeneratedMaterialState, g.id)
     return {
+        "description": metadata.description if metadata else "",
+        "tags": metadata.tags if metadata else [],
+        "metadata_revision": metadata.metadata_revision if metadata else 1,
+        "poster_hash": metadata.poster_hash if metadata else None,
         "id": g.id,
+        "work": {"id": work.id, "title": work.title, "script_id": work.script_id} if work else None,
         "job_id": job.id,
-        "title": (g.prompt_snapshot or "AI 生成素材")[:120],
+        "title": (metadata.name if metadata else None)
+        or (g.prompt_snapshot or "AI 生成素材")[:120],
         "prompt": g.prompt_snapshot,
         "output_type": g.output_type,
         "blob_hash": blob.hash,
@@ -62,7 +75,11 @@ def entry(db, g, job, blob):
 
 
 def catalog(db, project_id, *, query="", kind=None, offset=0, limit=24):
-    stmt = query_for(project_id)
+    stmt = (
+        query_for(project_id)
+        .outerjoin(GeneratedMaterialState, GeneratedMaterialState.generation_id == Generation.id)
+        .where(GeneratedMaterialState.deleted_at.is_(None))
+    )
     if kind:
         stmt = stmt.where(Generation.output_type == kind)
     if query.strip():
@@ -70,6 +87,9 @@ def catalog(db, project_id, *, query="", kind=None, offset=0, limit=24):
             or_(
                 Generation.prompt_snapshot.icontains(query.strip(), autoescape=True),
                 Generation.model.icontains(query.strip(), autoescape=True),
+                GeneratedMaterialState.name.icontains(query.strip(), autoescape=True),
+                GeneratedMaterialState.description.icontains(query.strip(), autoescape=True),
+                cast(GeneratedMaterialState.tags, String).icontains(query.strip(), autoescape=True),
             )
         )
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))

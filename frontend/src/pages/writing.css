@@ -57,7 +57,7 @@
   color: hsl(var(--fg));
   font-size: 13px;
 }
-.writing-library-toolbar select {
+.writing-library-toolbar .studio-select-trigger {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 9px;
@@ -227,14 +227,6 @@
   padding: 16px 10px;
   border-right: 1px solid hsl(var(--border));
 }
-.writing-outline-search {
-  width: 100%;
-  padding: 8px;
-  margin-bottom: 10px;
-  border-radius: 6px;
-  background: hsl(var(--elevated));
-  font-size: 11px;
-}
 .writing-outline button[aria-current] {
   background: hsl(var(--primary) / 0.12);
   color: hsl(var(--primary));
@@ -291,8 +283,13 @@
 .writing-block:focus-within .writing-block-actions {
   opacity: 1;
 }
-.writing-block-actions select {
+.writing-block-actions .studio-select-trigger {
   max-width: 100px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .writing-block:not(:hover):not(:focus-within) .writing-block-actions {
+    opacity: 0;
+  }
 }
 .writing-assistant {
   min-width: 0;
@@ -417,4 +414,34 @@
 .studio-shell:has(.is-writing-focus) > .studio-sidebar,
 .studio-shell:has(.is-writing-focus) > div > header {
   display: none;
+}
+
+.writing-production-tools {
+  position: relative;
+  font-size: 12px;
+}
+.writing-production-tools > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+.writing-production-tools > div {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(300px, 75vw);
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  box-shadow: 0 12px 32px #0002;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.writing-production-tools summary:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
 }

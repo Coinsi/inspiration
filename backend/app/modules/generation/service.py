@@ -13,6 +13,7 @@ from app.core.crypto import decrypt, encrypt
 from app.core.deps import ProjectContext
 from app.core.errors import CapabilityUnsupported, NotFound
 from app.models.enums import JobStatus, QuotaScope
+from app.models.identity import Project
 from app.models.generation import Generation, GenerationJob, ProviderConfig, Quota
 from app.modules.generation import schemas
 from app.modules.generation.channels import model_snapshot
@@ -55,7 +56,14 @@ def list_providers(db: Session, project_id: uuid.UUID, user_id=None) -> list[Pro
     from app.modules.generation.channels import provider_view
 
     creative = catalog.rows(db, project_id)
-    bound = {r["profile_id"] for m in creative for r in m.definition.get("routes", [])}
+    # Disabled routing groups must not hide independently enabled service models.
+    bound = {
+        r["profile_id"]
+        for m in creative
+        if m.enabled
+        for r in catalog.public(db, m, True)["routes"]
+        if r["available"]
+    }
     result = [
         provider_view(db, p)
         for p in db.scalars(select(ProviderConfig).where(ProviderConfig.project_id == project_id))
@@ -205,7 +213,8 @@ def get_project_quota(db: Session, project_id: uuid.UUID) -> Quota | None:
 
 # ── 供应商实例 ──
 def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=None, user_id=None):
-    from app.modules.generation.personal import PREFIX as PERSONAL, PersonalProvider
+    from app.modules.generation.personal import PREFIX as PERSONAL
+    from app.modules.generation.personal import PersonalProvider
     if name.startswith(PERSONAL):
         return PersonalProvider(db, name, user_id, snapshot)
     from app.modules.generation.model_catalog import PREFIX
@@ -404,6 +413,8 @@ def estimate(
     target_id: uuid.UUID,
     gen_in: schemas.GenerateIn,
 ) -> schemas.EstimateOut:
+    # Serialize connection removal with new generation submissions.
+    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     provider = _provider_instance(db, ctx.project.id, gen_in.provider, user_id=ctx.user.id)
     prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
     from app.modules.identity.preferences import guide
@@ -435,6 +446,8 @@ def submit(
     skill_snapshot: list | None = None,
     project_guidance: str | None = None,
 ) -> GenerationJob:
+    # Serialize connection removal with new generation submissions.
+    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     provider = _provider_instance(db, ctx.project.id, gen_in.provider, user_id=ctx.user.id)
     caps = provider.capabilities()
     if mask and ("inpaint" not in caps.features or not gen_in.source_generation_id):
@@ -608,35 +621,5 @@ def patch_generation(
 
 
 def select_variant(db: Session, ctx: ProjectContext, gen_id: uuid.UUID) -> Generation:
-    g = db.get(Generation, gen_id)
-    if g is None or g.project_id != ctx.project.id:
-        raise NotFound("生成记录不存在")
-    if g.output_type == "audio":
-        raise CapabilityUnsupported("音轨不能作为镜头画面或资产封面")
-    # 同 target 下取消其他钦定
-    for other in list_generations(db, ctx.project.id, g.target_type, g.target_id):
-        other.is_selected = other.id == g.id
-    if g.target_type == "shot":
-        from app.models.shot import Shot
-
-        shot = db.get(Shot, g.target_id)
-        if shot is not None:
-            shot.selected_generation_id = g.id
-    elif g.target_type == "asset":
-        # 钦定的概念图作为资产代表图(头像)
-        from app.models.asset import Asset
-
-        asset = db.get(Asset, g.target_id)
-        if asset is not None and g.output_blob_hash:
-            asset.representative_blob_hash = g.output_blob_hash
-    audit.record(
-        db,
-        action="generation.select",
-        user_id=ctx.user.id,
-        project_id=ctx.project.id,
-        target_type=g.target_type,
-        target_id=g.target_id,
-        detail={"generation": str(g.id)},
-    )
-    db.flush()
-    return g
+    from app.modules.generation import adoption, jobs
+    return adoption.select_output(db, ctx, jobs.source(db, ctx.project.id, gen_id))

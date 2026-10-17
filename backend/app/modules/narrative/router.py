@@ -17,6 +17,48 @@ EDIT = require_action("narrative.edit")
 ASSET_EDIT = require_action("asset.edit")
 
 
+@router.post("/novels/{novel_id}/cover")
+def upload_novel_cover(
+    novel_id: uuid.UUID,
+    file: UploadFile = File(...),
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.narrative.covers import change
+    return change(db, ctx, "novel", novel_id, file)
+
+
+@router.delete("/novels/{novel_id}/cover")
+def remove_novel_cover(
+    novel_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.narrative.covers import change
+    return change(db, ctx, "novel", novel_id)
+
+
+@router.post("/scripts/{script_id}/cover")
+def upload_script_cover(
+    script_id: uuid.UUID,
+    file: UploadFile = File(...),
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.narrative.covers import change
+    return change(db, ctx, "script", script_id, file)
+
+
+@router.delete("/scripts/{script_id}/cover")
+def remove_script_cover(
+    script_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.narrative.covers import change
+    return change(db, ctx, "script", script_id)
+
+
 # ── 小说 ──
 @router.post("/novels/import", response_model=schemas.NovelOut)
 def import_novel(
@@ -129,6 +171,16 @@ def get_script(
     db: Session = Depends(get_db, scope="function"),
 ):
     return service.get_script(db, ctx.project.id, script_id)
+
+
+@router.patch("/scripts/{script_id}", response_model=schemas.ScriptDetailOut)
+def rename_script(
+    script_id: uuid.UUID,
+    data: schemas.ScriptIn,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service.rename_script(db, ctx, script_id, data.title)
 
 
 @router.delete("/scripts/{script_id}", status_code=204)

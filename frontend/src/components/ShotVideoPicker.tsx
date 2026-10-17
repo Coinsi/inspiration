@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
@@ -77,21 +79,22 @@ export function ShotVideoPicker({
       {!selected ? (
         <>
           <div className="reference-tools">
-            <input
-              type="search"
-              aria-label="搜索参考素材"
+            <SearchField
+              className="flex-1"
+
+              label="搜索参考素材"
               placeholder="搜索图片、音频或视频…"
               value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
+              onValueChange={(value) => {
+                setQuery(value);
                 setOffset(0);
               }}
             />
-            <select
+            <StudioSelect
               aria-label="引用素材类型"
               value={mediaType}
-              onChange={(e) => {
-                setMediaType(e.target.value as MediaType | "all");
+              onValueChange={(selectedValue) => {
+                setMediaType(selectedValue as MediaType | "all");
                 setOffset(0);
               }}
             >
@@ -99,7 +102,7 @@ export function ShotVideoPicker({
               <option value="video">视频</option>
               <option value="image">图片</option>
               <option value="audio">音频</option>
-            </select>
+            </StudioSelect>
           </div>
           {catalog.isPending ? (
             <p role="status">正在读取素材…</p>
@@ -234,15 +237,15 @@ export function ShotVideoPicker({
             )}
             <label className="text-sm">
               用途
-              <select
+              <StudioSelect
                 aria-label="片段引用用途"
                 className="block mt-1"
                 value={purpose}
-                onChange={(e) => setPurpose(e.target.value)}
+                onValueChange={(selectedValue) => setPurpose(selectedValue)}
               >
                 <option value="visual_reference">创作参考</option>
                 <option value="editing_source">剪辑备选</option>
-              </select>
+              </StudioSelect>
             </label>
           </fieldset>
           {!valid && (

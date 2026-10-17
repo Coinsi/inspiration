@@ -10,6 +10,7 @@ export function Modal({
   children,
   width = 760,
   keepMounted = false,
+  bodyClassName,
 }: {
   open: boolean;
   onClose: () => void;
@@ -17,6 +18,7 @@ export function Modal({
   children: ReactNode;
   width?: number;
   keepMounted?: boolean;
+  bodyClassName?: string;
 }) {
   const [big, setBig] = useState(false);
   const titleId = useId();
@@ -44,10 +46,10 @@ export function Modal({
         }}
       >
         <div className="flex items-center justify-between px-5 h-14 border-b border-border shrink-0">
-          <div id={titleId} className="font-medium">
+          <div id={titleId} className="min-w-0 truncate font-medium">
             {title}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               onClick={() => setBig((b) => !b)}
               className="h-8 w-8 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
@@ -68,7 +70,9 @@ export function Modal({
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        <div className={bodyClassName ?? "min-h-0 flex-1 overflow-y-auto p-5"}>
+          {children}
+        </div>
       </div>
     </div>,
     document.body,

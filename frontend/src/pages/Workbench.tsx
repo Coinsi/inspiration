@@ -13,7 +13,7 @@ import {
   Images,
   RefreshCw,
 } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { MediaImage } from "@/components/MediaImage";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -28,8 +28,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { StudioScenes } from "@/components/StudioScenes";
-import { CreativeLaunch } from "@/components/CreativeLaunch";
+import { ConversationWorkspace } from "@/components/workbench/ConversationWorkspace";
 
 export default function Workbench() {
   const { projectId } = useParams();
@@ -40,6 +39,15 @@ function ProjectWorkbench({ projectId }: { projectId: string }) {
   const { lang } = useI18n();
   const zh = lang === "zh";
   const base = `/projects/${projectId}`;
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "overview" ? "overview" : "chat";
+  const chooseView = (nextView: string) => {
+    const next = new URLSearchParams(params);
+    next.set("view", nextView);
+    next.delete("reference");
+    next.delete("reuse");
+    setParams(next);
+  };
   const project = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => api.get<Project>(base),
@@ -166,254 +174,265 @@ function ProjectWorkbench({ projectId }: { projectId: string }) {
     : 0;
 
   return (
-    <div className="studio-page workbench-page">
-      <section className="home-hero workbench-hero">
-        <StudioScenes />
-        <p className="studio-eyebrow">
-          INSPIRATION · {zh ? "你的创作现场" : "YOUR CREATIVE STUDIO"}
-        </p>
-        <h1>
-          {zh ? (
-            <>
-              今天，想讲一个<span>怎样的故事？</span>
-            </>
-          ) : (
-            <>
-              What story<span>will you tell today?</span>
-            </>
-          )}
-        </h1>
-        <CreativeLaunch projectId={projectId} />
-      </section>
-      <header className="page-heading items-center">
-        <div className="min-w-0">
-          <p className="!mb-2 !mt-0 text-[11px] font-medium uppercase tracking-[.18em] text-faint">
-            INSPIRATION STUDIO
-          </p>
-          <h2 className="text-xl font-semibold tracking-tight">
-            {project.data?.name ?? (zh ? "创作工作台" : "Creative workspace")}
-          </h2>
-          <p>
-            {project.data?.description ||
-              (zh
-                ? "让故事、参考与画面，在这里连起来。"
-                : "Bring your story, references and shots together.")}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link className="studio-primary" to={`${base}/storyboard`}>
-            <Clapperboard className="h-4 w-4" />
-            {zh ? "进入分镜" : "Open storyboard"}
-          </Link>
-        </div>
-      </header>
-      <section
-        className="workbench-focus"
-        aria-label={zh ? "继续创作" : "Continue creating"}
+    <div
+      className={`studio-page workbench-page ${view === "chat" ? "workbench-chat-page" : ""}`}
+    >
+      <div
+        className="workbench-creation-tabs"
+        role="tablist"
+        aria-label="工作台视图"
       >
-        <div className="relative z-10 flex min-w-0 flex-col items-start justify-center p-6 md:p-8">
-          <span className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-primary">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            {zh ? "继续你的创作" : "CONTINUE YOUR STORY"}
-          </span>
-          <h2 className="max-w-lg text-xl font-semibold leading-relaxed tracking-tight md:text-2xl">
-            {!ready
-              ? coreError
-                ? zh
-                  ? "项目进度暂时无法获取"
-                  : "Project progress is unavailable"
-                : zh
-                  ? "正在整理项目进度…"
-                  : "Loading your project…"
-              : `${zh ? "下一步 · " : "Next · "}${next.label}`}
-          </h2>
-          <p className="mt-3 max-w-lg text-sm leading-7 text-muted-foreground">
-            {!ready
-              ? zh
-                ? "你仍可以通过导航进入已有的创作工具。"
-                : "You can still open your tools from the navigation."
-              : withoutOutput && next.to === "storyboard"
-                ? zh
-                  ? `「${withoutOutput.title || withoutOutput.code}」还没有选定画面，继续生成或上传参考。`
-                  : `Select an output for “${withoutOutput.title || withoutOutput.code}”.`
-                : next.detail}
-          </p>
-          <div className="mt-6 flex flex-wrap items-center gap-4">
-            {ready ? (
-              <Link className="studio-primary" to={nextHref}>
-                {zh ? "继续创作" : "Continue creating"}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            ) : coreError ? (
-              <button className="studio-link" onClick={retryAll}>
-                <RefreshCw className="h-4 w-4" />
-                {zh ? "重新加载进度" : "Reload progress"}
-              </button>
-            ) : (
-              <Skeleton className="h-9 w-32" />
-            )}
-            <Link
-              to={`${base}/assets`}
-              className="text-sm text-muted-foreground hover:text-primary"
-            >
-              {zh ? "浏览角色与参考" : "Browse references"}
-              <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" />
-            </Link>
-          </div>
-        </div>
-        <div className="workbench-cover relative hidden min-h-[240px] overflow-hidden md:block">
-          {cover ? (
-            <>
-              <MediaImage
-                src={blobUrl(projectId, cover.representative_blob_hash!)}
-                alt={cover.name}
-              />
-              <div className="absolute bottom-4 right-4 rounded-lg bg-black/70 px-3 py-1.5 text-xs text-white">
-                {zh ? "项目资产 · " : "Project asset · "}
-                {cover.name}
-              </div>
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center text-primary/40">
-              <Clapperboard className="h-24 w-24" strokeWidth={0.7} />
-            </div>
-          )}
-        </div>
-      </section>
-      <section aria-labelledby="workflow-heading">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h2 id="workflow-heading" className="text-sm font-semibold">
-            {zh ? "制作流程" : "Production workflow"}
-          </h2>
-          <span className="text-xs text-faint">
-            {zh
-              ? "全项目概览 · 可从任一步开始"
-              : "Project overview · start at any stage"}
-          </span>
-        </div>
-        <div className="grid auto-cols-[176px] grid-flow-col gap-3 overflow-x-auto pb-2 sm:auto-cols-auto sm:grid-flow-row sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">
-          {stages.map((stage, index) => (
-            <Link
-              key={stage.to}
-              to={`${base}/${stage.to}`}
-              className={cn(
-                "workbench-stage group",
-                ready &&
-                  next.to === stage.to &&
-                  "border-primary/50 bg-primary/[.04]",
-              )}
-            >
-              <div className="mb-5 flex items-center justify-between">
-                <stage.icon
-                  className="h-5 w-5 text-muted-foreground group-hover:text-primary"
-                  strokeWidth={1.6}
-                />
-                <span className="font-code text-[11px] text-faint">
-                  0{index + 1}
-                </span>
-              </div>
-              <h3 className="font-medium">{stage.label}</h3>
-              <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">
-                {stage.detail}
-              </p>
-              <div className="mt-4 flex items-center justify-between border-t pt-3 text-xs">
-                <span
-                  className={
-                    stage.query.isError
-                      ? "text-danger"
-                      : "text-muted-foreground"
-                  }
-                >
-                  {countText(stage.query, stage.count, stage.unit)}
-                </span>
-                <ArrowRight className="h-3.5 w-3.5 text-faint group-hover:text-primary" />
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <WorkbenchGallery
-          projectId={projectId}
-          assets={assets}
-          shots={shots}
-          novels={novels}
-        />
-        <aside className="min-w-0 space-y-5">
-          <section
-            className="rounded-xl border bg-card p-5"
-            aria-labelledby="attention-heading"
+        {[
+          ["chat", "创作对话"],
+          ["overview", "项目概览"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => chooseView(id)}
           >
-            <div className="mb-5 flex items-center justify-between">
-              <h2 id="attention-heading" className="text-sm font-semibold">
-                {zh ? "镜头准备情况" : "Shot readiness"}
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "chat" && <ConversationWorkspace projectId={projectId} />}
+      {view === "overview" && (
+        <>
+          <header className="page-heading items-center">
+            <div className="min-w-0">
+              <p className="!mb-2 !mt-0 text-[11px] font-medium uppercase tracking-[.18em] text-faint">
+                INSPIRATION STUDIO
+              </p>
+              <h2 className="text-xl font-semibold tracking-tight">
+                {project.data?.name ??
+                  (zh ? "创作工作台" : "Creative workspace")}
               </h2>
-              <span className="text-[11px] text-faint">
-                {zh ? "全项目" : "Project"}
+              <p>
+                {project.data?.description ||
+                  (zh
+                    ? "让故事、参考与画面，在这里连起来。"
+                    : "Bring your story, references and shots together.")}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link className="studio-primary" to={`${base}/storyboard`}>
+                <Clapperboard className="h-4 w-4" />
+                {zh ? "进入分镜" : "Open storyboard"}
+              </Link>
+            </div>
+          </header>
+          <section
+            className="workbench-focus"
+            aria-label={zh ? "继续创作" : "Continue creating"}
+          >
+            <div className="relative z-10 flex min-w-0 flex-col items-start justify-center p-6 md:p-8">
+              <span className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-primary">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                {zh ? "继续你的创作" : "CONTINUE YOUR STORY"}
+              </span>
+              <h2 className="max-w-lg text-xl font-semibold leading-relaxed tracking-tight md:text-2xl">
+                {!ready
+                  ? coreError
+                    ? zh
+                      ? "项目进度暂时无法获取"
+                      : "Project progress is unavailable"
+                    : zh
+                      ? "正在整理项目进度…"
+                      : "Loading your project…"
+                  : `${zh ? "下一步 · " : "Next · "}${next.label}`}
+              </h2>
+              <p className="mt-3 max-w-lg text-sm leading-7 text-muted-foreground">
+                {!ready
+                  ? zh
+                    ? "你仍可以通过导航进入已有的创作工具。"
+                    : "You can still open your tools from the navigation."
+                  : withoutOutput && next.to === "storyboard"
+                    ? zh
+                      ? `「${withoutOutput.title || withoutOutput.code}」还没有选定画面，继续生成或上传参考。`
+                      : `Select an output for “${withoutOutput.title || withoutOutput.code}”.`
+                    : next.detail}
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-4">
+                {ready ? (
+                  <Link className="studio-primary" to={nextHref}>
+                    {zh ? "继续创作" : "Continue creating"}
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                ) : coreError ? (
+                  <button className="studio-link" onClick={retryAll}>
+                    <RefreshCw className="h-4 w-4" />
+                    {zh ? "重新加载进度" : "Reload progress"}
+                  </button>
+                ) : (
+                  <Skeleton className="h-9 w-32" />
+                )}
+                <Link
+                  to={`${base}/assets`}
+                  className="text-sm text-muted-foreground hover:text-primary"
+                >
+                  {zh ? "浏览角色与参考" : "Browse references"}
+                  <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" />
+                </Link>
+              </div>
+            </div>
+            <div className="workbench-cover relative hidden min-h-[240px] overflow-hidden md:block">
+              {cover ? (
+                <>
+                  <MediaImage
+                    src={blobUrl(projectId, cover.representative_blob_hash!)}
+                    alt={cover.name}
+                  />
+                  <div className="absolute bottom-4 right-4 rounded-lg bg-black/70 px-3 py-1.5 text-xs text-white">
+                    {zh ? "项目资产 · " : "Project asset · "}
+                    {cover.name}
+                  </div>
+                </>
+              ) : (
+                <div className="flex h-full items-center justify-center text-primary/40">
+                  <Clapperboard className="h-24 w-24" strokeWidth={0.7} />
+                </div>
+              )}
+            </div>
+          </section>
+          <section aria-labelledby="workflow-heading">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 id="workflow-heading" className="text-sm font-semibold">
+                {zh ? "制作流程" : "Production workflow"}
+              </h2>
+              <span className="text-xs text-faint">
+                {zh
+                  ? "全项目概览 · 可从任一步开始"
+                  : "Project overview · start at any stage"}
               </span>
             </div>
-            <LoadState
-              loading={shots.isPending}
-              error={shots.isError}
-              retry={() => void shots.refetch()}
-            >
-              <div className="flex items-baseline gap-2">
-                <strong className="text-3xl font-medium tabular-nums">
-                  {selected}
-                  <span className="ml-1 text-base text-faint">
-                    / {shots.data?.length ?? 0}
-                  </span>
-                </strong>
-                <span className="text-xs text-muted-foreground">
-                  {zh ? "已选画面" : "outputs selected"}
-                </span>
-              </div>
-              <div
-                role="progressbar"
-                aria-label={zh ? "已选画面比例" : "Selected output progress"}
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                className="my-4 h-1.5 overflow-hidden rounded-full bg-elevated"
-              >
-                <div
-                  className="h-full rounded-full bg-primary"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="text-xs leading-6 text-muted-foreground">
-                {zh
-                  ? `${approved} 个镜头已通过审阅或进入成片。选定画面不代表已完成审阅。`
-                  : `${approved} shots approved or in a cut. Selecting an output does not approve a shot.`}
-              </p>
-              {withoutOutput ? (
+            <div className="grid auto-cols-[176px] grid-flow-col gap-3 overflow-x-auto pb-2 sm:auto-cols-auto sm:grid-flow-row sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">
+              {stages.map((stage, index) => (
                 <Link
-                  to={`${base}/shots?shot=${withoutOutput.id}`}
-                  className="mt-4 flex items-center justify-between gap-3 border-t pt-4 text-xs"
+                  key={stage.to}
+                  to={`${base}/${stage.to}`}
+                  className={cn(
+                    "workbench-stage group",
+                    ready &&
+                      next.to === stage.to &&
+                      "border-primary/50 bg-primary/[.04]",
+                  )}
                 >
-                  <span className="min-w-0 truncate">
-                    {zh ? "待选画面 · " : "Needs output · "}
-                    {withoutOutput.title || withoutOutput.code}
-                  </span>
-                  <ArrowUpRight className="h-4 w-4 shrink-0 text-primary" />
+                  <div className="mb-5 flex items-center justify-between">
+                    <stage.icon
+                      className="h-5 w-5 text-muted-foreground group-hover:text-primary"
+                      strokeWidth={1.6}
+                    />
+                    <span className="font-code text-[11px] text-faint">
+                      0{index + 1}
+                    </span>
+                  </div>
+                  <h3 className="font-medium">{stage.label}</h3>
+                  <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">
+                    {stage.detail}
+                  </p>
+                  <div className="mt-4 flex items-center justify-between border-t pt-3 text-xs">
+                    <span
+                      className={
+                        stage.query.isError
+                          ? "text-danger"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {countText(stage.query, stage.count, stage.unit)}
+                    </span>
+                    <ArrowRight className="h-3.5 w-3.5 text-faint group-hover:text-primary" />
+                  </div>
                 </Link>
-              ) : (
-                !!shots.data?.length && (
-                  <Link
-                    to={`${base}/cuts`}
-                    className="mt-4 flex items-center gap-2 text-xs text-primary"
-                  >
-                    <Check className="h-4 w-4" />
-                    {zh ? "前往编排成片" : "Arrange your film"}
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
-                )
-              )}
-            </LoadState>
+              ))}
+            </div>
           </section>
-          <WorkbenchActivity projectId={projectId} />
-        </aside>
-      </div>
+          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <WorkbenchGallery
+              projectId={projectId}
+              assets={assets}
+              shots={shots}
+              novels={novels}
+            />
+            <aside className="min-w-0 space-y-5">
+              <section
+                className="rounded-xl border bg-card p-5"
+                aria-labelledby="attention-heading"
+              >
+                <div className="mb-5 flex items-center justify-between">
+                  <h2 id="attention-heading" className="text-sm font-semibold">
+                    {zh ? "镜头准备情况" : "Shot readiness"}
+                  </h2>
+                  <span className="text-[11px] text-faint">
+                    {zh ? "全项目" : "Project"}
+                  </span>
+                </div>
+                <LoadState
+                  loading={shots.isPending}
+                  error={shots.isError}
+                  retry={() => void shots.refetch()}
+                >
+                  <div className="flex items-baseline gap-2">
+                    <strong className="text-3xl font-medium tabular-nums">
+                      {selected}
+                      <span className="ml-1 text-base text-faint">
+                        / {shots.data?.length ?? 0}
+                      </span>
+                    </strong>
+                    <span className="text-xs text-muted-foreground">
+                      {zh ? "已选画面" : "outputs selected"}
+                    </span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-label={
+                      zh ? "已选画面比例" : "Selected output progress"
+                    }
+                    aria-valuenow={progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    className="my-4 h-1.5 overflow-hidden rounded-full bg-elevated"
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs leading-6 text-muted-foreground">
+                    {zh
+                      ? `${approved} 个镜头已通过审阅或进入成片。选定画面不代表已完成审阅。`
+                      : `${approved} shots approved or in a cut. Selecting an output does not approve a shot.`}
+                  </p>
+                  {withoutOutput ? (
+                    <Link
+                      to={`${base}/shots?shot=${withoutOutput.id}`}
+                      className="mt-4 flex items-center justify-between gap-3 border-t pt-4 text-xs"
+                    >
+                      <span className="min-w-0 truncate">
+                        {zh ? "待选画面 · " : "Needs output · "}
+                        {withoutOutput.title || withoutOutput.code}
+                      </span>
+                      <ArrowUpRight className="h-4 w-4 shrink-0 text-primary" />
+                    </Link>
+                  ) : (
+                    !!shots.data?.length && (
+                      <Link
+                        to={`${base}/cuts`}
+                        className="mt-4 flex items-center gap-2 text-xs text-primary"
+                      >
+                        <Check className="h-4 w-4" />
+                        {zh ? "前往编排成片" : "Arrange your film"}
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    )
+                  )}
+                </LoadState>
+              </section>
+              <WorkbenchActivity projectId={projectId} />
+            </aside>
+          </div>
+        </>
+      )}
     </div>
   );
 }

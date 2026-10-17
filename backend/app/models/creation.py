@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Index, String
+from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,7 @@ class Creation(Base, TimestampMixin):
     created_by: Mapped[uuid.UUID] = mapped_column(UUID)
     request_key: Mapped[uuid.UUID] = mapped_column(UUID)
     title: Mapped[str] = mapped_column(String(120))
+    work_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("creative_work.id"))
     request: Mapped[dict] = mapped_column(JSONB)
     __table_args__ = (
         Index("uq_creation_request", "project_id", "created_by", "request_key", unique=True),

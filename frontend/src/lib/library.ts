@@ -79,6 +79,9 @@ export interface MediaVersion {
   height: number | null;
 }
 export interface LibraryMedia {
+  description?: string;
+  tags?: string[] | null;
+  metadata_revision?: number;
   folder_id?: string | null;
   id: string;
   name: string;

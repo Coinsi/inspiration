@@ -268,6 +268,23 @@ def get_script(db: Session, project_id: uuid.UUID, script_id: uuid.UUID) -> Scri
     return _get_script(db, project_id, script_id)
 
 
+def rename_script(db: Session, ctx: ProjectContext, script_id: uuid.UUID, title: str) -> Script:
+    script = _get_script(db, ctx.project.id, script_id)
+    previous = script.title
+    script.title = title
+    audit.record(
+        db,
+        action="script.rename",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_type="script",
+        target_id=script.id,
+        detail={"previous_title": previous, "title": title},
+    )
+    db.flush()
+    return script
+
+
 def delete_script(db: Session, ctx: ProjectContext, script_id: uuid.UUID) -> None:
     """软删除剧本(标记 deleted_at);其下已落库场次/镜头保持不动。"""
     s = _get_script(db, ctx.project.id, script_id)
@@ -504,6 +521,7 @@ def _to_fountain(title: str, blocks: list[dict]) -> str:
 def _llm_config(db: Session, project_id: uuid.UUID):
     """取项目内已启用的 LLM 供应商配置(provider_config kind=llm)。"""
     from app.modules.generation.channels import llm_config
+
     return llm_config(db, project_id)
 
 

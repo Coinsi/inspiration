@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  UploadCloud,
+  Film,
+  Image as ImageIcon,
+  AudioLines,
+  FileCheck2,
+  Check,
+  ArrowRight,
+} from "lucide-react";
+import "./library-upload.css";
 import { api, apiUpload } from "@/lib/api";
 import {
   digest,
   fileMediaType,
   mediaAccept,
   mediaTypeName,
+  mediaStatus,
   type MediaType,
   fileFingerprint,
   mediaSize,
@@ -38,6 +49,58 @@ export function LibraryUpload({
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [error, setError] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const ended = !!version && version.status !== "uploading";
+  const finished =
+    !!version && ["queued", "processing", "ready"].includes(version.status);
+  const fileLocked = busy || ended;
+  const selectedKind = file ? fileMediaType(file.name) : version?.media_type;
+  const FileIcon =
+    selectedKind === "image"
+      ? ImageIcon
+      : selectedKind === "audio"
+        ? AudioLines
+        : Film;
+  const chooseFile = (files: FileList | null) => {
+    setDragging(false);
+    if (fileLocked || !files?.length) return;
+    setError("");
+    if (files.length !== 1) {
+      setError(
+        zh
+          ? "请一次选择一个文件，完成后可以继续导入。"
+          : "Choose one file at a time.",
+      );
+      return;
+    }
+    const next = files[0];
+    const kind = fileMediaType(next.name);
+    if (!kind || next.size === 0) {
+      setError(
+        zh
+          ? "请选择有效的视频、静态图片或音频文件。"
+          : "Choose a valid video, still image or audio file.",
+      );
+      return;
+    }
+    if (kind === "image" && next.size > 64 * 1024 * 1024) {
+      setError(
+        zh ? "图片不能超过 64 MB，请重新选择。" : "Images must be under 64 MB.",
+      );
+      return;
+    }
+    if (expectedType && kind !== expectedType) {
+      setError(
+        zh
+          ? `请选择${mediaTypeName(expectedType, true)}文件，与原素材保持同一类型。`
+          : "Choose the same media type as the original.",
+      );
+      return;
+    }
+    setFile(next);
+    setMessage("");
+  };
   const expectedType = resume?.media_type || mediaType;
   const pause = useRef(false),
     running = useRef(false);
@@ -53,6 +116,7 @@ export function LibraryUpload({
     running.current = true;
     setBusy(true);
     setError("");
+    let hasSession = !!version;
     try {
       const kind = fileMediaType(file.name);
       if (!kind)
@@ -92,11 +156,8 @@ export function LibraryUpload({
       if (current && current.status !== "uploading") {
         setVersion(current);
         onChange();
-        throw new Error(
-          zh
-            ? "此上传已结束，请关闭窗口查看状态。"
-            : "This upload has ended. Close to check its status.",
-        );
+        setMessage(mediaStatus(current.status, zh));
+        return;
       }
       if (!current) {
         current = await api.post<MediaVersion>(`${base}/uploads`, {
@@ -107,6 +168,7 @@ export function LibraryUpload({
           folder_id: folderId,
         });
         setVersion(current);
+        hasSession = true;
         onChange();
       }
       // Verify every committed prefix chunk, not just filename/size, before resuming.
@@ -170,9 +232,11 @@ export function LibraryUpload({
       onChange();
     } catch (e) {
       setMessage(
-        zh
-          ? "上传已暂停，已完成的分块会保留。"
-          : "Upload paused. Completed chunks are retained.",
+        hasSession
+          ? zh
+            ? "上传已暂停，已完成的分块会保留。"
+            : "Upload paused. Completed chunks are retained."
+          : "",
       );
       setError(
         e instanceof TypeError
@@ -209,27 +273,20 @@ export function LibraryUpload({
         pause.current = true;
         onClose();
       }}
-      width={600}
+      width={640}
     >
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
+      <div className="library-upload">
+        <p className="upload-intro">
           {zh
-            ? "支持视频、JPEG / PNG / WebP静态图片和音频。图片最多64 MB；视频与音频默认最多10 GB、6小时。保留原文件并另行生成预览；离开页面后可重新选择原文件续传。"
-            : "Import video, still JPEG / PNG / WebP images and audio. Images up to 64 MB; video and audio default to 10 GB and 6 hours. Originals and previews are separate. Reselect the original to resume."}
+            ? resume
+              ? "重新选择原文件，从上次的位置继续。"
+              : mediaId
+                ? "为这份素材添加新版本，已有引用保持不变。"
+                : "把你的画面与声音，带入创作。"
+            : "Bring your footage, images and sound into your project."}
         </p>
-        {expectedType && (
-          <p className="text-xs text-muted-foreground">
-            {zh
-              ? `此素材为${mediaTypeName(expectedType, true)}，新版本需保持同一类型。`
-              : `This is ${mediaTypeName(expectedType, false).toLowerCase()} media. New versions keep the same type.`}
-          </p>
-        )}
-        {version && (
-          <p className="break-words text-sm">
-            {version.filename} · v{version.ordinal}
-          </p>
-        )}
         <input
+          ref={input}
           aria-label={zh ? "选择素材文件" : "Choose media file"}
           type="file"
           accept={
@@ -237,55 +294,208 @@ export function LibraryUpload({
               ? mediaAccept[expectedType]
               : Object.values(mediaAccept).join(",")
           }
-          disabled={busy || (!!version && version.status !== "uploading")}
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-          className="max-w-full text-sm"
+          disabled={fileLocked}
+          className="sr-only"
+          tabIndex={-1}
+          onChange={(e) => {
+            chooseFile(e.target.files);
+            e.target.value = "";
+          }}
         />
-        {version && (
-          <div>
-            <progress
-              aria-label={zh ? "素材上传进度" : "Media upload progress"}
-              className="h-2 w-full accent-primary"
-              value={version.uploaded_bytes}
-              max={version.size_bytes}
-            />
-            <p className="mt-2 text-xs text-muted-foreground">
-              {mediaSize(version.uploaded_bytes)} /{" "}
-              {mediaSize(version.size_bytes)} ·{" "}
-              {Math.floor((version.uploaded_bytes / version.size_bytes) * 100)}%
-            </p>
-          </div>
-        )}
-        <p role="status" className="text-xs text-muted-foreground">
-          {message}
-        </p>
-        {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error}
-          </p>
-        )}
-        <div className="flex justify-end gap-2">
-          {busy ? (
-            <Button
-              variant="outline"
-              onClick={() => {
-                pause.current = true;
-                setMessage(
-                  zh ? "当前分块完成后暂停…" : "Pausing after this chunk…",
-                );
-              }}
-            >
-              {zh ? "暂停上传" : "Pause"}
-            </Button>
+        <div
+          className={`upload-dropzone ${dragging ? "is-dragging" : ""} ${file || version ? "has-file" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!fileLocked) setDragging(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              setDragging(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            chooseFile(e.dataTransfer.files);
+          }}
+        >
+          {file || version ? (
+            <div className="upload-selected">
+              <span
+                className={`upload-file-icon ${finished ? "is-complete" : ""}`}
+              >
+                {finished ? <FileCheck2 size={28} /> : <FileIcon size={28} />}
+              </span>
+              <div className="upload-file-copy">
+                <strong title={file?.name || version?.filename}>
+                  {file?.name || version?.filename}
+                </strong>
+                <span>
+                  {selectedKind ? mediaTypeName(selectedKind, zh) : ""} ·{" "}
+                  {mediaSize(file?.size || version?.size_bytes || 0)}
+                  {version ? ` · v${version.ordinal}` : ""}
+                </span>
+                <small>
+                  {ended
+                    ? mediaStatus(version!.status, zh)
+                    : file
+                      ? version
+                        ? zh
+                          ? "已选择原文件，继续时将核对已上传内容"
+                          : "Ready to verify and resume"
+                        : zh
+                          ? "已准备好上传"
+                          : "Ready to upload"
+                      : zh
+                        ? "请选择原文件以继续上传"
+                        : "Select the original file to resume"}
+                </small>
+              </div>
+              {!fileLocked && (
+                <button
+                  type="button"
+                  className="upload-reselect"
+                  onClick={() => input.current?.click()}
+                >
+                  {zh ? (file ? "重新选择" : "选择原文件") : "Choose file"}
+                </button>
+              )}
+            </div>
           ) : (
-            <Button
-              disabled={!file || (!!version && version.status !== "uploading")}
-              onClick={() => void send()}
+            <button
+              type="button"
+              autoFocus
+              data-autofocus
+              className="upload-drop-trigger"
+              disabled={fileLocked}
+              onClick={() => input.current?.click()}
             >
-              {zh ? "开始 / 继续上传" : "Start / resume upload"}
-            </Button>
+              <span className="upload-drop-icon">
+                <UploadCloud size={30} strokeWidth={1.5} />
+              </span>
+              <strong>
+                {zh ? "拖入文件，或点击选择" : "Drop a file here, or browse"}
+              </strong>
+              <span>
+                {expectedType
+                  ? mediaTypeName(expectedType, zh)
+                  : zh
+                    ? "视频、图片、音频"
+                    : "Video, images and audio"}
+              </span>
+              <span className="upload-browse">
+                {zh ? "选择文件" : "Choose file"}
+                <ArrowRight size={14} />
+              </span>
+            </button>
           )}
         </div>
+        {version && (
+          <div className="upload-progress">
+            <div>
+              <strong>
+                {ended
+                  ? mediaStatus(version!.status, zh)
+                  : busy
+                    ? zh
+                      ? "正在上传"
+                      : "Uploading"
+                    : zh
+                      ? "等待继续"
+                      : "Ready to resume"}
+              </strong>
+              <span>
+                {Math.min(
+                  100,
+                  Math.floor(
+                    (version.uploaded_bytes / Math.max(1, version.size_bytes)) *
+                      100,
+                  ),
+                )}
+                %
+              </span>
+            </div>
+            <progress
+              aria-label={zh ? "素材上传进度" : "Media upload progress"}
+              value={version.uploaded_bytes}
+              max={Math.max(1, version.size_bytes)}
+            />
+            <span>
+              {mediaSize(version.uploaded_bytes)} /{" "}
+              {mediaSize(version.size_bytes)}
+            </span>
+          </div>
+        )}
+        {message && (
+          <p role="status" className="upload-message">
+            {message}
+          </p>
+        )}
+        {(error || (ended && version?.error)) && (
+          <p role="alert" className="upload-error">
+            {error || version?.error}
+          </p>
+        )}
+        <div className="upload-reassurance">
+          <span>
+            <Check size={13} />
+            {zh ? "保留原文件" : "Originals retained"}
+          </span>
+          <span>
+            <Check size={13} />
+            {zh ? "支持断点续传" : "Resumable uploads"}
+          </span>
+        </div>
+        <details className="upload-requirements">
+          <summary>
+            {zh ? "支持格式与大小限制" : "Formats and file limits"}
+          </summary>
+          <p>
+            {zh
+              ? "图片支持 JPEG、PNG、WebP，最大 64 MB。视频与音频默认最大 10 GB、6 小时，实际以服务端配置为准。一次导入一个文件，上传完成后自动制作预览。"
+              : "JPEG, PNG and WebP images up to 64 MB. Video and audio default to 10 GB and 6 hours, subject to server settings. Import one file at a time."}
+          </p>
+          {expectedType && (
+            <p>
+              {zh
+                ? `此素材为${mediaTypeName(expectedType, true)}，新版本需保持同一类型。`
+                : "New versions must use the same media type."}
+            </p>
+          )}
+        </details>
+        <footer className="upload-footer">
+          <span>
+            {zh
+              ? "上传后可在素材库查看处理进度"
+              : "Track processing in your media library"}
+          </span>
+          <div>
+            {ended ? (
+              <Button onClick={onClose}>{zh ? "完成" : "Done"}</Button>
+            ) : busy ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  pause.current = true;
+                  setMessage(
+                    zh ? "当前分块完成后暂停…" : "Pausing after this chunk…",
+                  );
+                }}
+              >
+                {zh ? "暂停上传" : "Pause"}
+              </Button>
+            ) : (
+              <Button disabled={!file} onClick={() => void send()}>
+                <UploadCloud size={15} />
+                {version
+                  ? zh
+                    ? "继续上传"
+                    : "Resume upload"
+                  : zh
+                    ? "开始上传"
+                    : "Start upload"}
+              </Button>
+            )}
+          </div>
+        </footer>
       </div>
     </Modal>
   );

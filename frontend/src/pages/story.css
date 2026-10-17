@@ -98,7 +98,7 @@
   font-size: 11px;
   color: hsl(var(--muted));
 }
-.story-type-size select {
+.story-type-size .studio-select-trigger {
   padding: 5px;
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
@@ -165,27 +165,11 @@
   border-top: 1px solid hsl(var(--border));
   border-bottom: 1px solid hsl(var(--border));
 }
-.story-search {
-  flex: 1;
-  min-width: 200px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: hsl(var(--muted));
-}
-.story-search input {
-  min-width: 0;
-  width: 100%;
-  background: transparent;
-  color: hsl(var(--fg));
-  font-size: 13px;
-  padding: 9px 2px;
-}
-.story-bible-tools > select,
+.story-bible-tools > .studio-select-trigger,
 .story-bible-tools > input,
 .story-extract-controls input,
-.story-extract-controls select,
-.story-setting-form select {
+.story-extract-controls .studio-select-trigger,
+.story-setting-form .studio-select-trigger {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--card));
@@ -196,7 +180,7 @@
 .story-bible-tools > input {
   width: 200px;
 }
-.story-bible-tools > select {
+.story-bible-tools > .studio-select-trigger {
   max-width: 280px;
 }
 .story-text-link {
@@ -431,7 +415,7 @@
   font-size: 12px;
   color: hsl(var(--muted));
 }
-.story-setting-form :is(input, select, textarea) {
+.story-setting-form :is(input, .studio-select-trigger, textarea) {
   color: hsl(var(--fg));
 }
 .story-setting-form textarea {
@@ -537,7 +521,7 @@
   .story-setting-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .story-bible-tools > select {
+  .story-bible-tools > .studio-select-trigger {
     max-width: 100%;
   }
 }
@@ -555,7 +539,7 @@
   .story-header h1 {
     font-size: 24px;
   }
-  .story-bible-tools > :is(select, input) {
+  .story-bible-tools > :is(.studio-select-trigger, input) {
     width: 100%;
   }
   .story-reading-page h2 {
@@ -588,5 +572,64 @@
   }
   .story-library:not(.is-open) {
     display: none;
+  }
+}
+
+/* The catalogue is the entry point; a reader contains only its chapter directory. */
+.story-catalog {
+  width: 100%;
+}
+.story-novel-card .writing-script-link {
+  width: 100%;
+  text-align: left;
+}
+.story-novel-card footer {
+  gap: 12px;
+}
+.story-novel-card footer > span {
+  min-width: 0;
+}
+.story-novel-card footer button:hover {
+  background: hsl(var(--elevated));
+  color: hsl(var(--fg));
+}
+.story-novel-rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid hsl(var(--border));
+}
+.story-novel-rename input {
+  min-width: 0;
+  flex: 1;
+  padding: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--bg));
+}
+.story-novel-rename button {
+  padding: 6px;
+}
+.story-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: hsl(var(--muted));
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+.story-header h1 {
+  overflow-wrap: anywhere;
+}
+.story-reading-layout .story-chapters {
+  max-height: none;
+}
+@media (max-width: 800px) {
+  .story-reading-layout .story-library.is-open {
+    display: flex;
+  }
+  .story-reading-layout .story-chapters {
+    max-height: 320px;
   }
 }

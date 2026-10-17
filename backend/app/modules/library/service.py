@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 
 from app.core import audit
 from app.core.config import settings
@@ -108,7 +108,13 @@ def catalog(
         LibraryMedia.deleted_at.is_not(None) if deleted else LibraryMedia.deleted_at.is_(None),
     ]
     if query.strip():
-        conditions.append(LibraryMedia.name.icontains(query.strip(), autoescape=True))
+        conditions.append(
+            or_(
+                LibraryMedia.name.icontains(query.strip(), autoescape=True),
+                LibraryMedia.description.icontains(query.strip(), autoescape=True),
+                cast(LibraryMedia.tags, String).icontains(query.strip(), autoescape=True),
+            )
+        )
     if folder_id is not None or root_only:
         conditions.append(LibraryMedia.folder_id == folder_id)
     if media_type:
@@ -151,7 +157,13 @@ def version_catalog(db, project_id, query="", offset=0, limit=24, media_type=Non
         MediaVersion.status == "ready",
     ]
     if query.strip():
-        conditions.append(LibraryMedia.name.icontains(query.strip(), autoescape=True))
+        conditions.append(
+            or_(
+                LibraryMedia.name.icontains(query.strip(), autoescape=True),
+                LibraryMedia.description.icontains(query.strip(), autoescape=True),
+                cast(LibraryMedia.tags, String).icontains(query.strip(), autoescape=True),
+            )
+        )
     if media_type:
         conditions.append(MediaVersion.media_type == media_type)
     total = db.scalar(
@@ -206,6 +218,9 @@ def media_entries(db, project_id, items):
         {
             "id": i.id,
             "name": i.name,
+            "description": i.description,
+            "tags": i.tags,
+            "metadata_revision": i.metadata_revision,
             "folder_id": i.folder_id,
             "deleted_at": i.deleted_at,
             "versions": grouped.get(i.id, []),
@@ -246,7 +261,9 @@ def begin_upload(db, ctx, data):
             folders.lock_project(db, ctx.project.id)
             folders.get(db, ctx.project.id, data.folder_id)
         item = LibraryMedia(
-            project_id=ctx.project.id, name=data.filename.strip(), folder_id=data.folder_id
+            project_id=ctx.project.id,
+            name=media_types.display_name(data.filename),
+            folder_id=data.folder_id,
         )
         db.add(item)
         db.flush()
@@ -325,6 +342,8 @@ def retry(db, ctx, version_id):
     if not v.original_hash and not staging_path(v.id).is_file():
         raise Conflict("源文件不可用，请重新上传")
     v.status, v.error = "queued", None
+    audit.record(db, action="library.retry", user_id=ctx.user.id,
+                 project_id=ctx.project.id, target_id=v.id)
     db.flush()
     return version_out(v)
 

@@ -32,6 +32,7 @@ const Storyboard = lazy(() => import("@/pages/Storyboard"));
 const Trash = lazy(() => import("@/pages/Trash"));
 const Workbench = lazy(() => import("@/pages/Workbench"));
 const Tasks = lazy(() => import("@/pages/Tasks"));
+const Materials = lazy(() => import("@/pages/Materials"));
 const MediaLibrary = lazy(() => import("@/pages/MediaLibrary"));
 const GeneratedLibrary = lazy(() => import("@/pages/GeneratedLibrary"));
 
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="scripts" element={<Scripts />} />
             <Route path="scripts/:scriptId" element={<ScriptEditor />} />
             <Route path="assets" element={<Assets />} />
+            <Route path="materials" element={<Materials />} />
             <Route path="library" element={<MediaLibrary />} />
             <Route path="generated" element={<GeneratedLibrary />} />
             <Route path="assets/import" element={<AssetImport />} />

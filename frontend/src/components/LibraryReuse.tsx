@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -76,13 +77,13 @@ export function LibraryReuse({
         ) : (
           <label className="block space-y-2 text-xs">
             <span>{zh ? "来源项目" : "Source project"}</span>
-            <select
+            <StudioSelect
               aria-label={zh ? "来源项目" : "Source project"}
               className="w-full rounded-lg border bg-background p-2 text-sm"
               value={sourceProject}
               disabled={reuse.isPending}
-              onChange={(e) => {
-                setSourceProject(e.target.value);
+              onValueChange={(selectedValue) => {
+                setSourceProject(selectedValue);
                 setVersion("");
                 reuse.reset();
               }}
@@ -95,7 +96,7 @@ export function LibraryReuse({
                   {p.name}
                 </option>
               ))}
-            </select>
+            </StudioSelect>
           </label>
         )}
         {sourceProject && (

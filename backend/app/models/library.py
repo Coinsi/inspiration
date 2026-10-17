@@ -25,6 +25,9 @@ class LibraryMedia(Base, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
     name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    tags: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    metadata_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     folder_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("media_folder.id"), index=True)
 
 

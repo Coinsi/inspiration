@@ -277,7 +277,7 @@ def test_default_text_routes_and_channel_disable(studio):
         assert llm_config(db, ids["project"]).config["model"] == "text-b"
 
 
-@pytest.mark.parametrize("protocol", ["openai_video", "ark_video", "minimax_video"])
+@pytest.mark.parametrize("protocol", ["openai_video", "video_v1", "ark_video", "minimax_video"])
 def test_real_video_protocol_rejection_then_resume_without_second_post(
     studio, monkeypatch, tmp_path, protocol
 ):
@@ -359,7 +359,7 @@ def test_real_video_protocol_rejection_then_resume_without_second_post(
             )
         return httpx.Response(200, json={"status": "completed"})
 
-    if protocol != "openai_video":
+    if protocol not in ("openai_video", "video_v1"):
         import io
         import urllib.request
 

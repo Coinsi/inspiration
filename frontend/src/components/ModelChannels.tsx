@@ -1,3 +1,5 @@
+import { ModelDirectory, modelSuggestion } from "./ModelDirectory";
+import { SelectField } from "./ui/select-field";
 import { PersonalModelServices } from "./PersonalModelServices";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +11,9 @@ import {
   MessageSquare,
   Pencil,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
+import { useConfirm } from "./ui/confirm";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,7 +66,6 @@ const paramNames: Record<string, string> = {
   aspect_ratio: "画面比例",
   resolution: "清晰度",
 };
-const field = "h-10 w-full rounded-lg border border-border bg-bg px-3 text-sm";
 
 export function ModelChannels({
   projectId,
@@ -172,6 +175,7 @@ function ChannelsPane({
   manualRequest: boolean;
   manualHandled: () => void;
 }) {
+  const confirm = useConfirm();
   const base = `/projects/${projectId}/model-channels`,
     qc = useQueryClient();
   const query = useQuery({
@@ -183,6 +187,7 @@ function ChannelsPane({
   const [modelEdit, setModelEdit] = useState<{
     channel: Channel;
     model: Model | null;
+    code?: string;
   } | null>(null);
   useEffect(() => {
     if (manualRequest) {
@@ -191,6 +196,7 @@ function ChannelsPane({
     }
   }, [manualRequest, manualHandled]);
   const [notice, setNotice] = useState("");
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const [directory, setDirectory] = useState<{
     channel: string;
     models: string[];
@@ -206,6 +212,29 @@ function ChannelsPane({
     ])
       await qc.invalidateQueries({ queryKey: [key, projectId] });
   };
+  const remove = useMutation({
+    mutationFn: (channel: Channel) =>
+      api.del(`${base}/${channel.id}?revision=${channel.revision}`),
+    onSuccess: async () => {
+      setSelected("");
+      setDirectory(null);
+      setNotice(
+        "服务及其模型已删除，作品和历史记录保留。请重新检查项目默认模型。",
+      );
+      await refresh();
+    },
+  });
+  async function confirmRemove(channel: Channel) {
+    if (
+      await confirm({
+        title: `删除「${channel.name}」？`,
+        message: `将移除本项目的服务连接、保存的密钥和 ${channel.models.length} 个模型。项目成员将无法继续使用它；已生成作品保留。默认模型若来自此服务，需要重新选择。`,
+        confirmText: "删除服务",
+        danger: true,
+      })
+    )
+      remove.mutate(channel);
+  }
   const discover = useMutation({
     mutationFn: (id: string) =>
       api.post<{ models: string[]; truncated: boolean; message: string }>(
@@ -213,7 +242,8 @@ function ChannelsPane({
       ),
     onSuccess: (r, id) => {
       setDirectory({ channel: id, ...r });
-      setNotice(r.message);
+      setDirectoryOpen(true);
+      setNotice("");
     },
   });
   const migrate = useMutation({
@@ -249,9 +279,12 @@ function ChannelsPane({
           添加服务
         </Button>
       </header>
-      {(notice || migrate.error || discover.error) && (
+      {(notice || migrate.error || discover.error || remove.error) && (
         <p role="status" className="model-settings-notice">
-          {migrate.error?.message || discover.error?.message || notice}
+          {remove.error?.message ||
+            migrate.error?.message ||
+            discover.error?.message ||
+            notice}
         </p>
       )}
       {data.legacy_count > 0 && (
@@ -291,6 +324,17 @@ function ChannelsPane({
                 </small>
               </div>
               <div className="service-item-actions">
+                <Button
+                  variant="ghost"
+                  className="text-danger"
+                  disabled={remove.isPending}
+                  aria-label={`删除服务 ${channel.name}`}
+                  onClick={() => void confirmRemove(channel)}
+                >
+                  <Trash2 size={14} />
+                  删除
+                </Button>
+
                 <Button
                   variant="outline"
                   onClick={() => setChannelEdit(channel)}
@@ -345,14 +389,19 @@ function ChannelsPane({
                       onClick={() => setModelEdit({ channel, model: null })}
                     >
                       <Plus size={13} />
-                      添加模型
+                      手动添加
                     </Button>
                   </div>
                 </div>
                 {directory?.channel === channel.id && (
                   <p className="model-settings-footnote">
-                    已读取 {directory.models.length}{" "}
-                    个模型。点击“添加模型”选择需要的模型与类型。
+                    已读取 {directory.models.length} 个模型。
+                    <button
+                      className="text-primary"
+                      onClick={() => setDirectoryOpen(true)}
+                    >
+                      打开模型列表
+                    </button>
                   </p>
                 )}
                 {channel.models.map((model) => (
@@ -381,7 +430,7 @@ function ChannelsPane({
                 ))}
                 {!channel.models.length && (
                   <p className="model-settings-footnote">
-                    从服务读取模型编号，或手动添加你已开通的模型。
+                    从服务读取并选择模型，或手动填写已开通的模型编号。
                   </p>
                 )}
               </div>
@@ -413,6 +462,34 @@ function ChannelsPane({
           }}
         />
       )}
+      {directory && data.channels.some((c) => c.id === directory.channel) && (
+        <ModelDirectory
+          key={directory.channel}
+          open={directoryOpen}
+          name={data.channels.find((c) => c.id === directory.channel)!.name}
+          models={directory.models}
+          added={data.channels
+            .find((c) => c.id === directory.channel)!
+            .models.map((m) => m.model)}
+          truncated={directory.truncated}
+          close={() => setDirectoryOpen(false)}
+          select={(code) => {
+            setDirectoryOpen(false);
+            setModelEdit({
+              channel: data.channels.find((c) => c.id === directory.channel)!,
+              model: null,
+              code,
+            });
+          }}
+          manual={() => {
+            setDirectoryOpen(false);
+            setModelEdit({
+              channel: data.channels.find((c) => c.id === directory.channel)!,
+              model: null,
+            });
+          }}
+        />
+      )}
       {modelEdit && (
         <ModelEditor
           key={modelEdit.model?.id || `new-${modelEdit.channel.id}`}
@@ -420,15 +497,17 @@ function ChannelsPane({
           channel={modelEdit.channel}
           model={modelEdit.model}
           protocols={data.protocols}
-          directory={
-            directory?.channel === modelEdit.channel.id ? directory.models : []
-          }
-          close={() => setModelEdit(null)}
+          initialCode={modelEdit.code}
+          close={() => {
+            setDirectoryOpen(!!modelEdit.code);
+            setModelEdit(null);
+          }}
           saved={async () => {
             await refresh();
+            setDirectoryOpen(!!modelEdit.code);
             setModelEdit(null);
             setNotice(
-              "模型已保存，可在镜头与画布中选择；默认文字模型用于故事、助手和 Agent",
+              "模型已保存，可在创作时选择，或在项目默认模型中设为默认。",
             );
           }}
         />
@@ -571,7 +650,7 @@ function ModelEditor({
   channel,
   model,
   protocols,
-  directory,
+  initialCode = "",
   close,
   saved,
 }: {
@@ -579,7 +658,7 @@ function ModelEditor({
   channel: Channel;
   model: Model | null;
   protocols: Catalog["protocols"];
-  directory: string[];
+  initialCode?: string;
   close: () => void;
   saved: () => Promise<void>;
 }) {
@@ -587,10 +666,14 @@ function ModelEditor({
   const [price, setPrice] = useState<ModelPrice>(
     model?.price || { mode: "unconfigured", amount: "0" },
   );
-  const [name, setName] = useState(model?.name || ""),
-    [code, setCode] = useState(model?.model || ""),
-    [protocol, setProtocol] = useState(model?.protocol || "gpt_image"),
-    [modality, setModality] = useState(model?.modality || "image"),
+  const [name, setName] = useState(model?.name || initialCode.slice(0, 100)),
+    [code, setCode] = useState(model?.model || initialCode),
+    [protocol, setProtocol] = useState(
+      model?.protocol || modelSuggestion(initialCode).protocol,
+    ),
+    [modality, setModality] = useState(
+      model?.modality || modelSuggestion(initialCode).modality,
+    ),
     [enabled, setEnabled] = useState(model?.enabled ?? true),
     [isDefault, setDefault] = useState(model?.is_default ?? false),
     [refs, setRefs] = useState(model?.max_reference_images ?? 0),
@@ -692,61 +775,79 @@ function ModelEditor({
               <Input
                 required
                 maxLength={128}
-                list="channel-model-directory"
                 value={code}
-                onChange={(e) => setCode(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCode(value);
+                  if (!model) {
+                    if (!name || name === code.slice(0, 100))
+                      setName(value.slice(0, 100));
+                    const hint = modelSuggestion(value);
+                    setModality(hint.modality);
+                    setProtocol(hint.protocol);
+                    setParameters({});
+                    setRefs(0);
+                    setMask(false);
+                    setDefault(false);
+                    setPrice({ mode: "unconfigured", amount: "0" });
+                  }
+                }}
                 placeholder="服务提供的准确模型 ID"
               />
-              <datalist id="channel-model-directory">
-                {directory.map((id) => (
-                  <option key={id} value={id} />
-                ))}
-              </datalist>
             </label>
           </div>
-          <label>
-            接口协议
-            <select
-              aria-label="接口协议"
-              className={field}
+          <SelectField
+            label="模型用途"
+            value={modality}
+            options={[
+              { value: "", label: "请选择模型用途", disabled: true },
+              ...Object.entries(kinds).map(([value, label]) => ({
+                value,
+                label,
+              })),
+            ]}
+            onChange={(value) => {
+              setModality(value);
+              const hint = modelSuggestion(code);
+              setProtocol(
+                hint.modality === value
+                  ? hint.protocol
+                  : value === "text"
+                    ? "cloud_llm"
+                    : "",
+              );
+              setParameters({});
+              setRefs(0);
+              setMask(false);
+              setDefault(false);
+              setPrice({ mode: "unconfigured", amount: "0" });
+              setDirty(true);
+            }}
+          />
+          {modality && (
+            <SelectField
+              label="接入方式"
               value={protocol}
-              onChange={(e) => {
-                const p = e.target.value;
-                setProtocol(p);
-                setModality(protocols[p].types[0]);
+              options={[
+                { value: "", label: "请选择接入方式", disabled: true },
+                ...Object.entries(protocols)
+                  .filter(([, p]) => p.types.includes(modality))
+                  .map(([value, p]) => ({ value, label: p.name })),
+              ]}
+              onChange={(value) => {
+                setProtocol(value);
                 setParameters({});
                 setRefs(0);
                 setMask(false);
-                setDefault(false);
-                setPrice({ mode: "unconfigured", amount: "0" });
+                setDirty(true);
               }}
-            >
-              {Object.entries(protocols).map(([id, p]) => (
-                <option key={id} value={id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            模型类型
-            <select
-              aria-label="模型类型"
-              className={field}
-              value={modality}
-              onChange={(e) => {
-                setModality(e.target.value);
-                setParameters({});
-                setPrice({ mode: "unconfigured", amount: "0" });
-              }}
-            >
-              {protocols[protocol].types.map((k) => (
-                <option key={k} value={k}>
-                  {kinds[k]}
-                </option>
-              ))}
-            </select>
-          </label>
+            />
+          )}
+          {!model && modelSuggestion(code).modality && (
+            <p className="text-xs text-muted-foreground">
+              已按模型名称建议用途与接入方式，请以服务说明为准；可在上方调整。
+            </p>
+          )}
           {protocol === "jimeng" && (
             <p className="model-notice">
               这是旧版自定义任务接口，不是火山即梦官方签名协议。仅适用于实现
@@ -759,82 +860,92 @@ function ModelEditor({
               创建、查询和下载视频。每次一个视频；停止本地等待不保证上游停止计费。
             </p>
           )}
-          {modality !== "text" && (
-            <>
-              <PriceFields
-                value={price}
-                onChange={setPrice}
-                video={modality === "video"}
-              />
-              <label>
-                最多参考图片数
-                <Input
-                  type="number"
-                  min={0}
-                  max={
-                    (
-                      {
-                        openai_video: 1,
-                        minimax_video: 1,
-                        ark_video: 2,
-                        ark_image: 14,
-                      } as Record<string, number>
-                    )[protocol] ?? 16
-                  }
-                  value={refs}
-                  onChange={(e) => {
-                    setRefs(Number(e.target.value));
-                    if (!Number(e.target.value)) setMask(false);
-                  }}
+          {protocol === "video_v1" && (
+            <p className="model-notice">
+              使用 video.v1 JSON 格式创建视频，当前支持文生视频。请按服务商文档填写时长选项；
+              提示词中的秒数不能代替时长设置。参考素材的公网地址接入暂未开放。
+            </p>
+          )}
+          {modality && protocol && modality !== "text" && (
+            <details className="model-optional-settings">
+              <summary>高级选项 · 参考图、生成参数与费用</summary>
+              <div className="model-form">
+                <PriceFields
+                  value={price}
+                  onChange={setPrice}
+                  video={modality === "video"}
                 />
-                <small>0 表示不使用参考图；只开启服务实际支持的能力。</small>
-              </label>
-              {protocol === "gpt_image" && refs > 0 && (
-                <label className="model-check">
-                  <input
-                    type="checkbox"
-                    checked={mask}
-                    onChange={(e) => setMask(e.target.checked)}
-                  />
-                  支持蒙版局部重绘
-                </label>
-              )}
-              {modality === "video" && (
                 <label>
-                  最大视频时长（秒）
+                  最多参考图片数
                   <Input
                     type="number"
-                    min={1}
-                    max={120}
-                    value={seconds}
-                    onChange={(e) => setSeconds(Number(e.target.value))}
+                    min={0}
+                    max={
+                      (
+                        {
+                          openai_video: 1,
+                          video_v1: 0,
+                          minimax_video: 1,
+                          ark_video: 2,
+                          ark_image: 14,
+                        } as Record<string, number>
+                      )[protocol] ?? 16
+                    }
+                    value={refs}
+                    onChange={(e) => {
+                      setRefs(Number(e.target.value));
+                      if (!Number(e.target.value)) setMask(false);
+                    }}
                   />
+                  <small>0 表示不使用参考图；只开启服务实际支持的能力。</small>
                 </label>
-              )}
-              <div className="model-form-grid">
-                {keys.map((k) => (
-                  <label key={k}>
-                    {paramNames[k]}
+                {protocol === "gpt_image" && refs > 0 && (
+                  <label className="model-check">
+                    <input
+                      type="checkbox"
+                      checked={mask}
+                      onChange={(e) => setMask(e.target.checked)}
+                    />
+                    支持蒙版局部重绘
+                  </label>
+                )}
+                {modality === "video" && (
+                  <label>
+                    最大视频时长（秒）
                     <Input
-                      value={parameters[k] || ""}
-                      onChange={(e) =>
-                        setParameters((p) => ({ ...p, [k]: e.target.value }))
-                      }
-                      placeholder={
-                        k === "duration"
-                          ? "如：4, 8, 12"
-                          : k === "size"
-                            ? "如：1280x720, 720x1280"
-                            : "多个选项用逗号分隔"
-                      }
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={seconds}
+                      onChange={(e) => setSeconds(Number(e.target.value))}
                     />
                   </label>
-                ))}
+                )}
+                <div className="model-form-grid">
+                  {keys.map((k) => (
+                    <label key={k}>
+                      {paramNames[k]}
+                      <Input
+                        value={parameters[k] || ""}
+                        onChange={(e) =>
+                          setParameters((p) => ({ ...p, [k]: e.target.value }))
+                        }
+                        placeholder={
+                          k === "duration"
+                            ? "如：4, 8, 12"
+                            : k === "size"
+                              ? "如：1280x720, 720x1280"
+                              : "多个选项用逗号分隔"
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+                <small>
+                  只填写渠道支持的选项；留空沿用上游默认，不会猜测模型能力。
+                </small>
               </div>
-              <small>
-                只填写渠道支持的选项；留空沿用上游默认，不会猜测模型能力。
-              </small>
-            </>
+            </details>
           )}
           <label className="model-check">
             <input
@@ -859,7 +970,10 @@ function ModelEditor({
               {save.error.message}
             </p>
           )}
-          <Button type="submit" disabled={!name.trim() || !code.trim()}>
+          <Button
+            type="submit"
+            disabled={!name.trim() || !code.trim() || !modality || !protocol}
+          >
             {save.isPending ? "保存中…" : "保存模型"}
           </Button>
         </fieldset>

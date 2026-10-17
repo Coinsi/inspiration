@@ -1,3 +1,4 @@
+import { SearchField } from "@/components/ui/search-field";
 import SkillPicker from "@/components/SkillPicker";
 import { createContext, useContext, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -559,12 +560,12 @@ export function CanvasMaterialPicker({
               </Button>
             ))}
           </div>
-          <input
-            className="canvas-picker-search"
-            aria-label="搜索素材对象"
+          <SearchField
+            className="w-full"
+            label="搜索素材对象"
             placeholder="搜索名称或编号"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onValueChange={(value) => setQuery(value)}
           />
           <div className="canvas-object-list">
             {objects

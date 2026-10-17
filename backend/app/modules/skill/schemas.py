@@ -67,7 +67,7 @@ class SkillIn(BaseModel):
     @field_validator("required_tools")
     @classmethod
     def known_tools(cls, values):
-        from app.modules.agent.tools import CATALOG
+        from app.modules.tools.registry import CATALOG
 
         if any(v not in CATALOG for v in values):
             raise ValueError("技能引用了未登记工具")

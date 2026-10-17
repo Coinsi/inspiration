@@ -1,7 +1,7 @@
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class UploadIn(BaseModel):
@@ -116,3 +116,29 @@ class ProcessingIn(BaseModel):
     capabilities: list[Literal["visual", "audio", "face", "object", "preview", "speech"]] = Field(
         min_length=1, max_length=6
     )
+
+
+class MaterialProfileIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=4000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    revision: int = Field(ge=1)
+    version_id: uuid.UUID | None = None
+
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, values):
+        result = []
+        for value in values:
+            value = value.strip()
+            if not value or len(value) > 40:
+                raise ValueError("标签须为1至40个字符")
+            if value not in result:
+                result.append(value)
+        return result

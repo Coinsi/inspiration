@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -563,17 +564,17 @@ function Editor({ id }: { id: string }) {
               <h2>文章设置</h2>
               <label className="website-field">
                 文章分类
-                <select
+                <StudioSelect
                   value={content.category}
                   disabled={readonly}
-                  onChange={(e) =>
-                    setContent({ ...content, category: e.target.value })
+                  onValueChange={(selectedValue) =>
+                    setContent({ ...content, category: selectedValue })
                   }
                 >
                   {categories.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
-                </select>
+                </StudioSelect>
               </label>
               <label className="website-field">
                 作者署名

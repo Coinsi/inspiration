@@ -1,3 +1,4 @@
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -58,15 +59,15 @@ export default function SkillPicker({
       )}
       {open && (
         <div className="rounded-lg border border-border bg-background p-3 space-y-2">
-          <input
-            aria-label="搜索创作技能"
+          <SearchField
+            className="w-full"
+            label="搜索创作技能"
             placeholder="搜索本项目技能"
-            className="w-full bg-transparent p-1 outline-none"
             value={q}
             disabled={disabled}
             maxLength={200}
-            onChange={(e) => {
-              setQ(e.target.value);
+            onValueChange={(value) => {
+              setQ(value);
               setOffset(0);
             }}
           />

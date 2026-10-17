@@ -8,8 +8,26 @@ export const JOB_LABEL: Record<string, string> = {
   succeeded: "已完成",
   failed: "失败",
   canceled: "已取消",
+  paused: "已暂停",
+  needs_review: "待确认",
 };
+export function taskError(error: string, zh = true) {
+  if (/504|502|Gateway|timed?\s*out/i.test(error))
+    return zh
+      ? "服务暂时没有响应。已有内容保留，请稍后检查任务再重试。"
+      : "Service did not respond. Existing results are retained; check the task before retrying.";
+  return error
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 export const OPERATIONS: Record<string, [string, string]> = {
+  agent: ["创作对话", "Conversation"],
+  canvas: ["画布执行", "Canvas run"],
+  import: ["素材入库与预览", "Import & preview"],
+  index: ["画面索引", "Visual index"],
+  processing: ["素材预览与索引服务", "Media processing"],
+  transcription: ["转写与字幕", "Transcription"],
   generate: ["模型生成", "Generation"],
   render: ["成片导出", "Film export"],
   upload: ["素材上传", "Upload"],
@@ -56,7 +74,8 @@ export function taskLabel(operation: string, requestType: string, zh: boolean) {
   );
 }
 export function taskSource(project: string, targetType: string, id: string) {
-  if (targetType === "creation") return `/projects/${project}/workbench`;
+  if (targetType === "creation")
+    return `/projects/${project}/workbench?view=generate`;
   if (targetType === "timeline")
     return `/projects/${project}/cuts?timeline=${id}`;
   if (targetType === "asset") return `/projects/${project}/assets/${id}`;
@@ -65,6 +84,7 @@ export function taskSource(project: string, targetType: string, id: string) {
 }
 export interface TaskSummary {
   id: string;
+  kind?: string;
   target_type: string;
   target_id: string;
   target_name: string | null;
@@ -88,6 +108,13 @@ export interface TaskCatalog {
   counts: Record<string, number>;
 }
 export interface TaskWorkspace {
+  changes: {
+    id: string;
+    at: string;
+    target: { label: string; path: string | null };
+    replaced: boolean;
+  }[];
+  more_changes: boolean;
   summary: TaskSummary;
   job: GenJob;
   outputs: (Generation & { output_mime: string })[];

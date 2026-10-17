@@ -1,12 +1,13 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.models.agent import AgentRun
+from app.models.conversation import ConversationMessage
 from app.modules.agent import schemas, service, tools
 
 router = APIRouter(prefix="/projects/{project_id}/agent", tags=["agent"])
@@ -32,6 +33,17 @@ def listing(ctx: ProjectContext = READ, db: Session = DB, offset: int = Query(0,
         for r in db.scalars(
             select(AgentRun)
             .where(AgentRun.project_id == ctx.project.id)
+            .where(
+                or_(
+                    AgentRun.created_by == ctx.user.id,
+                    ~select(ConversationMessage.id)
+                    .where(
+                        ConversationMessage.execution_kind == "project_agent",
+                        ConversationMessage.execution_id == AgentRun.id,
+                    )
+                    .exists(),
+                )
+            )
             .order_by(AgentRun.created_at.desc(), AgentRun.id)
             .offset(offset)
             .limit(30)

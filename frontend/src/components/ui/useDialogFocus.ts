@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 const focusable =
-  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]';
+  'button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"]), select:not(:disabled):not([tabindex="-1"]), textarea:not(:disabled):not([tabindex="-1"]), summary, [tabindex="0"]';
 const stack: symbol[] = [];
 
 /** Trap the topmost overlay only, and restore the invoking control on close. */
@@ -11,7 +11,8 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
   const wasOpen = useRef(false);
   const returnFocus = useRef<HTMLElement | null>(null);
   // Capture before React commits an autoFocus input in the newly opened overlay.
-  if (open && !wasOpen.current) returnFocus.current = document.activeElement as HTMLElement | null;
+  if (open && !wasOpen.current)
+    returnFocus.current = document.activeElement as HTMLElement | null;
   wasOpen.current = open;
   close.current = onClose;
   useEffect(() => {
@@ -22,21 +23,32 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
     const frame = requestAnimationFrame(() => {
       if (ref.current?.contains(document.activeElement)) return;
       const target =
-        ref.current?.querySelector<HTMLElement>("[autofocus]") ??
-        ref.current?.querySelector<HTMLElement>(focusable);
+        ref.current?.querySelector<HTMLElement>(
+          "[autofocus], [data-autofocus]",
+        ) ?? ref.current?.querySelector<HTMLElement>(focusable);
       (target ?? ref.current)?.focus();
     });
     const keydown = (e: KeyboardEvent) => {
       if (stack[stack.length - 1] !== id) return;
+      // The select popup owns Escape/Tab; keep the parent dialog open.
+      if ((e.target as HTMLElement)?.closest("[data-select-popup]")) return;
+      // Let search consume Escape to clear its query before closing the overlay.
+      if (e.isComposing) return;
+      if (
+        e.key === "Escape" &&
+        (e.target as HTMLElement)?.matches("[data-search-input]") &&
+        (e.target as HTMLInputElement).value
+      )
+        return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         close.current();
       }
       if (e.key !== "Tab") return;
-      const items = Array.from(ref.current?.querySelectorAll<HTMLElement>(focusable) ?? []).filter(
-        (el) => el.getClientRects().length > 0,
-      );
+      const items = Array.from(
+        ref.current?.querySelectorAll<HTMLElement>(focusable) ?? [],
+      ).filter((el) => el.getClientRects().length > 0);
       const first = items[0],
         last = items[items.length - 1];
       if (!first) {

@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -141,13 +142,13 @@ export function CanvasInspector({
                   {selected.data.kind === "generate" && (
                     <label className="block text-xs space-y-2">
                       <span>结果归属</span>
-                      <select
+                      <StudioSelect
                         className={field}
                         value={selected.data.target_type}
                         disabled={busy}
-                        onChange={(e) =>
+                        onValueChange={(selectedValue) =>
                           update({
-                            target_type: e.target.value as "asset" | "shot",
+                            target_type: selectedValue as "asset" | "shot",
                             target_id: null,
                             generation_id: null,
                           })
@@ -155,17 +156,17 @@ export function CanvasInspector({
                       >
                         <option value="shot">镜头</option>
                         <option value="asset">角色与资产</option>
-                      </select>
+                      </StudioSelect>
                     </label>
                   )}
                   <label className="block text-xs space-y-2">
                     <span>引用项目对象</span>
-                    <select
+                    <StudioSelect
                       className={field}
                       value={selected.data.target_id ?? ""}
                       disabled={busy}
-                      onChange={(e) => {
-                        const id = e.target.value;
+                      onValueChange={(selectedValue) => {
+                        const id = selectedValue;
                         const item =
                           assets.data?.find((a) => a.id === id) ||
                           shots.data?.find((s) => s.id === id);
@@ -197,7 +198,7 @@ export function CanvasInspector({
                               {s.code} · {s.title}
                             </option>
                           ))}
-                    </select>
+                    </StudioSelect>
                   </label>
                   {(assets.error || shots.error) && (
                     <p role="alert" className="text-xs text-danger">
@@ -218,21 +219,19 @@ export function CanvasInspector({
                 <>
                   <label className="block text-xs space-y-2">
                     <span>生成类型</span>
-                    <select
+                    <StudioSelect
                       className={field}
                       value={selected.data.generate.request_type}
                       disabled={busy}
-                      onChange={(e) =>
+                      onValueChange={(selectedValue) =>
                         update({
                           generate: {
                             ...selected.data.generate,
-                            request_type: e.target.value as
-                              | "image"
-                              | "video"
-                              | "audio",
+                            request_type: selectedValue as
+                              "image" | "video" | "audio",
                             provider: defaultCreationProvider(
                               providers.data,
-                              e.target.value,
+                              selectedValue,
                             ),
                             provider_params: {},
                             count: 1,
@@ -243,22 +242,22 @@ export function CanvasInspector({
                       <option value="image">图片</option>
                       <option value="video">视频</option>
                       <option value="audio">声音</option>
-                    </select>
+                    </StudioSelect>
                   </label>
                   <label className="block text-xs space-y-2">
                     <span>创作模型</span>
-                    <select
+                    <StudioSelect
                       className={field}
                       value={selected.data.generate.provider}
                       disabled={busy}
-                      onChange={(e) => {
+                      onValueChange={(selectedValue) => {
                         const model = providers.data?.find(
-                          (p) => p.provider_name === e.target.value,
+                          (p) => p.provider_name === selectedValue,
                         );
                         update({
                           generate: {
                             ...selected.data.generate,
-                            provider: e.target.value,
+                            provider: selectedValue,
                             request_type:
                               model?.config.modality === "video"
                                 ? "video"
@@ -267,6 +266,7 @@ export function CanvasInspector({
                                   : selected.data.generate.request_type,
                             count:
                               model?.config.protocol === "openai_video" ||
+                              model?.config.protocol === "video_v1" ||
                               (model?.config.protocol === "routed" &&
                                 model.config.modality === "video")
                                 ? 1
@@ -297,7 +297,7 @@ export function CanvasInspector({
                               : p.display_name || p.provider_name}
                           </option>
                         ))}
-                    </select>
+                    </StudioSelect>
                   </label>
                   {providers.error && (
                     <p className="text-xs text-danger" role="alert">
@@ -323,22 +323,22 @@ export function CanvasInspector({
                           resolution: "清晰度",
                         }[name] || name}
                       </span>
-                      <select
+                      <StudioSelect
                         className={field}
                         disabled={busy}
                         value={String(
                           selected.data.generate.provider_params[name] ?? "",
                         )}
-                        onChange={(e) => {
+                        onValueChange={(selectedValue) => {
                           const params = {
                             ...selected.data.generate.provider_params,
                           };
-                          if (!e.target.value) delete params[name];
+                          if (!selectedValue) delete params[name];
                           else
                             params[name] =
                               name === "duration"
-                                ? Number(e.target.value)
-                                : e.target.value;
+                                ? Number(selectedValue)
+                                : selectedValue;
                           update({
                             generate: {
                               ...selected.data.generate,
@@ -353,7 +353,7 @@ export function CanvasInspector({
                             {v}
                           </option>
                         ))}
-                      </select>
+                      </StudioSelect>
                     </label>
                   ))}
                   <label className="block text-xs space-y-2">
@@ -429,11 +429,11 @@ export function CanvasInspector({
               </p>
             ) : (
               <>
-                <select
+                <StudioSelect
                   aria-label="查看运行批次"
                   className={field}
                   value={run?.id}
-                  onChange={(e) => setViewRun(e.target.value)}
+                  onValueChange={(selectedValue) => setViewRun(selectedValue)}
                 >
                   {runs.data?.map((r) => (
                     <option value={r.id} key={r.id}>
@@ -442,7 +442,7 @@ export function CanvasInspector({
                       {statuses[r.status]}
                     </option>
                   ))}
-                </select>
+                </StudioSelect>
                 {run && (
                   <>
                     <div className="flex flex-wrap gap-2">
@@ -703,22 +703,22 @@ function ConnectForm({
   const targetPort = port === "text" ? "prompt" : "reference";
   return (
     <div className="space-y-2">
-      <select
+      <StudioSelect
         aria-label="连接输出类型"
         className={field}
         value={port}
-        onChange={(e) => setPort(e.target.value)}
+        onValueChange={(selectedValue) => setPort(selectedValue)}
       >
         <option value="text">文字输出</option>
         {selected.data.kind !== "text" && selected.data.kind !== "group" && (
           <option value="image">图片输出</option>
         )}
-      </select>
-      <select
+      </StudioSelect>
+      <StudioSelect
         aria-label="连接到节点"
         className={field}
         value={target}
-        onChange={(e) => setTarget(e.target.value)}
+        onValueChange={(selectedValue) => setTarget(selectedValue)}
       >
         <option value="">选择下游生成节点</option>
         {graph.nodes
@@ -728,7 +728,7 @@ function ConnectForm({
               {n.data.label}
             </option>
           ))}
-      </select>
+      </StudioSelect>
       <Button
         variant="outline"
         size="sm"

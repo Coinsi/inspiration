@@ -139,7 +139,7 @@ def import_catalogue(db, ctx, data):
             SourceImport.project_id == ctx.project.id, SourceImport.request_key == data.request_key
         )
     )
-    from app.modules.agent.tools import fingerprint
+    from app.modules.tools.registry import fingerprint
 
     digest = fingerprint(data.model_dump(mode="json", exclude={"request_key"}))
     if existing:

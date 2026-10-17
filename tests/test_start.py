@@ -129,7 +129,7 @@ class StartupTests(unittest.TestCase):
             patch.object(self.launcher, "command", return_value=Mock(returncode=0)) as command,
             patch.object(self.launcher, "spawn") as spawn,
             patch.object(start.HTTP, "open"),
-            patch.object(start.json, "load", return_value={"optional": {}}),
+            patch.object(start.json, "load", return_value={"status": "ok", "optional": {}, "background_workers": {}}),
         ):
             self.launcher.start()
         self.assertEqual(command.call_count, 1)
@@ -188,16 +188,87 @@ class StartupTests(unittest.TestCase):
         env_file.write_text(content)
         responses = [
             subprocess.CompletedProcess([], 0, stdout="v22.0.0"),
-            subprocess.CompletedProcess([], 0),
             subprocess.CompletedProcess([], 0, stdout='{"eager": true}'),
         ]
         with (
             patch.object(start.shutil, "which", return_value="node"),
             patch.object(self.launcher, "command", side_effect=responses),
             patch.object(self.launcher, "prepare_frontend"),
+            patch.object(self.launcher, "prepare_backend"),
         ):
             self.launcher.prepare()
         self.assertEqual(env_file.read_text(), content)
+
+    def backend_fixture(self):
+        self.launcher.python.parent.mkdir(parents=True)
+        (self.launcher.backend / "pyproject.toml").write_text("[project]\nname='test'\n")
+        return self.launcher.python.parent.parent / ".inspiration-dependencies"
+
+    def test_backend_adopts_verified_environment_without_install(self):
+        stamp = self.backend_fixture()
+        with patch.object(self.launcher, "command", return_value=Mock(returncode=0)) as command:
+            self.launcher.prepare_backend()
+        self.assertTrue(stamp.read_text())
+        self.assertEqual(command.call_count, 2)
+        self.assertEqual(command.call_args.args[0][-2:], ["pip", "check"])
+
+    def test_backend_dependency_change_installs_and_verifies(self):
+        stamp = self.backend_fixture()
+        stamp.write_text("old")
+        with (
+            patch.object(start, "port_open", return_value=False),
+            patch.object(self.launcher, "command", return_value=Mock(returncode=0)) as command,
+        ):
+            self.launcher.prepare_backend()
+        self.assertIn("install", command.call_args_list[0].args[0])
+        self.assertEqual(command.call_count, 3)
+        self.assertNotEqual(stamp.read_text(), "old")
+
+    def test_backend_does_not_install_into_running_api(self):
+        stamp = self.backend_fixture()
+        stamp.write_text("old")
+        with (
+            patch.object(start, "port_open", return_value=True),
+            patch.object(self.launcher, "command") as command,
+            self.assertRaisesRegex(start.StartupError, "8000"),
+        ):
+            self.launcher.prepare_backend()
+        command.assert_not_called()
+        self.assertEqual(stamp.read_text(), "old")
+
+    def test_backend_failed_verification_does_not_stamp(self):
+        stamp = self.backend_fixture()
+        with (
+            patch.object(start, "port_open", return_value=False),
+            patch.object(self.launcher, "command", side_effect=[
+                Mock(returncode=1), Mock(returncode=0), Mock(returncode=1),
+            ]),
+            self.assertRaisesRegex(start.StartupError, "检查未通过"),
+        ):
+            self.launcher.prepare_backend()
+        self.assertFalse(stamp.exists())
+
+    def test_processing_failure_is_visible_in_summary(self):
+        with (
+            patch.object(self.launcher, "ensure_processing_service", side_effect=start.StartupError("offline")),
+            patch.object(start, "say") as output,
+        ):
+            self.launcher.processing_services({
+                "library_processing_enabled": True,
+                "library_wise_url": "http://127.0.0.1:8014", "library_wise_token": "private",
+            })
+            self.launcher.summary()
+        self.assertEqual(self.launcher.service_results, {"wise": "unavailable", "mediacms": "not_configured"})
+        rendered = "\n".join(call.args[0] for call in output.call_args_list)
+        self.assertIn("部分服务未就绪", rendered)
+        self.assertNotIn("private", rendered)
+        self.assertNotIn("启动成功", rendered)
+
+    def test_reused_backend_requires_freshness_confirmation(self):
+        self.launcher.reused_backend = True
+        with patch.object(start, "say") as output:
+            self.launcher.summary()
+        self.assertTrue(any("无法确认" in call.args[0] for call in output.call_args_list))
 
     def frontend_fixture(self):
         folder = self.launcher.frontend

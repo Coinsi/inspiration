@@ -13,7 +13,7 @@ export const WORKSPACE_STAGES = [
     id: "media",
     zh: "素材库",
     en: "Materials",
-    routes: ["assets", "library", "evidence", "assets/trash"],
+    routes: ["materials"],
   },
   {
     id: "shots",
@@ -28,7 +28,6 @@ export const WORKSPACE_STAGES = [
     en: "Editing",
     routes: ["cuts", "transcriptions"],
   },
-  { id: "assistant", zh: "创作助理", en: "Assistant", routes: ["agent"] },
   {
     id: "tools",
     zh: "创作工具",

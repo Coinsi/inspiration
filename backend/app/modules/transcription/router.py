@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import audit
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.core.errors import Conflict
@@ -75,6 +76,10 @@ def download(run_id: uuid.UUID, ctx: ProjectContext = READ, db: Session = DB):
 @router.post("/{run_id}/control")
 def control(run_id: uuid.UUID, data: schemas.Control, ctx: ProjectContext = EDIT, db: Session = DB):
     r = service.get(db, ctx, run_id, True)
+    if data.action == "cancel" and r.status not in ("queued", "processing"):
+        raise Conflict("任务已结束，无需停止")
+    if data.action == "cancel" and r.cancel_requested:
+        return service.out(r)
     if data.action == "cancel" and r.status in ("queued", "processing"):
         r.cancel_requested = True
         if r.status == "queued":
@@ -97,4 +102,11 @@ def control(run_id: uuid.UUID, data: schemas.Control, ctx: ProjectContext = EDIT
         r.status = "queued"
         r.error = None
         r.cancel_requested = False
+    audit.record(
+        db,
+        action=f"transcription.{data.action}",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_id=r.id,
+    )
     return service.out(r)

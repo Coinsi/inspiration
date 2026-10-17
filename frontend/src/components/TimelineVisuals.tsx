@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layers, Plus, Trash2 } from "lucide-react";
@@ -151,11 +152,11 @@ export function TimelineVisuals({
         </p>
       </header>
       <div className="timeline-visual-add">
-        <select
+        <StudioSelect
           aria-label={zh ? "叠加素材镜头" : "Overlay shot"}
           value={shot}
-          onChange={(e) => {
-            setShot(e.target.value);
+          onValueChange={(selectedValue) => {
+            setShot(selectedValue);
             setGeneration("");
           }}
         >
@@ -167,11 +168,11 @@ export function TimelineVisuals({
               {s.title || s.code}
             </option>
           ))}
-        </select>
-        <select
+        </StudioSelect>
+        <StudioSelect
           aria-label={zh ? "叠加素材版本" : "Overlay version"}
           value={generation}
-          onChange={(e) => setGeneration(e.target.value)}
+          onValueChange={(selectedValue) => setGeneration(selectedValue)}
         >
           <option value="">
             {sources.isFetching
@@ -200,7 +201,7 @@ export function TimelineVisuals({
                 {i + 1} · {g.id.slice(0, 8)}
               </option>
             ))}
-        </select>
+        </StudioSelect>
         <Button
           size="sm"
           disabled={
@@ -265,10 +266,12 @@ export function TimelineVisuals({
               </label>
               <label>
                 {zh ? "叠加轨道" : "Overlay track"}
-                <select
+                <StudioSelect
                   aria-label={zh ? "叠加轨道" : "Overlay track"}
                   value={current.track}
-                  onChange={(e) => patch({ track: Number(e.target.value) })}
+                  onValueChange={(selectedValue) =>
+                    patch({ track: Number(selectedValue) })
+                  }
                 >
                   {[1, 2, 3].map((n) => (
                     <option key={n} value={n}>
@@ -276,7 +279,7 @@ export function TimelineVisuals({
                       {n === 3 ? (zh ? " · 最上方" : " · Top") : ""}
                     </option>
                   ))}
-                </select>
+                </StudioSelect>
               </label>
               {number(
                 zh ? "出现时间（秒）" : "Start (s)",
@@ -301,16 +304,16 @@ export function TimelineVisuals({
               )}
               <label>
                 {zh ? "画面适配" : "Fit"}
-                <select
+                <StudioSelect
                   aria-label={zh ? "画面适配" : "Fit"}
                   value={current.fit}
-                  onChange={(e) =>
-                    patch({ fit: e.target.value as VisualClip["fit"] })
+                  onValueChange={(selectedValue) =>
+                    patch({ fit: selectedValue as VisualClip["fit"] })
                   }
                 >
                   <option value="contain">{zh ? "完整显示" : "Contain"}</option>
                   <option value="cover">{zh ? "填满裁切" : "Cover"}</option>
-                </select>
+                </StudioSelect>
               </label>
               {number(zh ? "横向位置（%）" : "Left (%)", "x", 0.01, 0, 100)}
               {number(zh ? "纵向位置（%）" : "Top (%)", "y", 0.01, 0, 100)}

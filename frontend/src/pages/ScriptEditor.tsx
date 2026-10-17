@@ -1,3 +1,6 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { ScriptNameDialog } from "@/components/ScriptNameDialog";
+import { SearchField } from "@/components/ui/search-field";
 // 剧本编辑器:分块(typed blocks)编辑 + AI 侧栏改稿 + 派生场次/资产 + 导出 Fountain。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +16,7 @@ import {
   Loader2,
   MessageCircle,
   Parentheses,
+  Pencil,
   Plus,
   Save,
   Sparkles,
@@ -89,13 +93,14 @@ function ScriptEditorWorkspace() {
   });
   const [assistOpen, setAssistOpen] = usePersistentState<boolean>(
     "se.assistOpen",
-    true,
+    false,
   );
   const [outlineOpen, setOutlineOpen] = usePersistentState<boolean>(
     "se.outlineOpen",
     true,
   );
 
+  const [renameOpen, setRenameOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [outlineQuery, setOutlineQuery] = useState("");
   const { me } = useAuth();
@@ -384,6 +389,13 @@ function ScriptEditorWorkspace() {
 
   return (
     <div className={cn("writing-workspace", focusMode && "is-writing-focus")}>
+      {renameOpen && (
+        <ScriptNameDialog
+          projectId={projectId!}
+          script={script}
+          onClose={() => setRenameOpen(false)}
+        />
+      )}
       {/* 头部 */}
       <div className="writing-editor-header">
         <div className="flex min-w-0 items-center gap-2">
@@ -397,9 +409,20 @@ function ScriptEditorWorkspace() {
           <FileText className="h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-0">
             <span className="writing-eyebrow">SCREENPLAY / 剧本创作</span>
-            <h1 className="truncate text-xl font-semibold leading-tight">
-              {script.title}
-            </h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-xl font-semibold leading-tight">
+                {script.title}
+              </h1>
+              <button
+                type="button"
+                aria-label="重命名剧本"
+                title="重命名剧本"
+                onClick={() => setRenameOpen(true)}
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-elevated hover:text-foreground"
+              >
+                <Pencil size={14} />
+              </button>
+            </div>
             <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <span>
                 {save.isPending ? "保存中…" : dirty ? "未保存" : "已保存到项目"}
@@ -438,45 +461,69 @@ function ScriptEditorWorkspace() {
             onClick={() => setOutlineOpen(!outlineOpen)}
           >
             <List className="h-4 w-4" />
+            场景大纲
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => decompose.mutate()}
-            disabled={
-              decompose.isPending || dirty || save.isPending || serverChanged
-            }
+          <details
+            className="writing-production-tools"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.currentTarget.open = false;
+                e.currentTarget.querySelector("summary")?.focus();
+              }
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                e.currentTarget.open = false;
+            }}
           >
-            {decompose.isPending ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Clapperboard className="mr-1 h-4 w-4" />
-            )}
-            {tr("se.decompose")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => extract.mutate()}
-            disabled={
-              extract.isPending || dirty || save.isPending || serverChanged
-            }
-          >
-            {extract.isPending ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Users className="mr-1 h-4 w-4" />
-            )}
-            {tr("se.extract")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={exportFountain}
-            disabled={dirty || save.isPending || serverChanged}
-          >
-            <Download className="mr-1 h-4 w-4" /> Fountain
-          </Button>
+            <summary>制作工具</summary>
+            <div>
+              <p className="text-xs text-muted-foreground">
+                写好并保存正文后，再拆分场景、整理角色或导出。
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => decompose.mutate()}
+                disabled={
+                  decompose.isPending ||
+                  dirty ||
+                  save.isPending ||
+                  serverChanged
+                }
+              >
+                {decompose.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Clapperboard className="mr-1 h-4 w-4" />
+                )}
+                {tr("se.decompose")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => extract.mutate()}
+                disabled={
+                  extract.isPending || dirty || save.isPending || serverChanged
+                }
+              >
+                {extract.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Users className="mr-1 h-4 w-4" />
+                )}
+                {tr("se.extract")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={exportFountain}
+                disabled={dirty || save.isPending || serverChanged}
+              >
+                <Download className="mr-1 h-4 w-4" /> Fountain
+              </Button>
+            </div>
+          </details>
           <Button
             size="sm"
             onClick={() =>
@@ -503,6 +550,7 @@ function ScriptEditorWorkspace() {
               onClick={() => setAssistOpen(true)}
             >
               <Sparkles className="h-4 w-4 text-primary" />
+              创作助手
             </Button>
           )}
         </div>
@@ -620,12 +668,12 @@ function ScriptEditorWorkspace() {
                 <div className="px-2 pb-1.5 text-[11px] uppercase tracking-wider text-faint">
                   {tr("se.outline")}
                 </div>
-                <input
-                  aria-label="搜索场景"
-                  className="writing-outline-search"
+                <SearchField
+                  className="mb-2.5 w-full"
+                  label="搜索场景"
                   placeholder="搜索场景…"
                   value={outlineQuery}
-                  onChange={(e) => setOutlineQuery(e.target.value)}
+                  onValueChange={(value) => setOutlineQuery(value)}
                 />
                 {stats.scenes.length === 0 ? (
                   <p className="px-2 text-xs text-muted-foreground">
@@ -909,9 +957,11 @@ function BlockRow({
     >
       {/* 悬浮工具条 */}
       <div className="writing-block-actions">
-        <select
+        <StudioSelect
           value={block.block_type}
-          onChange={(e) => onChange({ block_type: e.target.value })}
+          onValueChange={(selectedValue) =>
+            onChange({ block_type: selectedValue })
+          }
           className="h-6 rounded border border-border bg-bg px-1 text-[10px] text-muted-foreground"
           title={tr("se.blockType")}
         >
@@ -920,7 +970,7 @@ function BlockRow({
               {tr(`se.bt.${bt}`)}
             </option>
           ))}
-        </select>
+        </StudioSelect>
         <button
           onClick={onInsertAfter}
           title={tr("se.addBlock")}

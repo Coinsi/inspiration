@@ -1,0 +1,118 @@
+.studio-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  color: hsl(var(--fg));
+  text-align: left;
+  font-size: 13px;
+}
+.studio-select-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-select-trigger > svg {
+  flex-shrink: 0;
+}
+.studio-select-trigger:hover:not(:disabled) {
+  background: hsl(var(--elevated));
+}
+.studio-select-trigger:focus-visible {
+  outline: 2px solid hsl(var(--primary) / 0.65);
+  outline-offset: 3px;
+}
+.studio-select-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.studio-select-chevron {
+  color: hsl(var(--muted));
+  transition: transform 0.15s;
+}
+.studio-select-trigger[aria-expanded="true"] .studio-select-chevron {
+  transform: rotate(180deg);
+}
+.studio-select-popup {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 160;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: 1px solid hsl(var(--border) / 0.8);
+  border-radius: 16px;
+  background: hsl(var(--card));
+  color: hsl(var(--fg));
+  box-shadow:
+    0 12px 40px #0002,
+    0 2px 8px #0001;
+  outline: none;
+}
+.studio-select-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  min-height: 44px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.studio-select-popup[data-select-popup]:focus-visible {
+  /* Keyboard focus is shown on the active option, not a second outer box. */
+  outline: none;
+}
+.studio-select-option[data-active] {
+  background: hsl(var(--elevated));
+}
+.studio-select-option[aria-selected="true"] .studio-select-copy > span {
+  font-weight: 600;
+}
+.studio-select-option[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.studio-select-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: hsl(var(--fg) / 0.04);
+}
+.studio-select-copy {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.studio-select-copy > span {
+  display: block;
+  line-height: 1.4;
+}
+.studio-select-copy small {
+  display: block;
+  font-size: 11px;
+  color: hsl(var(--muted));
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.studio-select-check {
+  flex-shrink: 0;
+  color: hsl(var(--primary));
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-select-chevron {
+    transition: none;
+  }
+}

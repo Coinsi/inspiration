@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useRef, useState } from "react";
 import {
   FileArchive,
@@ -349,11 +350,11 @@ export function SkillInstall({
                 </label>
                 <label>
                   技能分类
-                  <select
+                  <StudioSelect
                     aria-label="技能分类"
                     value={preview.category ?? "general"}
-                    onChange={(e) =>
-                      setPreview({ ...preview, category: e.target.value })
+                    onValueChange={(selectedValue) =>
+                      setPreview({ ...preview, category: selectedValue })
                     }
                   >
                     {Object.entries(categories).map(([key, name]) => (
@@ -361,7 +362,7 @@ export function SkillInstall({
                         {name}
                       </option>
                     ))}
-                  </select>
+                  </StudioSelect>
                 </label>
                 <label className="is-wide">
                   技能简介

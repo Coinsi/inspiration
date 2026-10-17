@@ -47,7 +47,7 @@
   gap: 8px;
   padding: 0 20px 12px;
 }
-.director-document-bar select {
+.director-document-bar .studio-select-trigger {
   font-size: 12px;
   height: 32px;
   padding-block: 4px;
@@ -318,7 +318,7 @@
   flex-direction: column;
   gap: 10px;
 }
-.director-delivery select {
+.director-delivery .studio-select-trigger {
   font-size: 12px;
   height: 32px;
   padding-block: 4px;
@@ -434,7 +434,7 @@
   .director-page-header > div > p {
     display: none;
   }
-  .director-document-bar > select {
+  .director-document-bar > .studio-select-trigger {
     max-width: calc(100% - 112px);
   }
   .director-document-bar > div {

@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -78,17 +80,17 @@ export function PriceFields({
     <div className="model-form-grid">
       <label>
         积分计价
-        <select
+        <StudioSelect
           className="creative-select"
           value={value.mode}
-          onChange={(e) =>
-            onChange({ ...value, mode: e.target.value as ModelPrice["mode"] })
+          onValueChange={(selectedValue) =>
+            onChange({ ...value, mode: selectedValue as ModelPrice["mode"] })
           }
         >
           <option value="unconfigured">暂未配置</option>
           <option value="per_request">按结果数量</option>
           {video && <option value="per_second">按视频秒数</option>}
-        </select>
+        </StudioSelect>
       </label>
       {value.mode !== "unconfigured" && (
         <label>
@@ -168,7 +170,9 @@ export function CreativeModels({
         <div>
           <span className="model-eyebrow">创作设置 / MODEL LIBRARY</span>
           <h1>高级模型管理</h1>
-          <p>为同一模型配置备用渠道、分配权重与内部积分。日常默认选择在“模型选择”中完成。</p>
+          <p>
+            为同一模型配置备用渠道、分配权重与内部积分。日常默认选择在“模型选择”中完成。
+          </p>
         </div>
         <div className="model-heading-actions">
           <Button
@@ -233,11 +237,12 @@ export function CreativeModels({
             </button>
           ))}
         </div>
-        <Input
-          aria-label="搜索创作模型"
+        <SearchField
+          className="w-full sm:w-72"
+          label="搜索创作模型"
           placeholder="搜索模型名称或介绍"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onValueChange={(value) => setSearch(value)}
         />
       </div>
       {query.isPending ? (
@@ -460,12 +465,12 @@ function CreativeEditor({
             </label>
             <label>
               创作类型
-              <select
+              <StudioSelect
                 className="creative-select"
                 value={modality}
                 disabled={!!model}
-                onChange={(e) => {
-                  setModality(e.target.value);
+                onValueChange={(selectedValue) => {
+                  setModality(selectedValue);
                   setRoutes([]);
                   setPrice(emptyPrice);
                 }}
@@ -475,7 +480,7 @@ function CreativeEditor({
                     {v}
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
           </div>
           <label>
@@ -587,14 +592,14 @@ function CreativeEditor({
             <>
               <label>
                 积分规则
-                <select
+                <StudioSelect
                   className="creative-select"
                   value={policy}
-                  onChange={(e) => setPolicy(e.target.value)}
+                  onValueChange={(selectedValue) => setPolicy(selectedValue)}
                 >
                   <option value="channel">使用实际渠道的积分规则</option>
                   <option value="unified">为这个创作模型统一设置</option>
-                </select>
+                </StudioSelect>
               </label>
               {policy === "unified" && (
                 <PriceFields
@@ -701,11 +706,11 @@ function Simulation({
         {Object.entries(fields).map(([k, vs]) => (
           <label key={k}>
             {labels[k] || k}
-            <select
+            <StudioSelect
               className="creative-select"
               value={String(params[k] ?? "")}
-              onChange={(e) => {
-                const value = vs.find((v) => String(v) === e.target.value);
+              onValueChange={(selectedValue) => {
+                const value = vs.find((v) => String(v) === selectedValue);
                 setParams((old) => {
                   const next = { ...old };
                   if (value === undefined) delete next[k];
@@ -721,7 +726,7 @@ function Simulation({
                   {v}
                 </option>
               ))}
-            </select>
+            </StudioSelect>
           </label>
         ))}
         <Button onClick={() => probe.mutate()} disabled={probe.isPending}>

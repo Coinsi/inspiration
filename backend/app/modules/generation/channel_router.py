@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -86,3 +86,13 @@ def update_model(
     db: Session = Depends(get_db, scope="function"),
 ):
     return channels.public_model(channels.save_model(db, ctx, channel_id, data, model_id))
+
+
+@router.delete("/{channel_id}", status_code=204)
+def remove(
+    channel_id: uuid.UUID,
+    revision: int = Query(ge=1),
+    ctx: ProjectContext = Depends(MANAGE),
+    db: Session = Depends(get_db, scope="function"),
+):
+    channels.remove_channel(db, ctx, channel_id, revision)

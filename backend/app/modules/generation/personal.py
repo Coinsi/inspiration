@@ -4,12 +4,13 @@ import copy
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.contracts import JobHandle, generation_registry
+from app.core import audit
 from app.core.crypto import decrypt, encrypt
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_action
@@ -81,7 +82,7 @@ def list_services(user=USER, db: Session = DB):
         public(r)
         for r in db.scalars(
             select(PersonalModelService)
-            .where(PersonalModelService.user_id == user.id)
+            .where(PersonalModelService.user_id == user.id, PersonalModelService.enabled.is_(True))
             .order_by(PersonalModelService.created_at)
         )
     ]
@@ -112,9 +113,9 @@ def save(preset_id: str, data: Save, user=USER, db: Session = DB):
     db.scalar(select(User).where(User.id == user.id).with_for_update())
     row = db.get(PersonalModelService, ident)
     token = data.token.get_secret_value().strip() if data.token else ""
-    if row and data.revision != row.revision:
+    if row and row.enabled and data.revision != row.revision:
         raise Conflict("服务已更新，请重新打开后保存")
-    if not row and not token:
+    if (not row or not row.enabled) and not token:
         raise CapabilityUnsupported("首次连接需要填写 API Key")
     if not row:
         row = PersonalModelService(
@@ -149,6 +150,40 @@ def save(preset_id: str, data: Save, user=USER, db: Session = DB):
     return public(row)
 
 
+@router.delete("/me/model-services/{service_id}", status_code=204)
+def remove_service(service_id: uuid.UUID, revision: int = Query(ge=1), user=USER, db: Session = DB):
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
+    row = owned(db, user.id, service_id, lock=True)
+    if not row.enabled:
+        return
+    if row.revision != revision:
+        raise Conflict("服务已更新，请刷新后重新删除")
+    active = db.scalar(
+        select(GenerationJob.id)
+        .where(
+            GenerationJob.created_by == user.id,
+            GenerationJob.provider.startswith(f"{PREFIX}{row.id.hex}_", autoescape=True),
+            GenerationJob.status.in_(["pending", "submitted", "running"]),
+        )
+        .limit(1)
+    )
+    if active:
+        raise Conflict("此服务仍有生成任务正在执行，请等待完成或取消任务后再删除")
+    # Retain only the identity/revision: reconnecting must never validate an old task snapshot.
+    row.enabled = False
+    row.credentials_encrypted = b""
+    row.verification = {}
+    row.revision += 1
+    audit.record(
+        db,
+        action="personal_model_service.remove",
+        user_id=user.id,
+        target_type="personal_model_service",
+        target_id=row.id,
+    )
+    db.flush()
+
+
 @router.post("/projects/{project_id}/model-channels/{channel_id}/use-personally")
 def adopt(channel_id: uuid.UUID, ctx=MANAGE, db: Session = DB):
     from app.modules.generation.channels import channel, public_model
@@ -164,7 +199,7 @@ def adopt(channel_id: uuid.UUID, ctx=MANAGE, db: Session = DB):
     ident = uuid.uuid5(ctx.user.id, "personal-model-service:" + preset_id)
     db.scalar(select(User).where(User.id == ctx.user.id).with_for_update())
     existing = db.get(PersonalModelService, ident)
-    if existing:
+    if existing and existing.enabled:
         return public(existing)  # Never overwrite an existing personal key with a project key.
     configured = list(
         db.scalars(select(ProviderConfig).where(ProviderConfig.project_id == ctx.project.id))
@@ -189,18 +224,19 @@ def adopt(channel_id: uuid.UUID, ctx=MANAGE, db: Session = DB):
         }
     if not selected:
         raise CapabilityUnsupported("这个项目服务尚未启用目录中的模型")
-    row = PersonalModelService(
-        id=ident,
-        user_id=ctx.user.id,
+    row = existing or PersonalModelService(id=ident, user_id=ctx.user.id, revision=0)
+    values = dict(
         name=presets.PRESETS.get(preset_id, {}).get("name", source.name),
         preset_id=preset_id,
         endpoint=source.endpoint,
         credentials_encrypted=source.credentials_encrypted,
         enabled=True,
-        revision=1,
+        revision=(row.revision or 0) + 1,
         models=selected,
         verification={},
     )
+    for key, value in values.items():
+        setattr(row, key, value)
     db.add(row)
     db.flush()
     return public(row)
@@ -211,7 +247,9 @@ def providers(db, user_id):
         return []
     result = []
     for row in db.scalars(
-        select(PersonalModelService).where(PersonalModelService.user_id == user_id)
+        select(PersonalModelService).where(
+            PersonalModelService.user_id == user_id, PersonalModelService.enabled.is_(True)
+        )
     ):
         for key, spec in row.models.items():
             if not spec.get("enabled", True):
@@ -254,7 +292,7 @@ def text_config(db, name, user_id):
 def resolve(db, name, user_id, snapshot=None):
     try:
         ident, key = name.removeprefix(PREFIX).split("_", 1)
-        row = owned(db, user_id, uuid.UUID(ident))
+        row = owned(db, user_id, uuid.UUID(ident), lock=True)
     except (ValueError, AttributeError):
         raise NotFound("个人模型不存在") from None
     if not row.enabled or key not in row.models or not row.models[key].get("enabled", True):

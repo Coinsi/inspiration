@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Trash2,
@@ -7,7 +9,7 @@ import {
   Plus,
   RefreshCw,
   Search,
-  ImagePlus,
+  Pencil,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -25,7 +27,7 @@ import { CreativeLaunch } from "@/components/CreativeLaunch";
 
 export default function Projects() {
   const qc = useQueryClient();
-  const { me, refresh } = useAuth();
+  const { me } = useAuth();
   const { t: tr, lang } = useI18n();
   const toast = useToast();
   const {
@@ -89,9 +91,7 @@ export default function Projects() {
     }
   }
   const saved = () => {
-    toast.push(zh ? "项目已保存" : "Project saved", "success");
     void qc.invalidateQueries({ queryKey: ["projects"] });
-    void refresh();
   };
 
   return (
@@ -243,30 +243,27 @@ export default function Projects() {
                   <Trash2 size={15} />
                   {zh ? "回收站" : "Trash"}
                 </Button>
-                <label className="flex items-center gap-2 rounded-lg border bg-card px-3">
-                  <Search className="h-4 w-4 text-faint" />
-                  <input
-                    id="project-search"
-                    aria-label={zh ? "搜索项目" : "Search projects"}
-                    className="min-w-0 bg-transparent py-2 text-sm outline-none"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder={
-                      zh ? "搜索项目名称或编号" : "Search name or code"
-                    }
-                  />
-                </label>
-                <select
+                <SearchField
+                  id="project-search"
+                  label={zh ? "搜索项目" : "Search projects"}
+                  value={search}
+                  onValueChange={setSearch}
+                  placeholder={
+                    zh ? "搜索项目名称或编号" : "Search name or code"
+                  }
+                  className="w-full sm:w-64"
+                />
+                <StudioSelect
                   aria-label={zh ? "项目排序" : "Sort projects"}
                   value={sort}
-                  onChange={(e) => setSort(e.target.value)}
+                  onValueChange={(selectedValue) => setSort(selectedValue)}
                   className="rounded-lg border bg-card px-3 py-2 text-xs"
                 >
                   <option value="newest">
                     {zh ? "最新创建" : "Newest created"}
                   </option>
                   <option value="name">{zh ? "按名称" : "By name"}</option>
-                </select>
+                </StudioSelect>
               </div>
             </div>
 
@@ -352,17 +349,11 @@ export default function Projects() {
                     ) && (
                       <button
                         className="project-card-cover-action"
-                        aria-label={`${zh ? "设置封面" : "Set cover"} · ${p.name}`}
+                        aria-label={`${zh ? "编辑项目" : "Edit project"} · ${p.name}`}
                         onClick={() => setCoverProject(p)}
                       >
-                        <ImagePlus size={15} />
-                        {p.cover_blob_hash
-                          ? zh
-                            ? "更换封面"
-                            : "Change cover"
-                          : zh
-                            ? "添加封面"
-                            : "Add cover"}
+                        <Pencil size={15} />
+                        {zh ? "编辑项目" : "Edit project"}
                       </button>
                     )}
                   </article>

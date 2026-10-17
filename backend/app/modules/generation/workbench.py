@@ -30,6 +30,7 @@ class Reference(BaseModel):
 
 
 class Create(schemas.GenerateIn):
+    work_id: uuid.UUID | None = None
     model_config = ConfigDict(extra="forbid")
     request_key: uuid.UUID
     prompt_override: str = Field(min_length=1, max_length=6000)
@@ -45,6 +46,10 @@ class Create(schemas.GenerateIn):
 
 
 def prepare(db, ctx, data):
+    if data.work_id:
+        from app.modules.conversation.works import get as get_work
+
+        get_work(db, ctx.project.id, data.work_id)
     if data.request_type.value not in ("image", "video"):
         raise CapabilityUnsupported("工作台媒体创作支持图片与视频")
     provider = service._provider_instance(db, ctx.project.id, data.provider, user_id=ctx.user.id)
@@ -69,7 +74,9 @@ def prepare(db, ctx, data):
         refs.append(ReferenceImage(blob_hash=g.output_blob_hash, role=ref.role))
     if refs and ("reference" not in caps.features or len(refs) > caps.max_reference_images):
         raise CapabilityUnsupported("参考图片超出模型能力，请调整参考或更换模型")
-    gen = schemas.GenerateIn.model_validate(data.model_dump(exclude={"request_key", "references"}))
+    gen = schemas.GenerateIn.model_validate(
+        data.model_dump(exclude={"request_key", "references", "work_id"})
+    )
     gen.use_references = False
     # The composer exposes one reference path. Avoid combining hidden legacy fields.
     if any((gen.source_generation_id, gen.first_frame_id, gen.last_frame_id)):
@@ -92,8 +99,18 @@ def estimate(data: Create, ctx: ProjectContext = RUN, db: Session = DB):
 
 @router.post("/generate", response_model=schemas.JobOut)
 def generate(data: Create, ctx: ProjectContext = RUN, db: Session = DB):
+    job = create_job(db, ctx, data)
+    if job.status != "pending" or (job.cost_raw or {}).get("events"):
+        return job
+    return jobs.dispatch(db, job)
+
+
+def create_job(db, ctx, data):
+    """Create without dispatch so callers can atomically attach business records."""
     db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     payload = data.model_dump(mode="json", exclude={"request_key"})
+    if payload.get("work_id") is None:
+        payload.pop("work_id", None)
     prior = db.scalar(
         select(Creation).where(
             Creation.project_id == ctx.project.id,
@@ -119,6 +136,7 @@ def generate(data: Create, ctx: ProjectContext = RUN, db: Session = DB):
         created_by=ctx.user.id,
         request_key=data.request_key,
         title=data.prompt_override[:120],
+        work_id=data.work_id,
         request=payload,
     )
     db.add(row)
@@ -128,17 +146,28 @@ def generate(data: Create, ctx: ProjectContext = RUN, db: Session = DB):
     )
     job.input_snapshot = {
         **job.input_snapshot,
+        "work_id": str(row.work_id) if row.work_id else None,
         "reference_sources": [r.model_dump(mode="json") for r in data.references],
     }
-    return jobs.dispatch(db, job)
+    return job
 
 
 @router.get("/creations")
-def history(ctx: ProjectContext = READ, db: Session = DB, offset: int = Query(0, ge=0)):
+def history(
+    ctx: ProjectContext = READ,
+    db: Session = DB,
+    offset: int = Query(0, ge=0),
+    work_id: uuid.UUID | None = None,
+):
+    if work_id:
+        from app.modules.conversation.works import get as get_work
+
+        get_work(db, ctx.project.id, work_id)
     rows = list(
         db.scalars(
             select(Creation)
             .where(Creation.project_id == ctx.project.id)
+            .where(Creation.work_id == work_id if work_id else True)
             .order_by(Creation.created_at.desc(), Creation.id)
             .offset(offset)
             .limit(12)
@@ -148,6 +177,7 @@ def history(ctx: ProjectContext = READ, db: Session = DB, offset: int = Query(0,
         {
             "id": row.id,
             "title": row.title,
+            "work_id": row.work_id,
             "request": row.request,
             "jobs": [
                 schemas.JobOut.model_validate(j)

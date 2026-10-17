@@ -1,3 +1,4 @@
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
@@ -30,12 +31,13 @@ export function ComposerReferences({
   return (
     <div className="composer-reference-picker">
       <p>从项目已有的生成结果或上传图片中选择。参考会随本次创作保存。</p>
-      <input
-        aria-label="搜索参考图片"
+      <SearchField
+        className="w-full"
+        label="搜索参考图片"
         placeholder="按提示词查找图片"
         value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
+        onValueChange={(value) => {
+          setQuery(value);
           setOffset(0);
         }}
       />

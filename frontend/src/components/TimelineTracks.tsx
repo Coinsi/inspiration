@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -266,11 +267,11 @@ export function TimelineTracks({
                 : "Place music, dialogue and effects on the timeline. Removing a track keeps the original in the project."}
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <select
+              <StudioSelect
                 aria-label={zh ? "音频素材" : "Audio source"}
                 className={`${input} flex-1 basis-48`}
                 value={sourceId}
-                onChange={(e) => setSourceId(e.target.value)}
+                onValueChange={(selectedValue) => setSourceId(selectedValue)}
                 disabled={busy}
               >
                 <option value="">
@@ -281,7 +282,7 @@ export function TimelineTracks({
                     {s.name} · {((s.duration_ms || 0) / 1000).toFixed(1)} s
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
               <Button
                 size="sm"
                 disabled={
@@ -476,21 +477,21 @@ export function TimelineTracks({
                   </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
-                  <select
+                  <StudioSelect
                     aria-label={zh ? "声音用途" : "Audio kind"}
                     className="h-8 rounded border bg-bg px-2 text-xs"
                     value={a.kind}
                     disabled={busy}
-                    onChange={(e) =>
+                    onValueChange={(selectedValue) =>
                       changeAudio(i, {
-                        kind: e.target.value as AudioClip["kind"],
+                        kind: selectedValue as AudioClip["kind"],
                       })
                     }
                   >
                     <option value="music">{zh ? "配乐" : "Music"}</option>
                     <option value="dialogue">{zh ? "对白" : "Dialogue"}</option>
                     <option value="effect">{zh ? "音效" : "Effect"}</option>
-                  </select>
+                  </StudioSelect>
                   <label className="flex items-center gap-2 text-xs">
                     <input
                       type="checkbox"
@@ -606,15 +607,15 @@ export function TimelineTracks({
                   }}
                 />
               </label>
-              <select
+              <StudioSelect
                 aria-label={zh ? "字幕文件编码" : "Subtitle encoding"}
                 className="h-9 rounded-md border bg-bg px-2 text-xs"
                 value={encoding}
-                onChange={(e) => setEncoding(e.target.value)}
+                onValueChange={(selectedValue) => setEncoding(selectedValue)}
               >
                 <option value="utf-8">UTF-8</option>
                 <option value="gb18030">GB18030</option>
-              </select>
+              </StudioSelect>
               <Button
                 size="sm"
                 variant="outline"

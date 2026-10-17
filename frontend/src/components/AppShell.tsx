@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useQuery } from "@tanstack/react-query";
 import {
   Clapperboard,
@@ -37,6 +38,10 @@ const COLLAPSE_KEY = "inspiration_sidebar_collapsed";
 export default function AppShell() {
   const { projectId } = useParams();
   const location = useLocation();
+  const taskReturnParams = new URLSearchParams(location.search);
+  taskReturnParams.delete("message");
+  taskReturnParams.delete("ordinal");
+  const taskReturnPath = `${location.pathname}?${taskReturnParams}`;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigate = useNavigate();
@@ -78,20 +83,8 @@ export default function AppShell() {
   const canvasWorkspace = location.pathname.endsWith("/canvas");
   const directorWorkspace = location.pathname.endsWith("/director");
   const cutsWorkspace = location.pathname.endsWith("/cuts");
-  const immersiveWorkspace =
-    canvasWorkspace ||
-    directorWorkspace ||
-    cutsWorkspace ||
-    (location.pathname.endsWith("/shots") &&
-      new URLSearchParams(location.search).has("shot"));
-  const [canvasNavExpanded, setCanvasNavExpanded] = useState(false);
-  const compact =
-    (immersiveWorkspace ? !canvasNavExpanded : collapsed) && !narrow;
+  const compact = collapsed && !narrow;
   const toggleCollapse = () => {
-    if (immersiveWorkspace) {
-      setCanvasNavExpanded((v) => !v);
-      return;
-    }
     setCollapsed((c) => {
       try {
         localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
@@ -131,7 +124,13 @@ export default function AppShell() {
   const iconBtn =
     "h-8 w-8 rounded-md hover:bg-elevated flex items-center justify-center text-muted-foreground shrink-0 transition-colors";
   const activeStage = WORKSPACE_STAGES.find((stage) =>
-    stage.routes.includes(destination?.to ?? ""),
+    stage.routes.includes(
+      ["assets", "assets/trash", "library", "evidence", "generated"].includes(
+        destination?.to ?? "",
+      )
+        ? "materials"
+        : (destination?.to ?? ""),
+    ),
   );
   useEffect(() => {
     setExpandedStage(activeStage?.id ?? null);
@@ -160,17 +159,17 @@ export default function AppShell() {
         className={cn(
           "studio-sidebar z-50 shrink-0 bg-surface flex flex-col md:relative",
           narrow ? (mobileOpen ? "fixed inset-y-0 left-0" : "hidden") : "",
-          compact ? "w-[72px]" : "w-[244px]",
+          compact ? "w-[88px]" : "w-[244px]",
         )}
       >
         {/* 头部 */}
         <div
           className={cn(
-            "flex items-center gap-2 px-4",
-            compact ? "min-h-24" : "min-h-20",
+            "flex items-center gap-2",
+            compact ? "flex-col px-2 pt-5 pb-3" : "min-h-20 px-4",
           )}
         >
-          <span className="studio-brand-mark shrink-0">
+          <span className="studio-brand-mark shrink-0" aria-hidden="true">
             <Clapperboard className="h-[18px] w-[18px]" />
           </span>
           {!compact && (
@@ -183,8 +182,30 @@ export default function AppShell() {
           )}
           <button
             onClick={() => (narrow ? setMobileOpen(false) : toggleCollapse())}
-            className={cn(iconBtn, compact && "absolute top-16 left-5")}
-            title={compact ? t("shell.expand") : t("shell.collapse")}
+            className={
+              compact
+                ? "flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-[11px] text-muted-foreground hover:bg-elevated"
+                : iconBtn
+            }
+            title={
+              narrow
+                ? lang === "zh"
+                  ? "关闭导航"
+                  : "Close navigation"
+                : compact
+                  ? t("shell.expand")
+                  : t("shell.collapse")
+            }
+            aria-label={
+              narrow
+                ? lang === "zh"
+                  ? "关闭导航"
+                  : "Close navigation"
+                : compact
+                  ? t("shell.expand")
+                  : t("shell.collapse")
+            }
+            aria-expanded={!compact}
           >
             {narrow ? (
               <X className="h-4 w-4" />
@@ -193,6 +214,7 @@ export default function AppShell() {
             ) : (
               <PanelLeftClose className="h-4 w-4" />
             )}
+            {compact && <span>{lang === "zh" ? "展开" : "Expand"}</span>}
           </button>
         </div>
 
@@ -201,11 +223,11 @@ export default function AppShell() {
           title={lang === "zh" ? "所有项目" : "All projects"}
           className={cn(
             "mx-3 mb-4 flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-elevated",
-            compact && "justify-center px-0",
+            compact && "flex-col justify-center gap-1 px-0 text-[11px]",
           )}
         >
           <Folder size={17} />
-          {!compact && (lang === "zh" ? "所有项目" : "All projects")}
+          <span>{lang === "zh" ? "所有项目" : "All projects"}</span>
         </NavLink>
 
         <button
@@ -215,10 +237,11 @@ export default function AppShell() {
           title={lang === "zh" ? "快速导航" : "Quick navigation"}
           className={cn(
             "mx-3 mb-5 flex items-center gap-2 rounded-xl bg-elevated/60 px-3 py-3 text-xs text-muted-foreground hover:bg-elevated",
-            compact && "justify-center px-0",
+            compact && "flex-col justify-center gap-1 px-0 text-[11px]",
           )}
         >
           <Search className="h-4 w-4 shrink-0" />
+          {compact && <span>{lang === "zh" ? "搜索" : "Search"}</span>}
           {!compact && (
             <>
               <span className="flex-1 text-left">
@@ -243,7 +266,11 @@ export default function AppShell() {
               <div key={stage.id}>
                 <div className="flex items-center gap-1">
                   <NavLink
-                    to={`/projects/${projectId}/${active ? destination!.to : first.to}`}
+                    to={
+                      stage.id === "media"
+                        ? `/projects/${projectId}/materials${activeStage?.id !== "media" ? `?return=${encodeURIComponent(location.pathname + location.search)}` : ""}`
+                        : `/projects/${projectId}/${active ? destination!.to : first.to}`
+                    }
                     title={lang === "zh" ? stage.zh : stage.en}
                     aria-current={active ? "page" : undefined}
                     className={cn(
@@ -281,11 +308,16 @@ export default function AppShell() {
                       <NavLink
                         key={it.to}
                         end
-                        to={`/projects/${projectId}/${it.to}`}
+                        to={`/projects/${projectId}/${it.to}${it.to === "shots" ? "?view=status" : ""}`}
                         className={() =>
                           cn(
                             "block rounded-lg px-3 py-2 text-[13px]",
-                            destination?.to === it.to
+                            (destination?.to === "shots" &&
+                            new URLSearchParams(location.search).has("shot") &&
+                            new URLSearchParams(location.search).get("view") !==
+                              "status"
+                              ? "storyboard"
+                              : destination?.to) === it.to
                               ? "bg-primary/10 text-primary"
                               : "text-muted-foreground hover:bg-elevated",
                           )
@@ -394,12 +426,12 @@ export default function AppShell() {
             {pageTitle}
           </span>
           {compact && activeStage && activeStage.items.length > 1 && (
-            <select
+            <StudioSelect
               aria-label={lang === "zh" ? "切换相关工具" : "Related tools"}
               className="ml-2 max-w-32 rounded-lg border bg-card px-2 py-1 text-xs"
               value={destination?.to}
-              onChange={(e) =>
-                navigate(`/projects/${projectId}/${e.target.value}`)
+              onValueChange={(selectedValue) =>
+                navigate(`/projects/${projectId}/${selectedValue}`)
               }
             >
               {activeStage.items.map((it) => (
@@ -407,7 +439,7 @@ export default function AppShell() {
                   {t(it.label)}
                 </option>
               ))}
-            </select>
+            </StudioSelect>
           )}
           <button
             className={cn(iconBtn, "ml-auto")}
@@ -417,7 +449,7 @@ export default function AppShell() {
             <Search className="h-4 w-4" />
           </button>
           <NavLink
-            to={`/projects/${projectId}/tasks`}
+            to={`/projects/${projectId}/tasks${location.pathname.endsWith("/workbench") ? `?return=${encodeURIComponent(taskReturnPath)}` : ""}`}
             title={lang === "zh" ? "任务中心" : "Task center"}
             aria-label={lang === "zh" ? "任务中心" : "Task center"}
             className={cn(

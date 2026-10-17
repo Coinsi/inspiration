@@ -2,13 +2,9 @@ import uuid
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
 from app.modules.skill.schemas import SkillUse
-
-
-class Target(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target_type: Literal["script", "scene", "shot", "asset", "setting"]
-    target_id: uuid.UUID
+from app.modules.tools.contracts import Target  # noqa: F401
 
 
 class Create(BaseModel):

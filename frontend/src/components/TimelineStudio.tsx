@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { ObjectPicker } from "@/components/ObjectPicker";
 import { useEffect, useState } from "react";
 import {
   edit,
@@ -12,8 +14,8 @@ import {
   type TimelineDocument,
 } from "@/lib/timeline-edit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, Download, Film, Plus, Trash2 } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { ArrowDown, ArrowUp, Download, Film, Trash2 } from "lucide-react";
 import {
   api,
   blobUrl,
@@ -88,13 +90,13 @@ export function TimelineStudio({
         </h2>
         <label className="text-xs text-muted-foreground">
           {zh ? "工作时间线" : "Working timeline"}
-          <select
+          <StudioSelect
             aria-label={zh ? "工作时间线" : "Working timeline"}
             className="mt-1 h-9 w-full rounded-md border bg-bg px-2 text-sm text-foreground"
             value={id}
             disabled={workingBusy}
-            onChange={async (e) => {
-              const value = e.target.value;
+            onValueChange={async (selectedValue) => {
+              const value = selectedValue;
               if (
                 !dirty ||
                 (await confirm({
@@ -117,7 +119,7 @@ export function TimelineStudio({
                 {t.name}
               </option>
             ))}
-          </select>
+          </StudioSelect>
         </label>
       </div>
       {q.error && (
@@ -193,6 +195,12 @@ function TimelineDraft({
   }));
   const content = history.present;
   const clips = content.items;
+  const hasContent = Boolean(
+    clips.length ||
+    content.visuals.length ||
+    content.audio.length ||
+    content.subtitles.length,
+  );
   const [savedSnapshot, setSavedSnapshot] = useState(() =>
     JSON.stringify(content),
   );
@@ -201,7 +209,6 @@ function TimelineDraft({
   useEffect(() => {
     onDirty(!saved);
   }, [saved, onDirty]);
-  const [selectedShot, setSelectedShot] = useState("");
   const [height, setHeight] = useState(720);
   const [aspect, setAspect] = useState("16:9");
   const [mute, setMute] = useState(false);
@@ -403,7 +410,10 @@ function TimelineDraft({
           onJob={setLastJob}
         />
       )}
-      <div className="timeline-preview-grid">
+      <div
+        className="timeline-preview-grid"
+        hidden={!clips.length && !outputs.length}
+      >
         <div className="timeline-monitor">
           <div className="timeline-monitor-screen">
             {composition ? (
@@ -511,13 +521,13 @@ function TimelineDraft({
           )}
           {outputs.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
+              <StudioSelect
                 aria-label={zh ? "历史导出" : "Export history"}
                 className="h-8 min-w-0 flex-1 rounded-md border bg-bg px-2 text-xs"
                 value={result?.id || ""}
-                onChange={(e) => {
+                onValueChange={(selectedValue) => {
                   setComposition(false);
-                  setPreview(e.target.value);
+                  setPreview(selectedValue);
                   setClipPreview(null);
                 }}
               >
@@ -527,7 +537,7 @@ function TimelineDraft({
                     {g.id.slice(0, 8)}
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
               <Button
                 size="sm"
                 variant="ghost"
@@ -570,26 +580,28 @@ function TimelineDraft({
           </p>
           <label className="block text-xs">
             {zh ? "画面比例" : "Aspect ratio"}
-            <select
+            <StudioSelect
               className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
               value={aspect}
-              onChange={(e) => setAspect(e.target.value)}
+              onValueChange={(selectedValue) => setAspect(selectedValue)}
             >
               {["16:9", "9:16", "1:1"].map((v) => (
                 <option key={v}>{v}</option>
               ))}
-            </select>
+            </StudioSelect>
           </label>
           <label className="block text-xs">
             {zh ? "短边分辨率" : "Short edge resolution"}
-            <select
+            <StudioSelect
               className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
               value={height}
-              onChange={(e) => setHeight(Number(e.target.value))}
+              onValueChange={(selectedValue) =>
+                setHeight(Number(selectedValue))
+              }
             >
               <option value={720}>720p</option>
               <option value={1080}>1080p</option>
-            </select>
+            </StudioSelect>
           </label>
           <label className="flex items-center gap-2 text-xs">
             <input
@@ -601,11 +613,11 @@ function TimelineDraft({
           </label>
           <label className="block text-xs">
             {zh ? "字幕导出方式" : "Subtitles"}
-            <select
+            <StudioSelect
               aria-label={zh ? "字幕导出方式" : "Subtitle export mode"}
               className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
               value={subtitleMode}
-              onChange={(e) => setSubtitleMode(e.target.value)}
+              onValueChange={(selectedValue) => setSubtitleMode(selectedValue)}
             >
               <option value="burn">
                 {zh ? "写入画面（所有播放器可见）" : "Burn into video"}
@@ -614,7 +626,7 @@ function TimelineDraft({
                 {zh ? "可切换字幕轨" : "Selectable subtitle track"}
               </option>
               <option value="none">{zh ? "不带字幕" : "No subtitles"}</option>
-            </select>
+            </StudioSelect>
           </label>
           <p className="text-xs leading-5 text-muted-foreground">
             {zh
@@ -639,34 +651,36 @@ function TimelineDraft({
           )}
         </fieldset>
       </div>
-      <TimelineOverview
-        content={content}
-        shots={shots}
-        selected={activeClip}
-        disabled={pending}
-        time={compositionTime}
-        onTime={(t) => {
-          setComposition(true);
-          setCompositionTime(t);
-        }}
-        onChange={(next) => setHistory((h) => edit(h, next))}
-        onSelect={(index) => {
-          setComposition(false);
-          setClipPreview(index);
-          setPanel("clips");
-        }}
-        onVisualSelect={(id) => {
-          setPanel("visuals");
-          setComposition(true);
-          setSelectedVisual(id);
-          const v = content.visuals.find((v) => v.id === id);
-          if (v) setCompositionTime(v.start_ms);
-        }}
-        onTracks={(tab) => {
-          setTrackTab(tab);
-          setPanel("tracks");
-        }}
-      />
+      {hasContent && (
+        <TimelineOverview
+          content={content}
+          shots={shots}
+          selected={activeClip}
+          disabled={pending}
+          time={compositionTime}
+          onTime={(t) => {
+            setComposition(true);
+            setCompositionTime(t);
+          }}
+          onChange={(next) => setHistory((h) => edit(h, next))}
+          onSelect={(index) => {
+            setComposition(false);
+            setClipPreview(index);
+            setPanel("clips");
+          }}
+          onVisualSelect={(id) => {
+            setPanel("visuals");
+            setComposition(true);
+            setSelectedVisual(id);
+            const v = content.visuals.find((v) => v.id === id);
+            if (v) setCompositionTime(v.start_ms);
+          }}
+          onTracks={(tab) => {
+            setTrackTab(tab);
+            setPanel("tracks");
+          }}
+        />
+      )}
       <div
         className="timeline-editor-tabs"
         role="tablist"
@@ -783,30 +797,39 @@ function TimelineDraft({
         <h3 className="text-sm font-medium">
           {zh ? "镜头顺序" : "Clip order"}
         </h3>
-        <div className="flex gap-2">
-          <select
-            aria-label={zh ? "添加镜头" : "Add shot"}
-            className="h-9 min-w-0 flex-1 rounded-md border bg-bg px-2 text-sm"
-            value={selectedShot}
-            onChange={(e) => setSelectedShot(e.target.value)}
-          >
-            <option value="">{zh ? "选择镜头素材…" : "Choose a shot…"}</option>
-            {shots.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code} · {s.title || ""}
-                {s.selected_generation_id
-                  ? ""
-                  : zh
-                    ? "（尚未钦定素材）"
-                    : " (no selected media)"}
-              </option>
-            ))}
-          </select>
-          <Button
-            size="sm"
-            disabled={!selectedShot || clips.length >= 100 || pending}
-            onClick={() => {
-              const shot = shots.find((s) => s.id === selectedShot)!;
+        <div
+          className={clips.length ? "timeline-add-clip" : "timeline-first-clip"}
+        >
+          {!clips.length && (
+            <div>
+              <Film size={28} />
+              <h3>{zh ? "从第一个镜头开始" : "Start with your first shot"}</h3>
+              <p>
+                {zh
+                  ? "选择已采用画面的镜头，再调整顺序和时长。声音、字幕与导出可以随后完成。"
+                  : "Choose a shot, then arrange its order and duration. Add sound and captions afterwards."}
+              </p>
+            </div>
+          )}
+          <ObjectPicker
+            title={zh ? "添加镜头" : "Add a shot"}
+            closeOnSelect
+            disabled={
+              pending ||
+              clips.length >= 100 ||
+              !shots.some((s) => s.selected_generation_id)
+            }
+            selected={[]}
+            items={shots
+              .filter((s) => s.selected_generation_id)
+              .map((s) => ({
+                id: s.id,
+                name: s.title || s.description || s.code,
+                context: s.code,
+              }))}
+            onSelect={(id) => {
+              const shot = shots.find((s) => s.id === id);
+              if (!shot || !shot.selected_generation_id) return;
               change([
                 ...clips,
                 {
@@ -817,19 +840,23 @@ function TimelineDraft({
                   duration_ms: 3000,
                 },
               ]);
-              setSelectedShot("");
               setClipPreview(clips.length);
             }}
-          >
-            <Plus className="mr-1 h-4 w-4" />
-            {zh ? "添加" : "Add"}
-          </Button>
+          />
+          {!shots.some((s) => s.selected_generation_id) && (
+            <p className="text-sm text-muted-foreground">
+              {zh
+                ? "还没有可用的镜头画面。"
+                : "No shots have an adopted image yet."}{" "}
+              <Link
+                className="underline text-primary"
+                to={`/projects/${projectId}/shots`}
+              >
+                {zh ? "去分镜选择画面 →" : "Choose shot media →"}
+              </Link>
+            </p>
+          )}
         </div>
-        {clips.length === 0 && (
-          <p className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">
-            {zh ? "时间线为空，添加第一个镜头。" : "Add your first clip."}
-          </p>
-        )}
         {clips.map((c, i) => (
           <div
             key={`${i}-${c.shot_id}`}
@@ -935,18 +962,18 @@ function TimelineDraft({
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 {zh ? "接下一镜" : "Transition"}
-                <select
+                <StudioSelect
                   aria-label={`${zh ? "转场" : "Transition"} ${i + 1}`}
                   className="h-8 rounded-md border bg-bg px-2 text-foreground"
                   disabled={pending}
                   value={String(c.transition?.type || "none")}
-                  onChange={(e) =>
+                  onValueChange={(selectedValue) =>
                     update(i, {
                       transition:
-                        e.target.value === "none"
+                        selectedValue === "none"
                           ? null
                           : {
-                              type: e.target.value,
+                              type: selectedValue,
                               duration_ms: Math.max(
                                 100,
                                 Math.min(
@@ -973,7 +1000,7 @@ function TimelineDraft({
                   <option value="wipeleft" disabled={i === clips.length - 1}>
                     {zh ? "向左擦除" : "Wipe left"}
                   </option>
-                </select>
+                </StudioSelect>
               </label>
               {c.transition && (
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1265,11 +1292,11 @@ function ClipSource({
   return (
     <label className="min-w-0 text-xs text-muted-foreground">
       {zh ? "使用素材" : "Media variant"}
-      <select
+      <StudioSelect
         className="mt-1 h-9 w-full rounded-md border bg-bg px-2 text-foreground"
         disabled={disabled}
         value={clip.generation_id || ""}
-        onChange={(e) => onChange(e.target.value || null)}
+        onValueChange={(selectedValue) => onChange(selectedValue || null)}
       >
         <option value="">
           {zh ? "使用镜头当前钦定素材" : "Use shot selection"}
@@ -1291,7 +1318,7 @@ function ClipSource({
               {i + 1} · {g.provider} · {g.id.slice(0, 8)}
             </option>
           ))}
-      </select>
+      </StudioSelect>
       {error && <span className="text-danger">{(error as Error).message}</span>}
     </label>
   );

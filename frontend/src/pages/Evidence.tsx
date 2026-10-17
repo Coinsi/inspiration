@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -101,10 +103,16 @@ function Workspace({ projectId }: { projectId: string }) {
     [candidates, setCandidates] = useState<Candidate[]>([]),
     [searched, setSearched] = useState(false);
   const identities = useQuery({
-    queryKey: ["identities", projectId, identityQuery, identityOffset],
+    queryKey: [
+      "identities",
+      projectId,
+      identityQuery,
+      identityOffset,
+      params.get("asset"),
+    ],
     queryFn: () =>
       api.get<Identity[]>(
-        `${base}/identities?q=${encodeURIComponent(identityQuery)}&offset=${identityOffset}`,
+        `${base}/identities?q=${encodeURIComponent(identityQuery)}&offset=${identityOffset}${params.get("asset") ? `&asset_id=${params.get("asset")}` : ""}`,
       ),
   });
   const selectedVersion = useLibraryVersion(projectId, version);
@@ -113,6 +121,8 @@ function Workspace({ projectId }: { projectId: string }) {
     queryFn: () => api.get<Asset[]>(root + "/assets"),
   });
   const query = new URLSearchParams({ offset: String(offset) });
+  if (params.get("asset")) query.set("asset_id", params.get("asset")!);
+  if (params.get("version")) query.set("version_id", params.get("version")!);
   if (identityFilter === "unknown") query.set("unknown", "true");
   else if (identityFilter) query.set("identity_id", identityFilter);
   if (status) query.set("status", status);
@@ -210,16 +220,32 @@ function Workspace({ projectId }: { projectId: string }) {
           </p>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">
             <Users className="h-6 w-6" />
-            身份与证据
+            人物与片段
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             用原片中的观察建立角色线索。先核对时间段，再确认身份；更正后，检索会使用最新判断，旧判断仍可追溯。
           </p>
         </div>
-        <Link to={root + "/library"}>
-          <Button variant="outline">返回视频素材</Button>
+        <Link
+          to={
+            params.get("return")?.startsWith(root + "/")
+              ? params.get("return")!
+              : root + "/materials"
+          }
+        >
+          <Button variant="outline">返回素材</Button>
         </Link>
       </header>
+      {params.get("asset") && (
+        <p className="text-sm text-muted-foreground">
+          当前仅展示这个角色关联的身份和片段。若尚未关联，可新建身份并选择对应角色。
+        </p>
+      )}
+      {params.get("version") && (
+        <p className="text-sm text-muted-foreground">
+          当前查看所选素材版本中的人物标注。
+        </p>
+      )}
       {error && (
         <div
           role="alert"
@@ -246,20 +272,20 @@ function Workspace({ projectId }: { projectId: string }) {
                   name: "",
                   aliases: [],
                   description: "",
-                  asset_id: null,
+                  asset_id: params.get("asset"),
                 })
               }
             >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
-          <input
-            aria-label="搜索角色身份"
-            className={field}
+          <SearchField
+            className="min-w-0 flex-1"
+            label="搜索角色身份"
             value={identityQuery}
             placeholder="按名称查找角色"
-            onChange={(e) => {
-              setIdentityQuery(e.target.value);
+            onValueChange={(value) => {
+              setIdentityQuery(value);
               setIdentityOffset(0);
             }}
           />
@@ -394,14 +420,14 @@ function Workspace({ projectId }: { projectId: string }) {
                 </label>
                 <label className="space-y-1 text-xs">
                   关联创作角色资产
-                  <select
+                  <StudioSelect
                     aria-label="关联角色资产"
                     className={field}
                     value={identityDraft.asset_id ?? ""}
-                    onChange={(e) =>
+                    onValueChange={(selectedValue) =>
                       setIdentityDraft({
                         ...identityDraft,
-                        asset_id: e.target.value || null,
+                        asset_id: selectedValue || null,
                       })
                     }
                   >
@@ -413,7 +439,7 @@ function Workspace({ projectId }: { projectId: string }) {
                           {a.name}
                         </option>
                       ))}
-                  </select>
+                  </StudioSelect>
                 </label>
               </fieldset>
               <div className="flex gap-2">
@@ -481,14 +507,14 @@ function Workspace({ projectId }: { projectId: string }) {
               </Button>
             </div>
             <div className="mt-3 flex gap-2">
-              <input
-                aria-label="外观线索搜索"
-                className={field}
+              <SearchField
+                className="min-w-0 flex-1"
+                label="外观线索搜索"
                 placeholder="例如：穿蓝色外套的人站在车站"
                 value={search}
                 maxLength={1000}
                 disabled={busy}
-                onChange={(e) => setSearch(e.target.value)}
+                onValueChange={(value) => setSearch(value)}
               />
               <Button
                 disabled={busy || !search.trim()}
@@ -631,14 +657,14 @@ function Workspace({ projectId }: { projectId: string }) {
                 <fieldset disabled={busy} className="space-y-3">
                   <label className="block space-y-1 text-xs">
                     关联身份
-                    <select
+                    <StudioSelect
                       aria-label="证据关联身份"
                       className={field}
                       value={draft.identity_id ?? ""}
-                      onChange={(e) =>
+                      onValueChange={(selectedValue) =>
                         setDraft({
                           ...draft,
-                          identity_id: e.target.value || null,
+                          identity_id: selectedValue || null,
                         })
                       }
                     >
@@ -648,43 +674,43 @@ function Workspace({ projectId }: { projectId: string }) {
                           {i.name}
                         </option>
                       ))}
-                    </select>
+                    </StudioSelect>
                   </label>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1 text-xs">
                       证据类型
-                      <select
+                      <StudioSelect
                         aria-label="证据类型"
                         className={field}
                         value={draft.kind}
-                        onChange={(e) =>
+                        onValueChange={(selectedValue) =>
                           setDraft({
                             ...draft,
-                            kind: e.target.value as Draft["kind"],
+                            kind: selectedValue as Draft["kind"],
                           })
                         }
                       >
                         <option value="visual">画面中出现</option>
                         <option value="speech">台词中提及</option>
-                      </select>
+                      </StudioSelect>
                     </label>
                     <label className="space-y-1 text-xs">
                       核对状态
-                      <select
+                      <StudioSelect
                         aria-label="证据状态"
                         className={field}
                         value={draft.status}
-                        onChange={(e) =>
+                        onValueChange={(selectedValue) =>
                           setDraft({
                             ...draft,
-                            status: e.target.value as Draft["status"],
+                            status: selectedValue as Draft["status"],
                           })
                         }
                       >
                         <option value="proposed">待核对</option>
                         <option value="confirmed">已确认</option>
                         <option value="rejected">已否定</option>
-                      </select>
+                      </StudioSelect>
                     </label>
                   </div>
                   <label className="block space-y-1 text-xs">
@@ -753,35 +779,39 @@ function Workspace({ projectId }: { projectId: string }) {
                   {evidence.data?.total ?? "—"}
                 </span>
               </h2>
-              <select
+              <StudioSelect
                 aria-label="筛选证据状态"
                 className={`${field} max-w-36`}
                 value={status}
-                onChange={(e) => setFilter(() => setStatus(e.target.value))}
+                onValueChange={(selectedValue) =>
+                  setFilter(() => setStatus(selectedValue))
+                }
               >
                 <option value="">所有状态</option>
                 <option value="confirmed">已确认</option>
                 <option value="proposed">待核对</option>
                 <option value="rejected">已否定</option>
-              </select>
-              <select
+              </StudioSelect>
+              <StudioSelect
                 aria-label="筛选证据类型"
                 className={`${field} max-w-36`}
                 value={kind}
-                onChange={(e) => setFilter(() => setKind(e.target.value))}
+                onValueChange={(selectedValue) =>
+                  setFilter(() => setKind(selectedValue))
+                }
               >
                 <option value="">全部证据</option>
                 <option value="visual">画面出现</option>
                 <option value="speech">台词提及</option>
-              </select>
+              </StudioSelect>
               {identityFilter && identityFilter !== "unknown" && (
-                <select
+                <StudioSelect
                   aria-label="重叠出现身份"
                   className={`${field} max-w-52`}
                   value={second}
-                  onChange={(e) =>
+                  onValueChange={(selectedValue) =>
                     setFilter(() => {
-                      setSecond(e.target.value);
+                      setSecond(selectedValue);
                       setStatus("confirmed");
                       setKind("visual");
                     })
@@ -795,7 +825,7 @@ function Workspace({ projectId }: { projectId: string }) {
                         与 {i.name} 重叠出现
                       </option>
                     ))}
-                </select>
+                </StudioSelect>
               )}
             </div>
             {second && (

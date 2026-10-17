@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, KeyRound, Plus, Settings2 } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  KeyRound,
+  Plus,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+import { useConfirm } from "./ui/confirm";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "./ui/button";
@@ -50,6 +58,7 @@ export function verificationLabel(value?: Verification) {
 export function PersonalModelServices({ projectId }: { projectId?: string }) {
   const { me } = useAuth();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const services = useQuery({
     queryKey: ["personal-model-services", me?.user.id],
     queryFn: () => api.get<Service[]>("/me/model-services"),
@@ -118,6 +127,32 @@ export function PersonalModelServices({ projectId }: { projectId?: string }) {
       setNotice(
         "已保存到当前账号，所有项目均可选择。首次生成后会更新验证状态。",
       );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(service: Service) {
+    if (
+      !(await confirm({
+        title: `删除「${service.name}」？`,
+        message:
+          "将移除个人连接、保存的密钥及可选模型。已生成的作品和历史记录会保留；之后可以重新填写密钥连接。",
+        confirmText: "删除服务",
+        danger: true,
+      }))
+    )
+      return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.del(
+        `/me/model-services/${service.id}?revision=${service.revision}`,
+      );
+      await refresh();
+      setNotice("服务已删除，已生成的作品保留。");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -246,6 +281,18 @@ export function PersonalModelServices({ projectId }: { projectId?: string }) {
                 </ul>
               )}
               <footer>
+                {service && (
+                  <Button
+                    variant="ghost"
+                    className="text-danger"
+                    disabled={busy}
+                    aria-label={`删除服务 ${service.name}`}
+                    onClick={() => void remove(service)}
+                  >
+                    <Trash2 size={15} />
+                    删除服务
+                  </Button>
+                )}
                 {!service && legacy ? (
                   <Button disabled={busy} onClick={() => void reuse(legacy.id)}>
                     <KeyRound size={15} />

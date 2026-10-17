@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { ShotMedia } from "@/components/ShotMedia";
 import { MediaImage } from "@/components/MediaImage";
 import { ObjectPicker } from "@/components/ObjectPicker";
@@ -7,6 +8,7 @@ import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Link,
+  Navigate,
   useLocation,
   useParams,
   useSearchParams,
@@ -84,6 +86,15 @@ const input =
 export default function Agent() {
   const { projectId } = useParams();
   const location = useLocation();
+  if (typeof location.state?.creativeGoal === "string") {
+    return (
+      <Navigate
+        replace
+        to={`/projects/${projectId}/workbench?view=chat`}
+        state={location.state}
+      />
+    );
+  }
   // A second idea brought from browser history must open a fresh composer.
   return (
     <AgentWorkspace
@@ -97,11 +108,13 @@ export function AgentWorkspace({
   initialGoal,
   initialRunId,
   embedded = false,
+  taskOnly = false,
 }: {
   projectId: string;
   initialGoal?: string;
   initialRunId?: string;
   embedded?: boolean;
+  taskOnly?: boolean;
 }) {
   const location = useLocation();
   const incomingGoal =
@@ -129,6 +142,7 @@ export function AgentWorkspace({
     queryKey: ["agent-runs", projectId, offset],
     queryFn: () => api.get<Run[]>(`${base}/runs?offset=${offset}`),
     refetchInterval: 3000,
+    enabled: !taskOnly,
   });
   const [embeddedRun, setEmbeddedRun] = useState<string | undefined>(
     initialRunId,
@@ -221,21 +235,24 @@ export function AgentWorkspace({
         <header className="page-heading">
           <div>
             <div className="mb-2 text-xs tracking-widest text-muted-foreground">
-              CREATIVE ASSISTANT
+              EXECUTION HISTORY
             </div>
             <h1 className="flex items-center gap-2">
               <Bot size={24} />
-              创作助理
+              助理任务记录
             </h1>
-            <p>给出目标，让 AI 读取项目、使用工具，并根据实际结果继续创作。</p>
+            <p>查看以往执行过程和待审阅修改。新的讨论从工作台开始。</p>
           </div>
-          <Button variant="outline" onClick={() => setCreating(true)}>
+          <Link
+            className="inline-flex items-center gap-2 text-sm text-primary"
+            to={`${root}/workbench?view=chat`}
+          >
             <Plus size={16} />
-            新的创作任务
-          </Button>
+            返回创作对话
+          </Link>
         </header>
       )}
-      {embedded && (
+      {embedded && !taskOnly && (
         <p className="text-sm text-muted-foreground">
           在这里选定允许修改的对象，开始后会直接显示执行与审阅结果。
           <Link
@@ -328,7 +345,17 @@ export function AgentWorkspace({
           </aside>
         )}
         <section className="min-w-0">
-          {creating || (!selected && !list.isLoading) ? (
+          {!embedded && !selected && !list.isLoading ? (
+            <p className="p-6 text-sm text-muted-foreground">
+              还没有执行记录。
+              <Link
+                className="ml-2 text-primary"
+                to={`${root}/workbench?view=chat`}
+              >
+                前往工作台开始对话 →
+              </Link>
+            </p>
+          ) : !taskOnly && (creating || (!selected && !list.isLoading)) ? (
             <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-card p-5 md:p-8 space-y-5">
               <div className="flex gap-3">
                 <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -364,18 +391,18 @@ export function AgentWorkspace({
                   未选择对象时只分析项目。所有修改和生成仍会等待你审阅。
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <select
+                  <StudioSelect
                     aria-label="对象类型"
                     className={`${input} !w-auto`}
                     value={scopeType}
-                    onChange={(e) => {
-                      setScopeType(e.target.value);
+                    onValueChange={(selectedValue) => {
+                      setScopeType(selectedValue);
                     }}
                   >
                     <option value="shot">镜头</option>
                     <option value="asset">角色与资产</option>
                     <option value="script">剧本</option>
-                  </select>
+                  </StudioSelect>
                   <ObjectPicker
                     key={scopeType}
                     renderPreview={(id) => {
@@ -488,18 +515,18 @@ export function AgentWorkspace({
                 <div className="flex flex-wrap gap-3 mt-3">
                   <label className="text-xs space-y-2 flex-1">
                     <span>运行方式</span>
-                    <select
+                    <StudioSelect
                       aria-label="运行方式"
                       className={input}
                       value={engine}
-                      onChange={(e) => {
-                        setEngine(e.target.value);
+                      onValueChange={(selectedValue) => {
+                        setEngine(selectedValue);
                         requestKey.current = null;
                       }}
                     >
                       <option value="cloud_llm">项目文本模型</option>
                       <option value="mock">离线机制测试</option>
-                    </select>
+                    </StudioSelect>
                   </label>
                   <label className="text-xs space-y-2 w-32">
                     <span>最多执行轮数</span>

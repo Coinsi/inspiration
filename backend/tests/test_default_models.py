@@ -3,6 +3,7 @@
 # ruff: noqa: F811
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from app.models.generation import ModelChannel
@@ -10,6 +11,60 @@ from app.models.identity import Membership
 from tests.test_creative_models import group
 from tests.test_media_workflow import studio  # noqa: F401
 from tests.test_model_channels import add, setup
+
+
+@pytest.mark.parametrize("disabled_group", [True, False])
+def test_default_text_profile_survives_disabled_group_or_route(studio, disabled_group):
+    from app.modules.generation.channels import llm_config
+
+    client, sessions, ids = studio
+    root, channel = setup(client, ids["project"])
+    current = add(
+        client,
+        root,
+        channel,
+        name="gpt-6-astra",
+        model="gpt-6-astra",
+        protocol="cloud_llm",
+        modality="text",
+        is_default=True,
+    )
+    routes = [{"profile_id": current["id"], "enabled": disabled_group}]
+    if not disabled_group:
+        other = add(client, root, channel, model="other", protocol="cloud_llm", modality="text")
+        routes.append({"profile_id": other["id"]})
+    old = group(
+        client,
+        root,
+        [current],
+        name="gpt-5.5",
+        modality="text",
+        enabled=not disabled_group,
+        routes=routes,
+    )
+    providers = client.get(root + "/providers").json()
+    profile = next(p for p in providers if p["id"] == current["id"])
+    assert profile["enabled"] and not profile["config"].get("hidden_from_catalog")
+
+    path = root + "/creative-models/select-default"
+    body = {"id": current["id"], "source": "profile"}
+    response = client.post(path, json=body)
+    assert response.status_code == 200, response.text
+    selected = response.json()
+    assert selected["id"] != old["id"]
+    assert selected["name"] == "gpt-6-astra"
+    assert selected["is_default"] and selected["available"]
+    assert client.post(path, json=body).json()["id"] == selected["id"]
+    models = client.get(root + "/creative-models").json()
+    assert len(models) == 2
+    previous = next(m for m in models if m["id"] == old["id"])
+    assert previous["routes"] == old["routes"]
+    assert previous["enabled"] == old["enabled"]
+    assert previous["revision"] == old["revision"]
+    with sessions() as db:
+        assert llm_config(db, ids["project"]).config["model"] == "gpt-6-astra"
+    providers = client.get(root + "/providers").json()
+    assert next(p for p in providers if p["id"] == current["id"])["config"]["hidden_from_catalog"]
 
 
 def test_choose_existing_profile_without_manual_directory_and_repeat(studio):

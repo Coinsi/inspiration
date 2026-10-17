@@ -23,8 +23,12 @@ from app.models import (  # noqa: F401
     media_processing,
     canvas,
     agent,
+    conversation,
     skill,
     director,
     evidence,
     transcription,
 )
+
+from app.models.material import GeneratedMaterialState  # noqa: F401
+from app.models.work import CreativeWork  # noqa: F401

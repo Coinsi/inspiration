@@ -1,7 +1,7 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -66,6 +66,64 @@ def retry_processing(
     from app.modules.library import processing
 
     return processing.retry(db, ctx, run_id)
+
+
+@router.get("/materials")
+def materials_catalog(
+    query: str = Query(default="", max_length=255),
+    kind: Literal["image", "video", "audio", "entity"] | None = None,
+    source: Literal["upload", "generated", "asset"] | None = None,
+    deleted: bool = False,
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    limit: int = Query(default=24, ge=1, le=100),
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import materials
+
+    return materials.catalog(
+        db,
+        ctx.project.id,
+        query=query,
+        kind=kind,
+        source=source,
+        deleted=deleted,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.post("/materials/{source}/{item_id}/profile")
+def material_profile(
+    source: Literal["upload", "generated"],
+    item_id: uuid.UUID,
+    metadata: str = Form(..., max_length=16000),
+    file: UploadFile | None = File(None),
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from pydantic import ValidationError
+
+    from app.core.errors import CapabilityUnsupported
+    from app.modules.library import materials
+    try:
+        data = schemas.MaterialProfileIn.model_validate_json(metadata)
+    except ValidationError as exc:
+        raise CapabilityUnsupported("请检查名称、说明和标签的长度与格式") from exc
+    return materials.update_profile(db, ctx, source, item_id, data, file)
+
+
+@router.post("/materials/{source}/{item_id}/{action}")
+def material_state(
+    source: Literal["upload", "generated", "asset"],
+    item_id: uuid.UUID,
+    action: Literal["trash", "restore"],
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.library import materials
+
+    return materials.state(db, ctx, source, item_id, restore=action == "restore")
 
 
 @router.get("/generated")

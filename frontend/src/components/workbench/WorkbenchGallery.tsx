@@ -1,6 +1,8 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { ArrowRight, ArrowUpRight, Images, Search } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Images } from "lucide-react";
 import { Link } from "react-router-dom";
 import { MediaImage } from "@/components/MediaImage";
 import { ShotMedia } from "@/components/ShotMedia";
@@ -125,24 +127,21 @@ export function WorkbenchGallery({
         {viewAll(tab === "shots" ? "storyboard" : "assets")}
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
-        <label className="flex min-w-[160px] flex-1 items-center gap-2 rounded-lg border bg-card px-3 py-2">
-          <Search className="h-4 w-4 shrink-0 text-faint" />
-          <input
-            aria-label={zh ? "筛选当前内容" : "Filter current content"}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              zh ? "按名称或描述筛选…" : "Filter by name or description…"
-            }
-            className="w-full min-w-0 bg-transparent text-xs outline-none"
-          />
-        </label>
+        <SearchField
+          className="min-w-[160px] flex-1"
+          label={zh ? "筛选当前内容" : "Filter current content"}
+          value={query}
+          onValueChange={(value) => setQuery(value)}
+          placeholder={
+            zh ? "按名称或描述筛选…" : "Filter by name or description…"
+          }
+        />
         {!!novels.data?.length && (
-          <select
+          <StudioSelect
             aria-label={zh ? "选择作品" : "Choose story"}
             value={currentNovel?.id ?? ""}
-            onChange={(e) => {
-              setNovelId(e.target.value);
+            onValueChange={(selectedValue) => {
+              setNovelId(selectedValue);
               setChapterId("");
             }}
             className="max-w-[160px] rounded-lg border bg-card px-2 text-xs"
@@ -152,14 +151,14 @@ export function WorkbenchGallery({
                 {n.title}
               </option>
             ))}
-          </select>
+          </StudioSelect>
         )}
         {!!currentNovel && (
-          <select
+          <StudioSelect
             aria-label={zh ? "章节范围" : "Chapter scope"}
             disabled={!novel.isSuccess || novel.isError}
             value={chapter?.id ?? ""}
-            onChange={(e) => setChapterId(e.target.value)}
+            onValueChange={(selectedValue) => setChapterId(selectedValue)}
             className="max-w-[170px] rounded-lg border bg-card px-2 py-2 text-xs"
           >
             <option value="">
@@ -181,7 +180,7 @@ export function WorkbenchGallery({
                 {c.title || (zh ? "未命名章节" : "Untitled chapter")}
               </option>
             ))}
-          </select>
+          </StudioSelect>
         )}
       </div>
       {novel.isError && (

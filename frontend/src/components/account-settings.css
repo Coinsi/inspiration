@@ -105,7 +105,7 @@
 }
 .account-form input,
 .account-form textarea,
-.account-language select {
+.account-language .studio-select-trigger {
   width: 100%;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
@@ -115,7 +115,7 @@
 }
 .account-form input:focus,
 .account-form textarea:focus,
-.account-language select:focus {
+.account-language .studio-select-trigger:focus {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }

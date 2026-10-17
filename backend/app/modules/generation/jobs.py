@@ -337,7 +337,7 @@ def retry(db, ctx, job_id):
             route = {"model_profile": snapshot.get("model_profile", {})}
         if (
             not route
-            or route["model_profile"].get("protocol") not in {"openai_video", "ark_video", "minimax_video"}
+            or route["model_profile"].get("protocol") not in {"openai_video", "video_v1", "ark_video", "minimax_video"}
             or not resume.get("external_job_id")
         ):
             raise Conflict(

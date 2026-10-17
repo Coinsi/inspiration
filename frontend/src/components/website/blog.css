@@ -82,17 +82,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid #ccd9cb;
-  padding: 8px 0;
+  width: 300px;
+  max-width: 100%;
 }
-.journal-toolbar input {
-  background: transparent;
-  outline: 0;
-  font-size: 12px;
-  width: 180px;
-  color: #34593e;
-}
-.journal-toolbar form button {
+
+.journal-toolbar form > button {
   color: #65836e;
   padding: 3px;
 }
@@ -760,10 +754,7 @@
   .journal-toolbar nav button {
     padding: 8px 11px;
   }
-  .journal-toolbar input {
-    flex: 1;
-    width: 100%;
-  }
+
   .journal-grid {
     grid-template-columns: 1fr;
     padding: 25px 24px 40px;
@@ -874,4 +865,13 @@
   .journal-loading h2 {
     font-size: 22px;
   }
+}
+
+.journal-toolbar .search-field {
+  --card: 0 0% 100%;
+  --fg: 136 26% 28%;
+  --muted: 138 13% 45%;
+  --border: 115 15% 82%;
+  --primary: 136 26% 28%;
+  --elevated: 115 15% 95%;
 }

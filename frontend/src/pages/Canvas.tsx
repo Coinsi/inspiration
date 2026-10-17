@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -139,11 +140,13 @@ function CanvasList({ projectId }: { projectId: string }) {
           自由画布
         </h1>
         <div className="flex flex-wrap gap-2">
-          <select
+          <StudioSelect
             aria-label="选择画布"
             className={`${field} !w-auto max-w-52`}
             value={selected ?? ""}
-            onChange={(e) => setParams({ canvas: e.target.value })}
+            onValueChange={(selectedValue) =>
+              setParams({ canvas: selectedValue })
+            }
           >
             <option value="" disabled>
               选择画布
@@ -156,7 +159,7 @@ function CanvasList({ projectId }: { projectId: string }) {
                 {c.name}
               </option>
             ))}
-          </select>
+          </StudioSelect>
           <Button
             variant="outline"
             disabled={busy}
@@ -1091,9 +1094,11 @@ function Editor({
           : "prompt",
     };
     const chosen = qc
-      .getQueryData<
-        Generation[]
-      >(["gens", origin.data.target_type, origin.data.target_id])
+      .getQueryData<Generation[]>([
+        "gens",
+        origin.data.target_type,
+        origin.data.target_id,
+      ])
       ?.find((g) => g.is_selected);
     const next = {
       ...graph,
@@ -1330,9 +1335,11 @@ function Editor({
               .filter((n) => n.id !== id && n.data.kind !== "group")
               .map((n) => {
                 const fixed = qc
-                  .getQueryData<
-                    Generation[]
-                  >(["gens", n.data.target_type, n.data.target_id])
+                  .getQueryData<Generation[]>([
+                    "gens",
+                    n.data.target_type,
+                    n.data.target_id,
+                  ])
                   ?.find(
                     (g) =>
                       g.id === (n.data.generation_id || n.data.outputId) ||
@@ -1393,9 +1400,11 @@ function Editor({
               return;
             }
             const adopted = qc
-              .getQueryData<
-                Generation[]
-              >(["gens", source.data.target_type, source.data.target_id])
+              .getQueryData<Generation[]>([
+                "gens",
+                source.data.target_type,
+                source.data.target_id,
+              ])
               ?.find((g) => g.is_selected);
             commit({
               ...graph,
@@ -1692,17 +1701,15 @@ function Editor({
                 <span>
                   已选 {graph.nodes.filter((n) => n.selected).length} 项
                 </span>
-                <select
+                <StudioSelect
                   aria-label="对齐与分布"
                   value=""
                   disabled={busy}
-                  onChange={(e) =>
+                  onValueChange={(selectedValue) =>
                     commit(
                       arrangeSelection(
                         graph,
-                        e.target.value as Parameters<
-                          typeof arrangeSelection
-                        >[1],
+                        selectedValue as Parameters<typeof arrangeSelection>[1],
                       ),
                     )
                   }
@@ -1724,7 +1731,7 @@ function Editor({
                       {label}
                     </option>
                   ))}
-                </select>
+                </StudioSelect>
                 <Button
                   size="sm"
                   variant="ghost"

@@ -90,6 +90,10 @@ def test_workspace_outputs_retry_permissions_and_read_only(studio, monkeypatch):
     assert data["summary"]["result_count"] == 1
     assert data["outputs"][0]["output_mime"] == "image/png"
     assert data["outputs"][0]["id"] == uploaded["id"] and not data["can_retry"]
+    post_ok(client, base + f"/generations/{uploaded['id']}/select")
+    changed = client.get(path).json()
+    assert changed["changes"][0]["target"]["label"] == "Test shot"
+    assert changed["changes"][0]["target"]["path"].endswith(f"shots?shot={ids['shot']}")
     assert client.get(path).json()["job"]["updated_at"] == data["job"]["updated_at"]
     with sessions() as db:
         job = GenerationJob(

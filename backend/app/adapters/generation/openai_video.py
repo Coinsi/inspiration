@@ -1,6 +1,7 @@
 """OpenAI-compatible multipart /videos task protocol. No vendor-name inference."""
 
 import base64
+import re
 from urllib.parse import quote
 
 import httpx
@@ -20,6 +21,8 @@ from app.core.errors import CapabilityUnsupported, ProviderError
 @generation_registry.register("openai_video")
 class OpenAIVideoProvider(GenerationProvider):
     name = "openai_video"
+    content_query = ""
+    content_redirects = False
 
     def __init__(self, endpoint=None, token=None, config=None, **_):
         self.endpoint = (endpoint or "").rstrip("/")
@@ -55,17 +58,37 @@ class OpenAIVideoProvider(GenerationProvider):
                     **kwargs,
                 )
             if not response.is_success:
+                try:
+                    detail = self._error_message(response.json())
+                except ValueError:
+                    detail = ""
+                suffix = f"：{detail}" if detail else ""
                 if method == "POST" and response.status_code in (401, 403, 404, 429):
                     from app.modules.generation.model_routing import SubmissionRejected
-                    raise SubmissionRejected(f"视频服务拒绝提交（HTTP {response.status_code}），未创建任务")
-                raise ProviderError(
-                    f"视频服务请求失败（HTTP {response.status_code}），请核对渠道协议和模型权限"
-                )
+
+                    raise SubmissionRejected(
+                        f"视频服务拒绝提交（HTTP {response.status_code}），未创建任务{suffix}"
+                    )
+                raise ProviderError(f"视频服务请求失败（HTTP {response.status_code}）{suffix}")
             return response.json()
         except ProviderError:
             raise
         except Exception as exc:
             raise ProviderError("视频服务连接或返回格式异常") from exc
+
+    def _error_message(self, data):
+        """Keep actionable vendor errors without persisting credentials or signed URLs."""
+        if not isinstance(data, dict):
+            return ""
+        error = data.get("error")
+        message = error.get("message") if isinstance(error, dict) else error
+        if not isinstance(message, str):
+            return ""
+        if self.token:
+            message = message.replace(self.token, "[已隐藏密钥]")
+        message = re.sub(r"https?://\S+", "[服务地址]", message)
+        message = re.sub(r"(?i)bearer\s+\S+|sk-[\w-]+", "[已隐藏密钥]", message)
+        return " ".join(message.split())[:500]
 
     def submit(self, req):
         self.estimate_cost(req)
@@ -95,15 +118,27 @@ class OpenAIVideoProvider(GenerationProvider):
         status = data.get("status")
         if status in ("queued", "pending", "in_progress", "running", "processing"):
             return GenerationResult(status="running")
-        if status != "completed":
+        if status in ("failed", "canceled", "cancelled"):
             return GenerationResult(
-                status="failed", error="视频生成失败或返回了未知任务状态，请查看上游记录"
+                status="failed",
+                error=self._error_message(data) or "上游视频任务失败或已取消，请查看服务商任务记录",
             )
+        if status not in ("completed", "succeeded"):
+            # Unknown state is a protocol/query problem, not proof of a failed generation.
+            # Raising preserves the accepted handle so retry only polls this same task.
+            raise ProviderError(
+                "视频服务返回了无法识别的任务状态；请核对上游记录，可继续查询原任务"
+            )
+        return self._download(path)
+
+    def _download(self, path):
         try:
-            with httpx.Client(timeout=120, follow_redirects=False) as client:
+            with httpx.Client(
+                timeout=120, follow_redirects=self.content_redirects, max_redirects=5
+            ) as client:
                 with client.stream(
                     "GET",
-                    self.endpoint + path + "/content",
+                    self.endpoint + path + "/content" + self.content_query,
                     headers={"Authorization": "Bearer " + self.token},
                 ) as response:
                     if not response.is_success:

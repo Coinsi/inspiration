@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -494,13 +495,13 @@ function Workspace({ projectId }: { projectId: string }) {
         </div>
       )}
       <div className="director-document-bar">
-        <select
+        <StudioSelect
           aria-label="预演场景"
           className={`${input} max-w-60`}
           value={stage?.id ?? ""}
           disabled={busy || list.isLoading}
-          onChange={(e) => {
-            const id = e.target.value;
+          onValueChange={(selectedValue) => {
+            const id = selectedValue;
             if (id)
               void perform(async () => {
                 if (await switchAllowed())
@@ -521,7 +522,7 @@ function Workspace({ projectId }: { projectId: string }) {
               {s.name} · v{s.revision}
             </option>
           ))}
-        </select>
+        </StudioSelect>
         <Button
           variant="outline"
           disabled={busy}
@@ -1026,12 +1027,14 @@ function Workspace({ projectId }: { projectId: string }) {
                     >
                       导出运镜视频
                     </Button>
-                    <select
+                    <StudioSelect
                       aria-label="参考回填镜头"
                       className={`${input} max-w-60`}
                       value={target}
                       disabled={busy}
-                      onChange={(e) => setTarget(e.target.value)}
+                      onValueChange={(selectedValue) =>
+                        setTarget(selectedValue)
+                      }
                     >
                       <option value="">选择回填镜头</option>
                       {shots.data?.map((s) => (
@@ -1039,7 +1042,7 @@ function Workspace({ projectId }: { projectId: string }) {
                           {s.code} · {s.title || "未命名镜头"}
                         </option>
                       ))}
-                    </select>
+                    </StudioSelect>
                     <Button
                       disabled={busy || !target || dirty}
                       onClick={() =>
@@ -1211,19 +1214,19 @@ function Workspace({ projectId }: { projectId: string }) {
                         {obj.kind === "person" && (
                           <label className="block space-y-1 text-xs">
                             姿态
-                            <select
+                            <StudioSelect
                               aria-label="人物姿态"
                               className={input}
                               value={obj.pose}
-                              onChange={(e) =>
+                              onValueChange={(selectedValue) =>
                                 objectChange({
-                                  pose: e.target.value as StageObject["pose"],
+                                  pose: selectedValue as StageObject["pose"],
                                 })
                               }
                             >
                               <option value="standing">站立</option>
                               <option value="sitting">坐姿</option>
-                            </select>
+                            </StudioSelect>
                           </label>
                         )}
                       </section>
@@ -1315,19 +1318,19 @@ function Workspace({ projectId }: { projectId: string }) {
                         />
                         <label className="space-y-1 text-xs text-muted-foreground">
                           <span>前往下一机位</span>
-                          <select
+                          <StudioSelect
                             aria-label="运镜速度曲线"
                             className={input}
                             value={activeFrame.ease}
-                            onChange={(e) =>
+                            onValueChange={(selectedValue) =>
                               updateFrame({
-                                ease: e.target.value as CameraKeyframe["ease"],
+                                ease: selectedValue as CameraKeyframe["ease"],
                               })
                             }
                           >
                             <option value="smooth">平滑起止</option>
                             <option value="linear">匀速</option>
-                          </select>
+                          </StudioSelect>
                         </label>
                       </div>
                     )}
@@ -1394,21 +1397,21 @@ function Workspace({ projectId }: { projectId: string }) {
                     )}
                     <label className="block space-y-1 text-xs">
                       画面比例
-                      <select
+                      <StudioSelect
                         aria-label="画面比例"
                         className={input}
                         value={d.aspect}
-                        onChange={(e) =>
+                        onValueChange={(selectedValue) =>
                           change({
                             ...d,
-                            aspect: e.target.value as StageDocument["aspect"],
+                            aspect: selectedValue as StageDocument["aspect"],
                           })
                         }
                       >
                         <option>16:9</option>
                         <option>9:16</option>
                         <option>1:1</option>
-                      </select>
+                      </StudioSelect>
                     </label>
                   </section>
                   <section

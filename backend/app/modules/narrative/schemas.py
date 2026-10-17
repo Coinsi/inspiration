@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChapterOut(BaseModel):
@@ -19,6 +19,7 @@ class NovelOut(BaseModel):
     id: uuid.UUID
     code: str
     title: str
+    cover_blob_hash: str | None = None
     source_format: str | None
     created_at: datetime
 
@@ -48,7 +49,12 @@ class SceneListItem(BaseModel):
 
 
 class ScriptIn(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=255)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class ScriptOut(BaseModel):
@@ -56,6 +62,7 @@ class ScriptOut(BaseModel):
     id: uuid.UUID
     code: str
     title: str
+    cover_blob_hash: str | None = None
     created_at: datetime
     block_count: int = 0  # 正文块数(列表页角标)
     scene_count: int = 0  # 场景头数
@@ -73,6 +80,7 @@ class ScriptDetailOut(BaseModel):
     id: uuid.UUID
     code: str
     title: str
+    cover_blob_hash: str | None = None
     created_at: datetime
     source_chapter_id: uuid.UUID | None = None
     content_blocks: list[ScriptBlockDTO] = Field(default_factory=list)

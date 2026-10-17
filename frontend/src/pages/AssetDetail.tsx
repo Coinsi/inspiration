@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Lock, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AssistPanel from "@/components/AssistPanel";
 import GenerationPanel from "@/components/GenerationPanel";
 import { ZoomableImage } from "@/components/ImageViewer";
@@ -21,6 +21,7 @@ export default function AssetDetail() {
   const base = `/projects/${projectId}`;
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const confirm = useConfirm();
   const { t: tr } = useI18n();
@@ -117,7 +118,7 @@ export default function AssetDetail() {
       {/* Hero */}
       <div className="relative h-44 overflow-hidden bg-surface border-b border-border">
         <button
-          onClick={() => navigate(`${base}/assets`)}
+          onClick={() => navigate(searchParams.get("return")?.startsWith(`${base}/`) ? searchParams.get("return")! : `${base}/assets`)}
           className="absolute top-4 left-6 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> {tr("detail.back")}
@@ -138,6 +139,7 @@ export default function AssetDetail() {
       </div>
 
       <div className="max-w-[960px] mx-auto p-4 md:p-6">
+        {asset.type === "character" && <Link className="studio-link mb-4 inline-block text-sm" to={`${base}/evidence?asset=${asset.id}&return=${encodeURIComponent(location.pathname + location.search)}`}>查看角色关联片段 ↗</Link>}
         <Tabs
           value={tab}
           onChange={setTab}

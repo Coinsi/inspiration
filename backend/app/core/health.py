@@ -11,6 +11,26 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
+# Populated by the application lifespan with checks bound to actual worker threads.
+background_workers = {}
+
+
+def background_status():
+    result = {}
+    for name, flag in (
+        ("media_processing", "library_processing_enabled"),
+        ("library", "library_worker_enabled"),
+        ("transcription", "transcription_worker_enabled"),
+        ("agent", "agent_worker_enabled"),
+        ("canvas", "canvas_worker_enabled"),
+    ):
+        if not getattr(settings, flag):
+            result[name] = "disabled"
+            continue
+        check = background_workers.get(name)
+        result[name] = "ok" if check and check() else "unavailable"
+    return result
+
 
 def database_ready():
     engine = create_engine(
@@ -90,4 +110,5 @@ def readiness():
         except Exception:
             optional[name] = "unavailable"
     ok = all(v == "ok" for v in results.values())
-    return {"status": "ok" if ok else "unavailable", "checks": results, "optional": optional}
+    return {"status": "ok" if ok else "unavailable", "checks": results,
+            "optional": optional, "background_workers": background_status()}

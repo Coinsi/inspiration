@@ -1,14 +1,9 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  Search,
-  ShieldCheck,
-  UserPlus,
-  Users,
-  Crown,
-  Trash2,
-} from "lucide-react";
+import { ShieldCheck, UserPlus, Users, Crown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Modal } from "@/components/ui/modal";
@@ -169,15 +164,13 @@ export default function ProjectMembers() {
       <section className="members-panel">
         <div className="members-toolbar">
           <h2>{zh ? "项目成员" : "Project members"}</h2>
-          <label>
-            <Search size={16} />
-            <input
-              aria-label={zh ? "搜索成员" : "Search members"}
-              placeholder={zh ? "搜索昵称或用户名" : "Search name or username"}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
+          <SearchField
+            className="w-full sm:w-64"
+            label={zh ? "搜索成员" : "Search members"}
+            placeholder={zh ? "搜索昵称或用户名" : "Search name or username"}
+            value={search}
+            onValueChange={(value) => setSearch(value)}
+          />
         </div>
         {members.isLoading ? (
           <p className="members-empty">
@@ -224,12 +217,12 @@ export default function ProjectMembers() {
                           {zh ? "所有者" : "Owner"}
                         </span>
                       ) : canManage && !protectedMember ? (
-                        <select
+                        <StudioSelect
                           aria-label={`${zh ? "调整角色" : "Role for"} ${m.display_name || m.username}`}
                           disabled={busy}
                           value={m.role}
-                          onChange={async (e) => {
-                            const next = e.target.value;
+                          onValueChange={async (selectedValue) => {
+                            const next = selectedValue;
                             if (
                               !(await confirm({
                                 title: zh
@@ -256,7 +249,7 @@ export default function ProjectMembers() {
                               {zh ? r.zh : r.en}
                             </option>
                           ))}
-                        </select>
+                        </StudioSelect>
                       ) : (
                         <span>{label(m.role)}</span>
                       )}
@@ -359,18 +352,18 @@ export default function ProjectMembers() {
           </label>
           <label>
             {zh ? "项目角色" : "Project role"}
-            <select
+            <StudioSelect
               aria-label={zh ? "项目角色" : "Project role"}
               value={role}
               disabled={busy}
-              onChange={(e) => setRole(e.target.value)}
+              onValueChange={(selectedValue) => setRole(selectedValue)}
             >
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
                   {zh ? r.zh : r.en}
                 </option>
               ))}
-            </select>
+            </StudioSelect>
           </label>
           <p className="members-role-description">
             {zh

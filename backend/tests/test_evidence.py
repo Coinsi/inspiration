@@ -137,3 +137,44 @@ def test_evidence_retention_permissions_and_bounds(studio):
         db.commit()
     assert c.post(base, json=data).status_code == 403
     assert c.get(base).status_code == 200
+
+
+def test_contextual_asset_and_version_filters(studio):
+    from app.models.asset import Asset
+
+    c, sessions, ids = studio
+    _, v1 = seed(sessions, ids)
+    _, v2 = seed(sessions, ids)
+    with sessions() as db:
+        character = Asset(project_id=ids["project"], name="关联角色", code="C-1", type="character")
+        unrelated = Asset(
+            project_id=ids["project"], name="无关联角色", code="C-2", type="character"
+        )
+        foreign = Asset(project_id=ids["other"], name="另一项目", code="C-3", type="character")
+        db.add_all([character, unrelated, foreign])
+        db.flush()
+        a, b, other = str(character.id), str(unrelated.id), str(foreign.id)
+        db.commit()
+    base = f"/api/v1/projects/{ids['project']}/identity-evidence"
+    identity = post_ok(c, base + "/identities", {"name": "人物", "asset_id": a})
+    post_ok(c, base + "/identities", {"name": "其他人物"})
+    for version in [v1, v2]:
+        post_ok(
+            c,
+            base,
+            {
+                "identity_id": identity["id"],
+                "version_id": version,
+                "start_ms": 0,
+                "end_ms": 1000,
+                "kind": "visual",
+                "status": "confirmed",
+                "observation": "片段中的人物",
+            },
+        )
+    assert len(c.get(base + f"/identities?asset_id={a}").json()) == 1
+    assert c.get(base + f"?asset_id={a}").json()["total"] == 2
+    assert c.get(base + f"?asset_id={b}").json()["total"] == 0
+    assert c.get(base + f"?asset_id={a}&version_id={v1}").json()["total"] == 1
+    assert c.get(base + f"?asset_id={other}").status_code == 404
+    assert c.get(base + f"/identities?asset_id={other}").status_code == 404

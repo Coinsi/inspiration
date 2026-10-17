@@ -205,7 +205,7 @@
   font-size: 14px;
   margin-bottom: 22px;
 }
-.blog-editor-settings select {
+.blog-editor-settings .studio-select-trigger {
   width: 100%;
   padding: 10px;
   background: hsl(var(--bg));

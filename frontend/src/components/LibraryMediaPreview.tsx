@@ -13,6 +13,7 @@ type LibraryMediaPreviewProps = {
   start?: number | null;
   end?: number | null;
   autoPlay?: boolean;
+  showRangeControls?: boolean;
   region?: RegionMatch | null;
   onMark?: (kind: "start" | "end", ms: number) => void;
 };
@@ -33,6 +34,7 @@ function LibraryMediaPreviewContent({
   start = 0,
   end = 0,
   autoPlay = false,
+  showRangeControls = true,
   onMark,
   region,
 }: LibraryMediaPreviewProps) {
@@ -41,7 +43,7 @@ function LibraryMediaPreviewContent({
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   if (mediaType === "image")
     return (
-      <div className="flex min-h-52 items-center justify-center overflow-hidden rounded-xl border bg-elevated p-3">
+      <div className="library-image-preview flex min-h-52 items-center justify-center overflow-hidden rounded-xl border bg-elevated p-3">
         {failed ? (
           <p
             role="alert"
@@ -51,7 +53,7 @@ function LibraryMediaPreviewContent({
             {zh ? "图片预览暂不可用" : "Image preview unavailable"}
           </p>
         ) : (
-          <div className="relative w-full">
+          <div className="library-image-plane relative w-full">
             <img
               src={src}
               alt={label}
@@ -77,6 +79,7 @@ function LibraryMediaPreviewContent({
         label={label}
         start={start ?? 0}
         end={end ?? 0}
+        showRangeControls={showRangeControls}
         autoPlay={autoPlay}
         onMark={onMark}
       />
@@ -87,6 +90,7 @@ function LibraryMediaPreviewContent({
       label={label}
       start={start ?? 0}
       end={end ?? 0}
+      showRangeControls={showRangeControls}
       autoPlay={autoPlay}
       onMark={onMark}
       region={region}
@@ -100,6 +104,7 @@ function AudioPreview({
   start,
   end,
   autoPlay,
+  showRangeControls = true,
   onMark,
 }: {
   src: string;
@@ -107,6 +112,7 @@ function AudioPreview({
   start: number;
   end: number;
   autoPlay: boolean;
+  showRangeControls?: boolean;
   onMark?: (kind: "start" | "end", ms: number) => void;
 }) {
   const zh = useI18n().lang === "zh";
@@ -155,7 +161,11 @@ function AudioPreview({
               : "Playback did not start. Try the player controls."}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div
+        className="flex flex-wrap gap-2"
+        hidden={!showRangeControls}
+        style={!showRangeControls ? { display: "none" } : undefined}
+      >
         <Button
           size="sm"
           variant="outline"

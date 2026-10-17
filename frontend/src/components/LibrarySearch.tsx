@@ -1,6 +1,19 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SelectField } from "@/components/ui/select-field";
+import "./library-annotation.css";
+import { SearchField } from "@/components/ui/search-field";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, ScanSearch, ImagePlus, X, AudioLines } from "lucide-react";
+import {
+  Search,
+  ScanSearch,
+  ImagePlus,
+  X,
+  AudioLines,
+  Upload,
+  Trash2,
+  MessageSquareText,
+} from "lucide-react";
 import { api, blobUrl } from "@/lib/api";
 import {
   mediaTime,
@@ -384,8 +397,10 @@ export function LibrarySearch({
                             ?.ready !== true))
                     }
                     title={
-                      (option.target === "face" || option.target === "object") &&
-                      wiseProvider?.optional_models?.[option.target]?.ready !== true
+                      (option.target === "face" ||
+                        option.target === "object") &&
+                      wiseProvider?.optional_models?.[option.target]?.ready !==
+                        true
                         ? optionalModelReason(
                             wiseProvider?.optional_models?.[option.target]
                               ?.reason,
@@ -458,9 +473,9 @@ export function LibrarySearch({
             submit();
           }}
         >
-          <input
-            aria-label={zh ? "搜索素材内容" : "Search media content"}
-            className="h-11 min-w-0 flex-1 rounded-lg border bg-bg px-3 text-sm"
+          <SearchField
+            className="min-w-0 flex-1"
+            label={zh ? "搜索素材内容" : "Search media content"}
             placeholder={
               mode === "semantic"
                 ? target === "face"
@@ -483,10 +498,11 @@ export function LibrarySearch({
                   : "Search words in captions, dialogue or visual annotations"
             }
             value={query}
+            onClear={() => setSubmitted(null)}
             disabled={mode === "semantic" && target === "face"}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              if (e.target.value.trim()) {
+            onValueChange={(value) => {
+              setQuery(value);
+              if (value.trim()) {
                 fileRead.current++;
                 setPicture(null);
                 setRegion(null);
@@ -495,18 +511,18 @@ export function LibrarySearch({
             }}
           />
           {mode === "annotated" && (
-            <select
+            <StudioSelect
               aria-label={zh ? "标注来源" : "Annotation source"}
               className="rounded-lg border bg-bg px-2 text-sm"
               value={kind}
-              onChange={(e) => setKind(e.target.value)}
+              onValueChange={(selectedValue) => setKind(selectedValue)}
             >
               <option value="">{zh ? "全部标注" : "All annotations"}</option>
               <option value="visual">{zh ? "画面标注" : "Visual"}</option>
               <option value="speech">
                 {zh ? "字幕与台词" : "Captions & dialogue"}
               </option>
-            </select>
+            </StudioSelect>
           )}
           <Button
             type="submit"
@@ -1050,21 +1066,34 @@ export function LibraryAnnotation({
   versionId,
   start,
   end,
-  valid,
+  duration,
   mediaType = "video",
 }: {
   projectId: string;
   versionId: string;
   start: number;
   end: number;
-  valid: boolean;
+  duration: number;
   mediaType?: MediaType;
 }) {
   const zh = useI18n().lang === "zh",
     qc = useQueryClient();
   const confirm = useConfirm();
-  const [expanded, setExpanded] = useState(false),
-    [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [tab, setTab] = useState("annotation");
+  const subtitleInput = useRef<HTMLInputElement>(null);
+  const [rangeStart, setRangeStart] = useState(String(start / 1000));
+  const [rangeEnd, setRangeEnd] = useState(String(end / 1000));
+  const startMs = Math.round(Number(rangeStart) * 1000),
+    endMs = Math.round(Number(rangeEnd) * 1000);
+  const valid =
+    rangeStart !== "" &&
+    rangeEnd !== "" &&
+    Number.isFinite(startMs) &&
+    Number.isFinite(endMs) &&
+    startMs >= 0 &&
+    endMs - startMs >= 100 &&
+    endMs <= duration;
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null),
     [encoding, setEncoding] = useState("utf-8");
   const importSubtitles = useMutation({
@@ -1098,7 +1127,6 @@ export function LibraryAnnotation({
   });
   const annotations = useQuery({
     queryKey: ["library-annotations", projectId, versionId, offset],
-    enabled: expanded,
     queryFn: () =>
       api.get<{
         total: number;
@@ -1134,7 +1162,7 @@ export function LibraryAnnotation({
     mutationFn: () =>
       api.post(
         `/projects/${projectId}/library/versions/${versionId}/annotations`,
-        { start_ms: start, end_ms: end, kind, text: text.trim() },
+        { start_ms: startMs, end_ms: endMs, kind, text: text.trim() },
       ),
     onSuccess: () => {
       setText("");
@@ -1145,189 +1173,327 @@ export function LibraryAnnotation({
     },
   });
   return (
-    <details
-      className="rounded-lg border p-3 text-xs"
-      onToggle={(e) => setExpanded(e.currentTarget.open)}
-    >
-      <summary className="cursor-pointer font-medium">
-        {zh ? "为所选片段添加检索标注" : "Annotate the selected segment"}
-      </summary>
-      <div className="mt-3 space-y-3">
-        <p className="text-muted-foreground">
-          {zh
-            ? "记录你实际看见的内容或听见的台词，方便之后精确查找。标注与素材版本一起保留。"
-            : "Record visible evidence or dialogue for later lookup. Annotations stay with this media version."}
-        </p>
-        <select
-          aria-label={zh ? "新标注来源" : "New annotation source"}
-          className="h-8 w-full rounded border bg-bg px-2"
-          value={kind}
-          onChange={(e) => {
-            setKind(e.target.value);
-            save.reset();
-          }}
+    <div className="annotation-workspace">
+      <section
+        className="annotation-editor"
+        aria-label={zh ? "添加标注或导入字幕" : "Add annotations or subtitles"}
+      >
+        <div
+          className="annotation-tabs"
+          role="group"
+          aria-label={zh ? "添加方式" : "Add method"}
         >
-          {mediaType !== "audio" && (
-            <option value="visual">
-              {zh ? "画面内容" : "Visual evidence"}
-            </option>
-          )}
-          <option value="speech">{zh ? "台词内容" : "Dialogue"}</option>
-        </select>
-        <textarea
-          aria-label={zh ? "片段检索标注" : "Segment search annotation"}
-          className="w-full rounded border bg-bg p-2"
-          rows={3}
-          maxLength={4000}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            save.reset();
-          }}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!valid || !text.trim() || save.isPending}
-          onClick={() => save.mutate()}
-        >
-          {zh ? "保存标注" : "Save annotation"}
-        </Button>
-        {save.isSuccess && (
-          <p role="status">
-            {zh
-              ? "标注已保存，可在“字幕与标注”中检索。"
-              : "Saved. Find it in Captions & annotations."}
-          </p>
-        )}
-        {save.error && (
-          <p role="alert" className="text-danger">
-            {save.error.message}
-          </p>
-        )}
-        {annotations.isError ? (
           <button
-            className="studio-link"
-            onClick={() => void annotations.refetch()}
+            aria-pressed={tab === "annotation"}
+            onClick={() => setTab("annotation")}
           >
-            {zh ? "标注读取失败，重试" : "Retry annotations"}
+            {zh ? "添加标注" : "Add annotation"}
           </button>
-        ) : (
-          annotations.data?.items.map((a) => (
-            <div className="space-y-1 border-t pt-2" key={a.id}>
-              <p className="text-muted-foreground">
-                {mediaTime(a.start_ms)} — {mediaTime(a.end_ms)} ·{" "}
-                {a.kind === "visual"
-                  ? zh
-                    ? "画面"
-                    : "Visual"
-                  : zh
-                    ? "台词"
-                    : "Dialogue"}
-              </p>
-              <p className="break-words">{a.text}</p>
-              {(a.source?.model_key || a.source?.provider === "mediacms") && (
-                <p className="text-xs text-muted-foreground">
-                  {a.source?.reviewed
-                    ? zh
-                      ? "自动转写 · 已人工核对"
-                      : "Automatic transcript · Reviewed"
-                    : zh
-                      ? "自动转写 · 尚未人工核对"
-                      : "Automatic transcript · Not reviewed"}
-                </p>
-              )}
-              <button
-                className="studio-link"
-                disabled={remove.isPending}
-                onClick={async () => {
-                  if (
-                    await confirm({
-                      message: zh
-                        ? "移除这条检索标注？不影响原素材与镜头引用。"
-                        : "Remove this annotation? The media and shot references remain.",
-                    })
-                  )
-                    remove.mutate(a.id);
-                }}
-              >
-                {zh ? "移除标注" : "Remove annotation"}
-              </button>
+          <button
+            aria-pressed={tab === "subtitles"}
+            onClick={() => setTab("subtitles")}
+          >
+            {zh ? "导入字幕" : "Import subtitles"}
+          </button>
+        </div>
+        {tab === "annotation" ? (
+          <div className="annotation-form">
+            <p className="annotation-help">
+              {zh
+                ? "记录画面内容或台词，方便之后搜索到这段素材。"
+                : "Describe the scene or dialogue to find this segment later."}
+            </p>
+            <div className="annotation-range">
+              <label>
+                {zh ? "开始（秒）" : "Start (s)"}
+                <input
+                  aria-label={zh ? "标注开始时间" : "Annotation start"}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={rangeStart}
+                  onChange={(e) => {
+                    setRangeStart(e.target.value);
+                    save.reset();
+                  }}
+                />
+              </label>
+              <label>
+                {zh ? "结束（秒）" : "End (s)"}
+                <input
+                  aria-label={zh ? "标注结束时间" : "Annotation end"}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={rangeEnd}
+                  onChange={(e) => {
+                    setRangeEnd(e.target.value);
+                    save.reset();
+                  }}
+                />
+              </label>
             </div>
-          ))
-        )}
-        {annotations.data && annotations.data.total > 50 && (
-          <div className="flex justify-between">
-            <button disabled={!offset} onClick={() => setOffset(offset - 50)}>
-              {zh ? "上一页" : "Previous"}
-            </button>
+            {!valid && (
+              <p className="text-xs text-danger" role="alert">
+                {zh
+                  ? "请选择素材时长内至少 0.1 秒的片段。"
+                  : "Choose at least 0.1 seconds within the media."}
+              </p>
+            )}
+            <SelectField
+              label={zh ? "标注类型" : "Annotation type"}
+              value={kind}
+              onChange={(value) => {
+                setKind(value);
+                save.reset();
+              }}
+              options={[
+                ...(mediaType !== "audio"
+                  ? [
+                      {
+                        value: "visual",
+                        label: zh ? "画面内容" : "Visual evidence",
+                      },
+                    ]
+                  : []),
+                { value: "speech", label: zh ? "台词内容" : "Dialogue" },
+              ]}
+            />
+            <textarea
+              aria-label={zh ? "片段检索标注" : "Segment search annotation"}
+              placeholder={
+                zh ? "这段素材里有什么？" : "What happens in this segment?"
+              }
+              rows={5}
+              maxLength={4000}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                save.reset();
+              }}
+            />
+            <div className="annotation-form-footer">
+              <span>{text.length} / 4000</span>
+              <Button
+                size="sm"
+                disabled={!valid || !text.trim() || save.isPending}
+                onClick={() => save.mutate()}
+              >
+                {save.isPending
+                  ? zh
+                    ? "保存中…"
+                    : "Saving…"
+                  : zh
+                    ? "保存标注"
+                    : "Save annotation"}
+              </Button>
+            </div>
+            {save.isSuccess && (
+              <p role="status" className="text-xs text-primary">
+                {zh
+                  ? "已保存，可通过字幕与标注搜索找到。"
+                  : "Saved and available in annotation search."}
+              </p>
+            )}
+            {save.error && (
+              <p role="alert" className="text-xs text-danger">
+                {save.error.message}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="annotation-form">
+            <p className="annotation-help">
+              {zh
+                ? "导入 SRT 字幕后，可以按台词查找片段。"
+                : "Import SRT subtitles to search by dialogue."}
+            </p>
+            <input
+              ref={subtitleInput}
+              type="file"
+              accept=".srt"
+              hidden
+              aria-label={zh ? "字幕文件" : "Subtitle file"}
+              onChange={(e) => {
+                setSubtitleFile(e.target.files?.[0] || null);
+                importSubtitles.reset();
+              }}
+            />
             <button
+              className="annotation-file"
+              onClick={() => subtitleInput.current?.click()}
+            >
+              <Upload size={22} />
+              <strong>
+                {subtitleFile?.name ||
+                  (zh ? "选择字幕文件" : "Choose subtitles")}
+              </strong>
+              <span>{zh ? "SRT 格式 · 最大 1 MB" : "SRT · Up to 1 MB"}</span>
+            </button>
+            <SelectField
+              label={zh ? "字幕编码" : "Subtitle encoding"}
+              value={encoding}
+              onChange={(value) => {
+                setEncoding(value);
+                importSubtitles.reset();
+              }}
+              options={[
+                { value: "utf-8", label: "UTF-8" },
+                { value: "gb18030", label: "GB18030 / GBK" },
+              ]}
+            />
+            <Button
+              size="sm"
+              disabled={!subtitleFile || importSubtitles.isPending}
+              onClick={() => importSubtitles.mutate()}
+            >
+              {importSubtitles.isPending
+                ? zh
+                  ? "导入中…"
+                  : "Importing…"
+                : zh
+                  ? "导入字幕"
+                  : "Import subtitles"}
+            </Button>
+            <p className="annotation-help">
+              {zh
+                ? "会检查时间范围并跳过重复字幕。台词中的提及不代表画面中出现了该内容。"
+                : "Time ranges are validated and duplicates skipped. Spoken mentions are not visual detections."}
+            </p>
+            {importSubtitles.data && (
+              <p role="status" className="text-xs text-primary">
+                {zh
+                  ? `已导入 ${importSubtitles.data.added} 条，跳过 ${importSubtitles.data.skipped} 条重复字幕`
+                  : `Imported ${importSubtitles.data.added}, skipped ${importSubtitles.data.skipped} duplicates`}
+              </p>
+            )}
+            {importSubtitles.error && (
+              <p role="alert" className="text-xs text-danger">
+                {importSubtitles.error.message}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      <section
+        className="annotation-history"
+        aria-label={zh ? "已有标注" : "Saved annotations"}
+      >
+        <header>
+          <h3>{zh ? "已有标注" : "Saved annotations"}</h3>
+          <span>{annotations.data?.total ?? "—"}</span>
+        </header>
+        <div className="annotation-records">
+          {annotations.isPending && (
+            <p role="status" className="annotation-help">
+              {zh ? "正在读取标注…" : "Loading annotations…"}
+            </p>
+          )}
+          {annotations.isError && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void annotations.refetch()}
+            >
+              {zh ? "读取失败，重试" : "Retry annotations"}
+            </Button>
+          )}
+          {annotations.data?.total === 0 && (
+            <div className="annotation-empty">
+              <MessageSquareText size={28} strokeWidth={1.25} />
+              <p>{zh ? "还没有标注" : "No annotations yet"}</p>
+              <span>
+                {zh
+                  ? "添加内容标注或导入字幕后显示在这里。"
+                  : "Add an annotation or import subtitles to start."}
+              </span>
+            </div>
+          )}
+          {annotations.data?.items.map((a) => (
+            <article className="annotation-record" key={a.id}>
+              <div className="annotation-record-meta">
+                <span>
+                  {mediaTime(a.start_ms)} – {mediaTime(a.end_ms)}
+                </span>
+                <span>
+                  {a.kind === "visual"
+                    ? zh
+                      ? "画面"
+                      : "Visual"
+                    : zh
+                      ? "台词"
+                      : "Dialogue"}
+                </span>
+              </div>
+              <p>{a.text}</p>
+              <footer>
+                <span>
+                  {a.source?.model_key || a.source?.provider === "mediacms"
+                    ? a.source?.reviewed
+                      ? zh
+                        ? "自动转写 · 已核对"
+                        : "Transcript · Reviewed"
+                      : zh
+                        ? "自动转写 · 待核对"
+                        : "Transcript · Not reviewed"
+                    : zh
+                      ? "内容标注"
+                      : "Annotation"}
+                </span>
+                <button
+                  aria-label={
+                    zh
+                      ? `移除标注：${a.text.slice(0, 40)}`
+                      : `Remove annotation: ${a.text.slice(0, 40)}`
+                  }
+                  title={zh ? "移除标注" : "Remove annotation"}
+                  disabled={remove.isPending}
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        message: zh
+                          ? "移除这条检索标注？不影响原素材与镜头引用。"
+                          : "Remove this annotation? Media and references remain.",
+                      })
+                    )
+                      remove.mutate(a.id);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </footer>
+            </article>
+          ))}
+        </div>
+        {annotations.data && annotations.data.total > 50 && (
+          <div className="annotation-pagination">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!offset}
+              onClick={() => setOffset(offset - 50)}
+            >
+              {zh ? "上一页" : "Previous"}
+            </Button>
+            <span>
+              {offset / 50 + 1} / {Math.ceil(annotations.data.total / 50)}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={offset + 50 >= annotations.data.total}
               onClick={() => setOffset(offset + 50)}
             >
               {zh ? "下一页" : "Next"}
-            </button>
+            </Button>
           </div>
         )}
         {remove.error && (
-          <p role="alert" className="text-danger">
+          <p role="alert" className="text-xs text-danger">
             {remove.error.message}
           </p>
         )}
-        <div className="space-y-2 border-t pt-3">
-          <p className="font-medium">
-            {zh
-              ? "导入字幕并按台词检索"
-              : "Import subtitles for dialogue search"}
-          </p>
-          <input
-            aria-label={zh ? "字幕文件" : "Subtitle file"}
-            type="file"
-            accept=".srt"
-            className="max-w-full"
-            onChange={(e) => {
-              setSubtitleFile(e.target.files?.[0] || null);
-              importSubtitles.reset();
-            }}
-          />
-          <div className="flex flex-wrap gap-2">
-            <select
-              aria-label={zh ? "字幕编码" : "Subtitle encoding"}
-              value={encoding}
-              onChange={(e) => setEncoding(e.target.value)}
-              className="h-8 rounded border bg-bg px-2"
-            >
-              <option value="utf-8">UTF-8</option>
-              <option value="gb18030">GB18030 / GBK</option>
-            </select>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!subtitleFile || importSubtitles.isPending}
-              onClick={() => importSubtitles.mutate()}
-            >
-              {zh ? "导入SRT" : "Import SRT"}
-            </Button>
-          </div>
-          <p className="text-muted-foreground">
-            {zh
-              ? "导入前检查全部时间范围，重复字幕会跳过。字幕中的提及不视为画面识别结果。"
-              : "All ranges are validated before import; duplicate cues are skipped. Spoken mentions are not visual detections."}
-          </p>
-          {importSubtitles.data && (
-            <p role="status">
-              {zh
-                ? `已导入 ${importSubtitles.data.added} 条，跳过 ${importSubtitles.data.skipped} 条重复字幕`
-                : `Imported ${importSubtitles.data.added}, skipped ${importSubtitles.data.skipped} duplicates`}
-            </p>
-          )}
-          {importSubtitles.error && (
-            <p role="alert" className="text-danger">
-              {importSubtitles.error.message}
-            </p>
-          )}
-        </div>
-      </div>
-    </details>
+      </section>
+    </div>
   );
 }

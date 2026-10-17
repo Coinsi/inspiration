@@ -19,8 +19,9 @@ from app.models.asset import Asset, AssetReferenceImage
 from app.models.generation import Generation
 from app.models.identity import Membership, Project, User
 from app.models.library import LibraryMedia, MediaVersion
+from app.models.material import GeneratedMaterialState
 from app.models.media_index import MediaIndex, MediaSegment
-from app.models.narrative import Novel
+from app.models.narrative import Novel, Script
 from app.models.storage import Blob
 from app.models.timeline import AudioTrack, Timeline
 from app.storage import cas
@@ -110,7 +111,15 @@ def get_blob(
                 .where(Asset.project_id == project_id, AssetReferenceImage.blob_hash == blob_hash)
                 .exists(),
                 select(Novel.id)
-                .where(Novel.project_id == project_id, Novel.original_blob_hash == blob_hash)
+                .where(Novel.project_id == project_id,
+                       or_(Novel.original_blob_hash == blob_hash, Novel.cover_blob_hash == blob_hash))
+                .exists(),
+                select(GeneratedMaterialState.generation_id)
+                .join(Generation, Generation.id == GeneratedMaterialState.generation_id)
+                .where(Generation.project_id == project_id, GeneratedMaterialState.poster_hash == blob_hash)
+                .exists(),
+                select(Script.id)
+                .where(Script.project_id == project_id, Script.cover_blob_hash == blob_hash)
                 .exists(),
                 select(AudioTrack.id)
                 .join(Timeline, Timeline.id == AudioTrack.timeline_id)

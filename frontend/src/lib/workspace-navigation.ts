@@ -59,8 +59,8 @@ export const WORKSPACE_GROUPS = [
     title: "nav.assets",
     items: [
       {
-        to: "generated",
-        label: "nav.generatedLibrary",
+        to: "materials",
+        label: "nav.materials",
         icon: Images,
         keywords: "AI 生成 图片 视频 素材 library generated results",
       },
@@ -87,7 +87,8 @@ export const WORKSPACE_GROUPS = [
         to: "library",
         label: "nav.videoLibrary",
         icon: Film,
-        keywords: "视频 图片 音频 素材 原片 片段 引用 上传 library image audio footage clips upload",
+        keywords:
+          "视频 图片 音频 素材 原片 片段 引用 上传 library image audio footage clips upload",
       },
       {
         to: "evidence",

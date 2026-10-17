@@ -6,6 +6,7 @@ from app.models.asset import Asset
 from app.models.creation import Creation
 from app.models.generation import Generation
 from app.models.generation import GenerationJob as Job
+from app.models.identity import AuditLog
 from app.models.shot import Shot
 from app.models.storage import Blob
 from app.models.timeline import Timeline
@@ -45,7 +46,12 @@ def base_query(project_id):
     query = select(
         Job, title.label("target_name"), available.label("target_available"), result_count
     )
-    for model, kind in ((Shot, "shot"), (Asset, "asset"), (Timeline, "timeline"), (Creation, "creation")):
+    for model, kind in (
+        (Shot, "shot"),
+        (Asset, "asset"),
+        (Timeline, "timeline"),
+        (Creation, "creation"),
+    ):
         query = query.outerjoin(
             model,
             and_(
@@ -67,7 +73,8 @@ def summary(row):
         "target_available": bool(available),
         "status": job.status,
         "provider": job.provider,
-        "model_name": job.input_snapshot.get("routing", {}).get("name") or job.input_snapshot.get("model_profile", {}).get("display_name"),
+        "model_name": job.input_snapshot.get("routing", {}).get("name")
+        or job.input_snapshot.get("model_profile", {}).get("display_name"),
         "request_type": job.request_type,
         "operation": job.input_snapshot.get("operation", "generate"),
         "created_at": job.created_at,
@@ -160,11 +167,25 @@ def workspace(db, ctx, job_id):
         )
         .limit(1)
     )
+    output_ids = [str(g.id) for g, _ in outputs]
+    changes = db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.project_id == project_id,
+            AuditLog.action == "generation.select",
+            AuditLog.detail["generation"].astext.in_(output_ids),
+        )
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .limit(31)
+    ).all()
+    from app.modules.activity.details import object_link
+
     return {
         "summary": item,
         "job": schemas.JobOut.model_validate(job),
         "can_cancel": permitted and job.status in ACTIVE,
         "can_retry": permitted
+        and (not job.provider.startswith("personal_") or job.created_by == ctx.user.id)
         and item["target_available"]
         and job.status in ("failed", "canceled")
         and retry_allowed(job)
@@ -176,4 +197,14 @@ def workspace(db, ctx, job_id):
         "retry_parent": parent,
         "retries": [summary(r) for r in retries[:20]],
         "more_retries": len(retries) > 20,
+        "changes": [
+            {
+                "id": a.id,
+                "at": a.created_at,
+                "target": object_link(db, ctx, a.target_type, a.target_id),
+                "replaced": bool(a.detail.get("previous_generation")),
+            }
+            for a in changes[:30]
+        ],
+        "more_changes": len(changes) > 30,
     }

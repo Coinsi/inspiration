@@ -1,9 +1,29 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { MaterialProfile } from "@/components/MaterialProfile";
+import { SearchField } from "@/components/ui/search-field";
+import { MaterialShotPicker } from "@/components/MaterialShotPicker";
+import "./library-detail.css";
+import { SelectField } from "@/components/ui/select-field";
+import { Lightbox } from "@/components/ImageViewer";
 import { MaterialTabs } from "@/components/MaterialTabs";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   Film,
+  Download,
+  Tags,
+  Captions,
+  UserRound,
+  Upload,
+  ChevronRight,
+  Maximize2,
   Plus,
   LayoutGrid,
   List,
@@ -49,6 +69,7 @@ export default function MediaLibrary() {
 }
 function LibraryContent({ projectId }: { projectId: string }) {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const folder = params.get("folder") || "all";
   const folderId = ["all", "root"].includes(folder) ? null : folder;
   const [selection, setSelection] = useState<Record<string, string | null>>({});
@@ -63,7 +84,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
   const zh = useI18n().lang === "zh",
     base = `/projects/${projectId}/library`,
     qc = useQueryClient();
-  const [deleted, setDeleted] = useState(false),
+  const [deleted] = useState(false),
     [search, setSearch] = useState("");
   const [query, setQuery] = useState(""),
     [page, setPage] = useState(0),
@@ -149,7 +170,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
       <div className="page-heading mb-6">
         <div>
           <h1 className="text-xl font-semibold">
-            {zh ? "素材库" : "Media library"}
+            {zh ? "文件与版本管理" : "Files & versions"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {zh
@@ -207,7 +228,6 @@ function LibraryContent({ projectId }: { projectId: string }) {
           projectId={projectId}
           onSelect={(r) => {
             setSegment(r);
-            setDeleted(false);
             setOpenId(r.media_id);
           }}
         />
@@ -254,7 +274,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
               variant="ghost"
               size="sm"
               onClick={() => {
-                setDeleted(!deleted);
+                navigate(`/projects/${projectId}/materials?tab=trash`);
                 setSelection({});
                 setPage(0);
               }}
@@ -300,26 +320,28 @@ function LibraryContent({ projectId }: { projectId: string }) {
           {(!!list.data?.total || !!search || deleted || folder !== "all") && (
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-surface p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  aria-label={zh ? "搜索素材" : "Search media"}
+                <SearchField
+                  label={zh ? "搜索素材" : "Search media"}
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={zh ? "按名称查找素材…" : "Find media by name…"}
-                  className="h-9 max-w-full rounded-md border bg-bg px-3 text-sm"
+                  onValueChange={setSearch}
+                  placeholder={
+                    zh ? "搜索名称、说明或标签" : "Find media by name"
+                  }
+                  className="w-64 max-w-full"
                 />
-                <select
+                <StudioSelect
                   aria-label={zh ? "素材排序" : "Sort media"}
                   className="h-9 rounded-md border bg-bg px-2 text-xs"
                   value={sort}
-                  onChange={(e) => {
-                    setSort(e.target.value);
+                  onValueChange={(selectedValue) => {
+                    setSort(selectedValue);
                     setPage(0);
                   }}
                 >
                   <option value="recent">{zh ? "最近导入" : "Newest"}</option>
                   <option value="oldest">{zh ? "最早导入" : "Oldest"}</option>
                   <option value="name">{zh ? "按名称" : "Name"}</option>
-                </select>
+                </StudioSelect>
                 <div
                   className="flex rounded-lg border p-0.5"
                   role="group"
@@ -710,7 +732,6 @@ function LibraryContent({ projectId }: { projectId: string }) {
           onClose={() => setReuseOpen(false)}
           onDone={(result) => {
             setReuseOpen(false);
-            setDeleted(false);
             setView("videos");
             refresh();
             const next = new URLSearchParams(params);
@@ -735,7 +756,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
   );
 }
 
-function LibraryDetail({
+export function LibraryDetail({
   projectId,
   item,
   onClose,
@@ -752,10 +773,13 @@ function LibraryDetail({
 }) {
   const zh = useI18n().lang === "zh",
     [params] = useSearchParams();
+  const location = useLocation();
+  const returnPath = location.pathname + location.search;
   const [versionId, setVersionId] = useState(
     segment?.version_id ||
       (params.get("media") === item.id ? params.get("version") : null) ||
       item.versions.find((v) => v.status === "ready")?.id ||
+      item.versions[0]?.id ||
       "",
   );
   const v = item.versions.find((v) => v.id === versionId);
@@ -786,7 +810,11 @@ function LibraryDetail({
       v?.media_type === "audio" ? "editing_source" : "visual_reference",
     ),
     [note, setNote] = useState(segment?.description || "");
+  const [enlarged, setEnlarged] = useState(false);
+  const [annotating, setAnnotating] = useState(false);
+  const [using, setUsing] = useState(Boolean(params.get("shot")));
   const shots = useQuery({
+    enabled: using,
     queryKey: ["all-shots", projectId],
     queryFn: () => api.get<Shot[]>(`/projects/${projectId}/shots`),
   });
@@ -815,326 +843,507 @@ function LibraryDetail({
     onSuccess: onChange,
   });
   return (
-    <Modal open title={item.name} onClose={onClose} width={1050}>
-      <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
-        <div className="min-w-0 space-y-3">
-          {!v && (
-            <p role="alert" className="text-sm text-danger">
-              {zh
-                ? "链接中的原片版本不可用，请检查版本记录。"
-                : "The linked source version is unavailable."}
-            </p>
-          )}
-          <label className="flex items-center gap-3 text-xs">
-            {zh ? "素材版本" : "Version"}
-            <select
-              aria-label={zh ? "素材版本" : "Media version"}
-              value={versionId}
-              className="h-9 min-w-0 flex-1 rounded-md border bg-bg px-2"
-              onChange={(e) => {
-                const next = item.versions.find((v) => v.id === e.target.value);
-                setVersionId(e.target.value);
-                setStart("0");
-                setEnd(String((next?.duration_ms || 0) / 1000));
-                reference.reset();
-              }}
-            >
-              {item.versions.map((v) => (
-                <option key={v.id} value={v.id} disabled={v.status !== "ready"}>
-                  v{v.ordinal} · {mediaStatus(v.status, zh)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {v?.proxy_hash && (
-            <LibraryMediaPreview
-              mediaType={kind}
-              key={v.id}
-              src={blobUrl(projectId, v.proxy_hash)}
-              start={startMs || 0}
-              end={endMs || 0}
-              label={item.name}
-              region={selectedMatch}
-              onMark={(kind, ms) => {
-                if (kind === "start") setStart(String(ms / 1000));
-                else setEnd(String(ms / 1000));
-                reference.reset();
-              }}
+    <>
+      <Modal
+        open
+        title={item.name}
+        onClose={onClose}
+        width={1120}
+        bodyClassName="library-viewer-body"
+      >
+        <div className="library-viewer">
+          <section
+            className="library-viewer-media"
+            aria-label={zh ? "素材预览" : "Media preview"}
+          >
+            <div className="library-preview-stage">
+              {v?.proxy_hash ? (
+                <LibraryMediaPreview
+                  showRangeControls={using || Boolean(segment)}
+                  mediaType={kind}
+                  key={v.id}
+                  src={blobUrl(projectId, v.proxy_hash)}
+                  start={startMs || 0}
+                  end={endMs || 0}
+                  label={item.name}
+                  region={selectedMatch}
+                  onMark={
+                    using
+                      ? (kind, ms) => {
+                          if (kind === "start") setStart(String(ms / 1000));
+                          else setEnd(String(ms / 1000));
+                          reference.reset();
+                        }
+                      : undefined
+                  }
+                />
+              ) : (
+                <div className="library-preview-empty" role="status">
+                  <ImageIcon size={32} strokeWidth={1.25} />
+                  <p>
+                    {v
+                      ? mediaStatus(v.status, zh)
+                      : zh
+                        ? "此版本不可用"
+                        : "Version unavailable"}
+                  </p>
+                  <span>
+                    {v?.status === "failed"
+                      ? zh
+                        ? "请重新上传或稍后重试。"
+                        : "Upload again or try later."
+                      : zh
+                        ? "预览准备好后将在这里显示。"
+                        : "Your preview will appear here when ready."}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="library-preview-caption">
+              <span>{zh ? "预览 · 保留完整画面" : "Preview · Full frame"}</span>
+              {isImage && v?.proxy_hash && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEnlarged(true)}
+                >
+                  <Maximize2 size={14} />
+                  {zh ? "放大查看" : "Enlarge"}
+                </Button>
+              )}
+            </div>
+          </section>
+          <aside
+            className="library-viewer-info"
+            aria-label={zh ? "素材信息与操作" : "Media details and actions"}
+          >
+            <div className="library-viewer-heading">
+              <span>{v ? mediaTypeName(kind, zh) : zh ? "素材" : "Media"}</span>
+              <h3>{item.name}</h3>
+            </div>
+            <MaterialProfile
+              projectId={projectId}
+              source="upload"
+              item={item}
+              video={
+                v?.status === "ready" &&
+                v.media_type === "video" &&
+                (v.proxy_hash || v.original_hash)
+                  ? {
+                      src: blobUrl(
+                        projectId,
+                        (v.proxy_hash || v.original_hash)!,
+                      ),
+                      versionId: v.id,
+                    }
+                  : undefined
+              }
             />
-          )}
-          {segment?.version_id === versionId && !!segment.matches?.length && (
-            <div className="space-y-2 rounded-lg border bg-surface p-3">
+            {!v && (
+              <p role="alert" className="text-xs text-danger">
+                {zh
+                  ? "链接中的原片版本不可用，请检查版本记录。"
+                  : "The linked source version is unavailable."}
+              </p>
+            )}
+            <div className="library-viewer-version">
+              {item.versions.length > 1 ? (
+                <SelectField
+                  label={zh ? "素材版本" : "Media version"}
+                  value={versionId}
+                  options={item.versions.map((version) => ({
+                    value: version.id,
+                    label: `v${version.ordinal} · ${mediaStatus(version.status, zh)}`,
+                    disabled: version.status !== "ready",
+                  }))}
+                  onChange={(value) => {
+                    const next = item.versions.find(
+                      (version) => version.id === value,
+                    );
+                    setVersionId(value);
+                    setStart("0");
+                    setEnd(String((next?.duration_ms || 0) / 1000));
+                    setPurpose(
+                      next?.media_type === "audio"
+                        ? "editing_source"
+                        : "visual_reference",
+                    );
+                    reference.reset();
+                  }}
+                />
+              ) : (
+                v && (
+                  <span className="library-version-label">
+                    v{v.ordinal}
+                    <span>·</span>
+                    {mediaStatus(v.status, zh)}
+                  </span>
+                )
+              )}
+            </div>
+            {v && (
+              <dl className="library-viewer-facts">
+                <div className="library-original-filename">
+                  <dt>{zh ? "原文件名" : "Original filename"}</dt>
+                  <dd title={v.filename}>{v.filename}</dd>
+                </div>
+                <div>
+                  <dt>{zh ? "文件大小" : "File size"}</dt>
+                  <dd>
+                    {v.size_bytes < 1024 * 1024
+                      ? `${Math.max(1, Math.round(v.size_bytes / 1024))} KB`
+                      : mediaSize(v.size_bytes)}
+                  </dd>
+                </div>
+                {!!v.width && !!v.height && (
+                  <div>
+                    <dt>{zh ? "尺寸" : "Dimensions"}</dt>
+                    <dd>
+                      {v.width} × {v.height}
+                    </dd>
+                  </div>
+                )}
+                {!isImage && v.duration_ms != null && (
+                  <div>
+                    <dt>{zh ? "时长" : "Duration"}</dt>
+                    <dd>{mediaTime(v.duration_ms)}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt>{zh ? "已被引用" : "References"}</dt>
+                  <dd>
+                    {item.usage_count}
+                    {zh ? " 次" : ""}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            <div className="library-viewer-actions">
+              <Button
+                disabled={!v || v.status !== "ready"}
+                variant={using ? "outline" : "default"}
+                aria-expanded={using}
+                aria-controls="library-use-panel"
+                onClick={() => setUsing(!using)}
+              >
+                <Film size={16} />
+                {using
+                  ? zh
+                    ? "收起引用设置"
+                    : "Hide reference settings"
+                  : zh
+                    ? "用到镜头"
+                    : "Use in a shot"}
+              </Button>
+              {v?.original_hash && (
+                <a
+                  className="library-download"
+                  href={`${blobUrl(projectId, v.original_hash)}&download=true`}
+                  download
+                >
+                  <Download size={15} />
+                  {zh ? "下载原文件" : "Download original"}
+                </a>
+              )}
+            </div>
+            <div
+              id="library-use-panel"
+              hidden={!using}
+              className="library-use-panel space-y-4"
+            >
+              <h3 className="text-sm font-medium">
+                {isImage
+                  ? zh
+                    ? "将图片用到镜头中"
+                    : "Reference this image in a shot"
+                  : zh
+                    ? "选一个片段，用到镜头中"
+                    : "Reference a segment in a shot"}
+              </h3>
+              {isImage ? (
+                <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                  {zh
+                    ? "引用整张图片，无需设置起止时间。"
+                    : "Use the whole image. No time range is needed."}
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    [start, setStart, zh ? "入点（秒）" : "Start (seconds)"],
+                    [end, setEnd, zh ? "出点（秒）" : "End (seconds)"],
+                  ].map(([value, setter, label], i) => (
+                    <label className="space-y-1 text-xs" key={i}>
+                      <span>{label as string}</span>
+                      <input
+                        aria-label={label as string}
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={value as string}
+                        onChange={(e) => {
+                          (setter as (v: string) => void)(e.target.value);
+                          reference.reset();
+                        }}
+                        className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+              {!valid && (
+                <p role="alert" className="text-xs text-danger">
+                  {zh
+                    ? "请选择素材范围内至少0.1秒的片段。"
+                    : "Choose at least 0.1 seconds within the media."}
+                </p>
+              )}
+              <div className="space-y-2">
+                <MaterialShotPicker
+                  projectId={projectId}
+                  shots={shots.data || []}
+                  selected={selectedShot}
+                  loading={shots.isPending}
+                  error={shots.isError}
+                  onRetry={() => void shots.refetch()}
+                  onSelect={(id) => {
+                    setShotId(id);
+                    reference.reset();
+                  }}
+                />
+              </div>
+              {shots.isError && (
+                <button
+                  className="studio-link text-xs"
+                  onClick={() => void shots.refetch()}
+                >
+                  {zh ? "镜头加载失败，重试" : "Failed to load shots. Retry"}
+                </button>
+              )}
+              <label className="block space-y-1 text-xs">
+                <span>{zh ? "用途" : "Purpose"}</span>
+                <SelectField
+                  label={zh ? "片段用途" : "Segment purpose"}
+                  value={purpose}
+                  onChange={(value) => {
+                    setPurpose(value);
+                    reference.reset();
+                  }}
+                  options={[
+                    ...(kind !== "audio"
+                      ? [
+                          {
+                            value: "visual_reference",
+                            label: zh ? "画面参考" : "Visual reference",
+                          },
+                        ]
+                      : []),
+                    {
+                      value: "editing_source",
+                      label: zh ? "剪辑备选" : "Editing source",
+                    },
+                  ]}
+                />
+              </label>
+              <textarea
+                aria-label={zh ? "片段备注" : "Segment note"}
+                placeholder={
+                  zh
+                    ? "例如：说明这份素材在镜头中的用途"
+                    : "What should this segment inform?"
+                }
+                maxLength={1000}
+                rows={3}
+                value={note}
+                onChange={(e) => {
+                  setNote(e.target.value);
+                  reference.reset();
+                }}
+                className="w-full rounded-md border bg-bg p-2 text-sm"
+              />
               <p className="text-xs text-muted-foreground">
                 {zh
-                  ? "选择一个命中区域核对。保留的区域仅来自本次有限候选集；区域框不会改变原图或引用范围。"
-                  : "Inspect a region from this search's bounded candidate set. Boxes do not crop the source or change its reference."}
+                  ? "保存后可在镜头详情中查看；不会自动加入时间线或发送给AI。"
+                  : "View it from the shot details. This does not add it to the timeline or send it to AI."}
               </p>
-              <div
-                role="group"
-                aria-label={zh ? "命中区域" : "Matched regions"}
-                className="flex max-h-36 flex-wrap gap-2 overflow-y-auto pr-1"
+              <Button
+                disabled={
+                  !valid ||
+                  !selectedShot ||
+                  v?.status !== "ready" ||
+                  reference.isPending
+                }
+                onClick={() => reference.mutate()}
               >
-                {segment.matches.map((match, index) => (
-                  <Button
-                    key={match.id}
-                    size="sm"
-                    variant={match.id === matchId ? "default" : "outline"}
-                    aria-pressed={match.id === matchId}
-                    onClick={() => {
-                      setMatchId(match.id);
-                      if (!isImage) {
-                        setStart(String((match.start_ms || 0) / 1000));
-                        setEnd(String((match.end_ms || 0) / 1000));
-                      }
-                      reference.reset();
-                    }}
-                  >
-                    {zh ? `区域 ${index + 1}` : `Region ${index + 1}`}
-                    {match.matched_at_ms !== null
-                      ? ` · ${mediaTime(match.matched_at_ms)}`
-                      : ""}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-          {v?.reuse_origin && (
-            <p className="rounded-lg border bg-muted/40 p-3 text-xs leading-6">
-              {zh
-                ? `跨项目复用：${v.reuse_origin.name} · 来源 v${v.reuse_origin.ordinal}。本项目使用固定版本，不自动跟随原片更新。`
-                : `Reused source: ${v.reuse_origin.name} · v${v.reuse_origin.ordinal}. This project retains a fixed version.`}
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            {zh
-              ? "正在查看轻量预览。引用始终指向原文件版本；新增版本不会替换已有引用。"
-              : "Viewing a lightweight preview. References point to the original version and never follow newer uploads automatically."}
-          </p>
-          {segment?.match_type === "frame" &&
-            segment.version_id === versionId && (
-              <p className="rounded-lg border bg-surface px-3 py-2 text-xs leading-6 text-muted-foreground">
-                {zh
-                  ? `定位到 ${mediaTime(selectedMatch?.matched_at_ms ?? segment.matched_at_ms ?? segment.start_ms)} 的采样画面。当前是定位预览，请播放前后内容，调整引用的起止时间。`
-                  : `Matched a sampled frame at ${mediaTime(selectedMatch?.matched_at_ms ?? segment.matched_at_ms ?? segment.start_ms)}. Play the surrounding footage and adjust the range before referencing it.`}
-              </p>
-            )}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={item.versions.some((v) =>
-                ["uploading", "queued", "processing"].includes(v.status),
-              )}
-              onClick={onUpload}
-            >
-              {zh ? "上传新版本" : "Upload new version"}
-            </Button>
-            {v?.original_hash && (
-              <a
-                className="studio-link text-xs"
-                href={`${blobUrl(projectId, v.original_hash)}&download=true`}
-                download
-              >
-                {zh ? "下载原片" : "Download original"}
-              </a>
-            )}
-          </div>
-          {v && kind === "video" && valid && (
-            <Link
-              className="studio-link block text-sm"
-              to={`/projects/${projectId}/evidence?version=${v.id}&start=${startMs}&end=${endMs}`}
-            >
-              {zh
-                ? "为这段画面记录身份与证据 →"
-                : "Record identity evidence for this segment →"}
-            </Link>
-          )}
-          {v?.status === "ready" && kind === "video" && v.has_audio !== false && (
-            <Link
-              className="studio-link block text-sm"
-              to={`/projects/${projectId}/transcriptions?version=${v.id}`}
-            >
-              {zh
-                ? "转写音轨与编辑字幕 →"
-                : "Transcribe audio and edit captions →"}
-            </Link>
-          )}
-          {v && !isImage && (
-            <LibraryAnnotation
-              key={`${v.id}.${startMs}.${endMs}`}
-              projectId={projectId}
-              versionId={v.id}
-              mediaType={kind}
-              start={startMs}
-              end={endMs}
-              valid={valid}
-            />
-          )}
-        </div>
-        <div className="space-y-4 rounded-lg border bg-surface p-4">
-          <h3 className="text-sm font-medium">
-            {isImage
-              ? zh
-                ? "将图片用到镜头中"
-                : "Reference this image in a shot"
-              : zh
-                ? "选一个片段，用到镜头中"
-                : "Reference a segment in a shot"}
-          </h3>
-          {isImage ? (
-            <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
-              {zh
-                ? "引用整张图片，无需设置起止时间。"
-                : "Use the whole image. No time range is needed."}
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                [start, setStart, zh ? "入点（秒）" : "Start (seconds)"],
-                [end, setEnd, zh ? "出点（秒）" : "End (seconds)"],
-              ].map(([value, setter, label], i) => (
-                <label className="space-y-1 text-xs" key={i}>
-                  <span>{label as string}</span>
-                  <input
-                    aria-label={label as string}
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    value={value as string}
-                    onChange={(e) => {
-                      (setter as (v: string) => void)(e.target.value);
-                      reference.reset();
-                    }}
-                    className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
-                  />
-                </label>
-              ))}
-            </div>
-          )}
-          {!valid && (
-            <p role="alert" className="text-xs text-danger">
-              {zh
-                ? "请选择素材范围内至少0.1秒的片段。"
-                : "Choose at least 0.1 seconds within the media."}
-            </p>
-          )}
-          <label className="block space-y-1 text-xs">
-            <span>{zh ? "目标镜头" : "Target shot"}</span>
-            <select
-              aria-label={zh ? "目标镜头" : "Target shot"}
-              value={selectedShot}
-              onChange={(e) => {
-                setShotId(e.target.value);
-                reference.reset();
-              }}
-              className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
-            >
-              <option value="">
-                {shots.isPending
+                {reference.isPending
                   ? zh
-                    ? "加载镜头…"
-                    : "Loading…"
+                    ? "保存中…"
+                    : "Saving…"
                   : zh
-                    ? "选择镜头"
-                    : "Choose a shot"}
-              </option>
-              {shots.data?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.code} · {s.title || s.description.slice(0, 40)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {shots.isError && (
-            <button
-              className="studio-link text-xs"
-              onClick={() => void shots.refetch()}
-            >
-              {zh ? "镜头加载失败，重试" : "Failed to load shots. Retry"}
-            </button>
-          )}
-          <label className="block space-y-1 text-xs">
-            <span>{zh ? "用途" : "Purpose"}</span>
-            <select
-              aria-label={zh ? "片段用途" : "Segment purpose"}
-              value={purpose}
-              onChange={(e) => {
-                setPurpose(e.target.value);
-                reference.reset();
-              }}
-              className="h-9 w-full rounded-md border bg-bg px-2 text-sm"
-            >
-              {kind !== "audio" && (
-                <option value="visual_reference">
-                  {zh ? "画面参考" : "Visual reference"}
-                </option>
+                    ? "引用到镜头"
+                    : "Reference in shot"}
+              </Button>
+              {reference.error && (
+                <p role="alert" className="text-xs text-danger">
+                  {reference.error.message}
+                </p>
               )}
-              <option value="editing_source">
-                {zh ? "剪辑备选" : "Editing source"}
-              </option>
-            </select>
-          </label>
-          <textarea
-            aria-label={zh ? "片段备注" : "Segment note"}
-            placeholder={
-              zh
-                ? "例如：说明这份素材在镜头中的用途"
-                : "What should this segment inform?"
-            }
-            maxLength={1000}
-            rows={3}
-            value={note}
-            onChange={(e) => {
-              setNote(e.target.value);
-              reference.reset();
-            }}
-            className="w-full rounded-md border bg-bg p-2 text-sm"
-          />
-          <p className="text-xs text-muted-foreground">
-            {zh
-              ? "保存后可在镜头详情中查看；不会自动加入时间线或发送给AI。"
-              : "View it from the shot details. This does not add it to the timeline or send it to AI."}
-          </p>
-          <Button
-            disabled={
-              !valid ||
-              !selectedShot ||
-              v?.status !== "ready" ||
-              reference.isPending
-            }
-            onClick={() => reference.mutate()}
-          >
-            {reference.isPending
-              ? zh
-                ? "保存中…"
-                : "Saving…"
-              : zh
-                ? "引用到镜头"
-                : "Reference in shot"}
-          </Button>
-          {reference.error && (
-            <p role="alert" className="text-xs text-danger">
-              {reference.error.message}
+              {reference.isSuccess && (
+                <p role="status" className="text-sm text-primary">
+                  {zh ? "引用已保存。" : "Reference saved."}{" "}
+                  <Link
+                    className="underline"
+                    to={`/projects/${projectId}/shots?shot=${selectedShot}`}
+                  >
+                    {zh ? "打开镜头" : "Open shot"} →
+                  </Link>
+                </p>
+              )}
+            </div>
+            {segment?.version_id === versionId && !!segment.matches?.length && (
+              <div className="space-y-2 rounded-lg border bg-surface p-3">
+                <p className="text-xs text-muted-foreground">
+                  {zh
+                    ? "选择一个命中区域核对。保留的区域仅来自本次有限候选集；区域框不会改变原图或引用范围。"
+                    : "Inspect a region from this search's bounded candidate set. Boxes do not crop the source or change its reference."}
+                </p>
+                <div
+                  role="group"
+                  aria-label={zh ? "命中区域" : "Matched regions"}
+                  className="flex max-h-36 flex-wrap gap-2 overflow-y-auto pr-1"
+                >
+                  {segment.matches.map((match, index) => (
+                    <Button
+                      key={match.id}
+                      size="sm"
+                      variant={match.id === matchId ? "default" : "outline"}
+                      aria-pressed={match.id === matchId}
+                      onClick={() => {
+                        setMatchId(match.id);
+                        if (!isImage) {
+                          setStart(String((match.start_ms || 0) / 1000));
+                          setEnd(String((match.end_ms || 0) / 1000));
+                        }
+                        reference.reset();
+                      }}
+                    >
+                      {zh ? `区域 ${index + 1}` : `Region ${index + 1}`}
+                      {match.matched_at_ms !== null
+                        ? ` · ${mediaTime(match.matched_at_ms)}`
+                        : ""}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {v?.reuse_origin && (
+              <p className="rounded-lg border bg-muted/40 p-3 text-xs leading-6">
+                {zh
+                  ? `跨项目复用：${v.reuse_origin.name} · 来源 v${v.reuse_origin.ordinal}。本项目使用固定版本，不自动跟随原片更新。`
+                  : `Reused source: ${v.reuse_origin.name} · v${v.reuse_origin.ordinal}. This project retains a fixed version.`}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {zh
+                ? "正在查看轻量预览。引用始终指向原文件版本；新增版本不会替换已有引用。"
+                : "Viewing a lightweight preview. References point to the original version and never follow newer uploads automatically."}
             </p>
-          )}
-          {reference.isSuccess && (
-            <p role="status" className="text-sm text-primary">
-              {zh ? "引用已保存。" : "Reference saved."}{" "}
-              <Link
-                className="underline"
-                to={`/projects/${projectId}/shots?shot=${selectedShot}`}
+            {segment?.match_type === "frame" &&
+              segment.version_id === versionId && (
+                <p className="rounded-lg border bg-surface px-3 py-2 text-xs leading-6 text-muted-foreground">
+                  {zh
+                    ? `定位到 ${mediaTime(selectedMatch?.matched_at_ms ?? segment.matched_at_ms ?? segment.start_ms)} 的采样画面。当前是定位预览，请播放前后内容，调整引用的起止时间。`
+                    : `Matched a sampled frame at ${mediaTime(selectedMatch?.matched_at_ms ?? segment.matched_at_ms ?? segment.start_ms)}. Play the surrounding footage and adjust the range before referencing it.`}
+                </p>
+              )}
+            <section
+              className="library-tool-list"
+              aria-label={zh ? "素材工具" : "Media tools"}
+            >
+              <h4>{zh ? "素材工具" : "Media tools"}</h4>
+              {v?.status === "ready" && !isImage && (
+                <button
+                  className="library-tool-row"
+                  onClick={() => setAnnotating(true)}
+                >
+                  <Tags size={16} />
+                  <span>{zh ? "标注与字幕" : "Annotations & subtitles"}</span>
+                  <ChevronRight size={14} />
+                </button>
+              )}
+              {v && kind === "video" && valid && (
+                <Link
+                  className="library-tool-row"
+                  to={`/projects/${projectId}/evidence?version=${v.id}&start=${startMs}&end=${endMs}&return=${encodeURIComponent(returnPath)}`}
+                >
+                  <UserRound size={16} />
+                  <span>{zh ? "标注画面人物" : "Identify people"}</span>
+                  <ChevronRight size={14} />
+                </Link>
+              )}
+              {v?.status === "ready" &&
+                kind === "video" &&
+                v.has_audio !== false && (
+                  <Link
+                    className="library-tool-row"
+                    to={`/projects/${projectId}/transcriptions?version=${v.id}`}
+                  >
+                    <Captions size={16} />
+                    <span>
+                      {zh ? "转写与编辑字幕" : "Transcribe & edit captions"}
+                    </span>
+                    <ChevronRight size={14} />
+                  </Link>
+                )}
+              <button
+                className="library-tool-row"
+                disabled={item.versions.some((version) =>
+                  ["uploading", "queued", "processing"].includes(
+                    version.status,
+                  ),
+                )}
+                onClick={onUpload}
               >
-                {zh ? "打开镜头" : "Open shot"} →
-              </Link>
-            </p>
-          )}
+                <Upload size={16} />
+                <span>{zh ? "上传新版本" : "Upload new version"}</span>
+                <ChevronRight size={14} />
+              </button>
+            </section>
+          </aside>
         </div>
-      </div>
-    </Modal>
+      </Modal>
+      {annotating && v && (
+        <Modal
+          open
+          title={zh ? "标注与字幕" : "Annotations & subtitles"}
+          width={880}
+          onClose={() => setAnnotating(false)}
+        >
+          <p className="library-annotation-source">
+            {item.name} · v{v.ordinal}
+          </p>
+          <LibraryAnnotation
+            projectId={projectId}
+            versionId={v.id}
+            mediaType={kind}
+            start={startMs}
+            end={endMs}
+            duration={v.duration_ms || 0}
+          />
+        </Modal>
+      )}
+      {enlarged && v?.proxy_hash && (
+        <Lightbox
+          src={blobUrl(projectId, v.proxy_hash)}
+          alt={item.name}
+          filename={v.filename}
+          onClose={() => setEnlarged(false)}
+        />
+      )}
+    </>
   );
 }
 
-function ImpactDialog({
+export function ImpactDialog({
   projectId,
   mediaId,
   onClose,

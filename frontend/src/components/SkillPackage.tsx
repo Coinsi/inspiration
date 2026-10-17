@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useState, type ReactNode } from "react";
@@ -5,7 +7,6 @@ import { SkillOverlay } from "@/components/SkillOverlay";
 import {
   FileText,
   FolderOpen,
-  Search,
   Download,
   Files,
   ChevronRight,
@@ -108,15 +109,13 @@ export function SkillReader({
                 <strong>技能文件</strong>
                 <span>{files.length}</span>
               </div>
-              <label className="knowledge-file-search">
-                <Search size={14} />
-                <input
-                  aria-label="筛选技能文件"
-                  placeholder="筛选文件…"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                />
-              </label>
+              <SearchField
+                className="my-3.5"
+                label="筛选技能文件"
+                placeholder="筛选文件…"
+                value={filter}
+                onValueChange={(value) => setFilter(value)}
+              />
               <nav className="knowledge-file-tree">
                 {directories.map((dir) => (
                   <div key={dir}>
@@ -364,17 +363,19 @@ export function SkillFilesEditor({
     <div className="space-y-3">
       <label className="block text-xs">
         技能分类
-        <select
+        <StudioSelect
           className={`${field} mt-2`}
           value={skill.category ?? "general"}
-          onChange={(e) => onChange({ category: e.target.value })}
+          onValueChange={(selectedValue) =>
+            onChange({ category: selectedValue })
+          }
         >
           {Object.entries(categories).map(([k, v]) => (
             <option key={k} value={k}>
               {v}
             </option>
           ))}
-        </select>
+        </StudioSelect>
       </label>
       <div className="flex justify-between gap-2 text-sm">
         <span>配套文件 · {files.length}/40</span>

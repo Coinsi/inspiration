@@ -23,6 +23,7 @@ class Novel(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    cover_blob_hash: Mapped[str | None] = mapped_column(String(64), ForeignKey("blob.hash"))
     source_format: Mapped[str | None] = mapped_column(String(32))
     original_blob_hash: Mapped[str | None] = mapped_column(String(128), ForeignKey("blob.hash"))
     status: Mapped[VersionStatus] = mapped_column(String(16), default=VersionStatus.draft)
@@ -71,6 +72,7 @@ class Script(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    cover_blob_hash: Mapped[str | None] = mapped_column(String(64), ForeignKey("blob.hash"))
     # 剧本正文:有序的 typed blocks(scene_heading/action/character/dialogue/parenthetical/transition)
     content_blocks: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"

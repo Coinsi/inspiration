@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api, blobUrl, type GenJob, type Generation } from "@/lib/api";
@@ -61,13 +62,16 @@ export function ImageRefiner({
   }, [source, crop, rotate, brightness, contrast]);
   const save = useMutation({
     mutationFn: () =>
-      api.post<GenJob>(`/projects/${projectId}/generations/${generation.id}/refine`, {
-        crop,
-        rotate,
-        scale,
-        brightness,
-        contrast,
-      }),
+      api.post<GenJob>(
+        `/projects/${projectId}/generations/${generation.id}/refine`,
+        {
+          crop,
+          rotate,
+          scale,
+          brightness,
+          contrast,
+        },
+      ),
     onSuccess: (j) => {
       onJob(j.id);
       onClose();
@@ -102,7 +106,12 @@ export function ImageRefiner({
   const outH = source ? Math.round(source.naturalHeight * crop[3] * scale) : 0;
   const oversize = Math.max(outW, outH) > 8192 || outW * outH > 40_000_000;
   return (
-    <Modal open onClose={onClose} title={zh ? "图片精修" : "Refine image"} width={960}>
+    <Modal
+      open
+      onClose={onClose}
+      title={zh ? "图片精修" : "Refine image"}
+      width={960}
+    >
       <p className="mb-4 text-xs text-muted-foreground">
         {zh
           ? "在原图上拖动选择裁剪区域，也可输入比例。保存后生成新版本，原图保留。"
@@ -110,7 +119,9 @@ export function ImageRefiner({
       </p>
       <div className="grid gap-5 md:grid-cols-2">
         <section className="min-w-0 space-y-3">
-          <h3 className="text-sm font-medium">{zh ? "原图 / 裁剪选区" : "Source / crop"}</h3>
+          <h3 className="text-sm font-medium">
+            {zh ? "原图 / 裁剪选区" : "Source / crop"}
+          </h3>
           <div
             className="relative touch-none select-none overflow-hidden rounded-lg border border-border"
             onPointerDown={(e) => {
@@ -123,7 +134,12 @@ export function ImageRefiner({
               const [x, y] = point(e);
               const [ax, ay] = anchor.current;
               if (Math.abs(x - ax) > 0.01 && Math.abs(y - ay) > 0.01)
-                setCrop([Math.min(x, ax), Math.min(y, ay), Math.abs(x - ax), Math.abs(y - ay)]);
+                setCrop([
+                  Math.min(x, ax),
+                  Math.min(y, ay),
+                  Math.abs(x - ax),
+                  Math.abs(y - ay),
+                ]);
             }}
             onPointerUp={() => {
               anchor.current = null;
@@ -155,7 +171,9 @@ export function ImageRefiner({
           </div>
           {error && (
             <p role="alert" className="text-xs text-danger">
-              {zh ? "原图不可读，请检查存储或重新上传。" : "Source unavailable. Check storage or re-upload."}
+              {zh
+                ? "原图不可读，请检查存储或重新上传。"
+                : "Source unavailable. Check storage or re-upload."}
             </p>
           )}
           <div className="grid grid-cols-4 gap-2">
@@ -183,37 +201,44 @@ export function ImageRefiner({
         <section className="min-w-0 space-y-3">
           <h3 className="text-sm font-medium">{zh ? "效果预览" : "Preview"}</h3>
           <div className="flex min-h-40 items-center justify-center overflow-hidden rounded-lg border bg-elevated p-2">
-            <canvas ref={canvas} className="max-h-64 max-w-full object-contain" />
+            <canvas
+              ref={canvas}
+              className="max-h-64 max-w-full object-contain"
+            />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="text-xs">
               {zh ? "顺时针旋转" : "Clockwise rotation"}
-              <select
+              <StudioSelect
                 aria-label={zh ? "旋转角度" : "Rotation"}
                 className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
                 value={rotate}
-                onChange={(e) => setRotate(Number(e.target.value))}
+                onValueChange={(selectedValue) =>
+                  setRotate(Number(selectedValue))
+                }
               >
                 {[0, 90, 180, 270].map((n) => (
                   <option key={n} value={n}>
                     {n}°
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
             <label className="text-xs">
               {zh ? "尺寸倍率" : "Resize scale"}
-              <select
+              <StudioSelect
                 className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
                 value={scale}
-                onChange={(e) => setScale(Number(e.target.value))}
+                onValueChange={(selectedValue) =>
+                  setScale(Number(selectedValue))
+                }
               >
                 {[0.5, 1, 2, 4].map((n) => (
                   <option key={n} value={n}>
                     {n}×
                   </option>
                 ))}
-              </select>
+              </StudioSelect>
             </label>
           </div>
           {[
@@ -228,13 +253,18 @@ export function ImageRefiner({
                 max="2"
                 step=".05"
                 value={value as number}
-                onChange={(e) => (setter as (v: number) => void)(Number(e.target.value))}
+                onChange={(e) =>
+                  (setter as (v: number) => void)(Number(e.target.value))
+                }
                 className="mt-2 block w-full"
               />
             </label>
           ))}
-          <p className={`text-xs ${oversize ? "text-danger" : "text-muted-foreground"}`}>
-            {zh ? "输出" : "Output"}: {rotate % 180 ? outH : outW} × {rotate % 180 ? outW : outH} px · PNG
+          <p
+            className={`text-xs ${oversize ? "text-danger" : "text-muted-foreground"}`}
+          >
+            {zh ? "输出" : "Output"}: {rotate % 180 ? outH : outW} ×{" "}
+            {rotate % 180 ? outW : outH} px · PNG
           </p>
           <p className="text-xs leading-5 text-muted-foreground">
             {zh
@@ -247,7 +277,10 @@ export function ImageRefiner({
         <Button variant="ghost" onClick={reset}>
           {zh ? "重置" : "Reset"}
         </Button>
-        <Button disabled={!source || error || oversize || save.isPending} onClick={() => save.mutate()}>
+        <Button
+          disabled={!source || error || oversize || save.isPending}
+          onClick={() => save.mutate()}
+        >
           {zh ? "保存为新版本" : "Save new variant"}
         </Button>
       </div>

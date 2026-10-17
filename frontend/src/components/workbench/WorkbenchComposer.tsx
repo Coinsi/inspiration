@@ -1,9 +1,11 @@
+import { SelectField } from "@/components/ui/select-field";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUp,
+  Play,
+  ChevronRight,
   Coins,
-  ChevronDown,
   Clapperboard,
   BookOpen,
   Trash2,
@@ -26,13 +28,14 @@ import {
   type Generation,
 } from "@/lib/api";
 import { usePersistentState } from "@/lib/usePersistentState";
+import { WorkPicker } from "@/components/WorkPicker";
 import { useAuth } from "@/lib/auth";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { MediaImage } from "@/components/MediaImage";
-import { MediaVideo } from "@/components/MediaVideo";
-import { MediaPreview } from "@/components/MediaPreview";
-import { JobStatus, ACTIVE_JOBS } from "@/components/JobStatus";
+import { MaterialVideoCover } from "@/components/MaterialVideoCover";
+
+import { JobStatus, ACTIVE_JOBS, JOB_LABEL } from "@/components/JobStatus";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerParameters } from "./ComposerParameters";
 import {
@@ -62,11 +65,6 @@ type Creation = {
   jobs: GenJob[];
   outputs: Generation[];
 };
-const modes = [
-  { id: "image" as const, label: "图片", icon: Image },
-  { id: "video" as const, label: "视频", icon: Film },
-  { id: "text" as const, label: "文字", icon: MessageSquare },
-];
 const mock: ProviderConfig = {
   id: "mock",
   provider_name: "mock",
@@ -86,6 +84,9 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     `workbench.mode.${me?.user.id}.${projectId}`,
     "image",
   );
+  useEffect(() => {
+    if (mode === "text") setMode("image");
+  }, [mode, setMode]);
   const [prompt, setPrompt] = usePersistentState(
     `creative.goal.${projectId}`,
     "",
@@ -113,6 +114,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     [agentOpen, setAgentOpen] = useState(false),
     [offset, setOffset] = useState(0);
   const sending = useRef(false);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [clearedPrompt, setClearedPrompt] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const importId = searchParams.get("reference") || searchParams.get("reuse");
@@ -169,6 +171,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     const next = new URLSearchParams(searchParams);
     next.delete("reference");
     next.delete("reuse");
+    next.set("view", "generate");
     setSearchParams(next, { replace: true });
   }, [
     importId,
@@ -255,6 +258,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           : ""
       : "";
   const payload = {
+    work_id: searchParams.get("work") || null,
     provider,
     request_type: mode,
     prompt_override: prompt.trim(),
@@ -287,9 +291,16 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     },
   });
   const creations = useQuery({
-    queryKey: ["workbench-creations", projectId, offset],
+    queryKey: [
+      "workbench-creations",
+      projectId,
+      searchParams.get("work"),
+      offset,
+    ],
     queryFn: () =>
-      api.get<Creation[]>(`${base}/workbench/creations?offset=${offset}`),
+      api.get<Creation[]>(
+        `${base}/workbench/creations?offset=${offset}${searchParams.get("work") ? `&work_id=${encodeURIComponent(searchParams.get("work")!)}` : ""}`,
+      ),
     refetchInterval: (q) =>
       q.state.data?.some((c) => c.jobs.some((j) => ACTIVE_JOBS.has(j.status)))
         ? 2000
@@ -377,8 +388,69 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     submit.reset();
     quoteMutation.reset();
   };
+  const reuseCreation = (creation: Creation) => {
+    setPrompt(creation.request.prompt_override);
+    setMode(creation.request.request_type);
+    setChoices((v) => ({
+      ...v,
+      [creation.request.request_type]: creation.request.provider,
+    }));
+    promptRef.current?.focus();
+  };
+  const resultCreations = (creations.data || []).filter((c) =>
+    c.outputs.some((g) => g.output_blob_hash),
+  );
+  const taskRecords = (creations.data || []).filter(
+    (c) =>
+      !c.outputs.some((g) => g.output_blob_hash) ||
+      c.jobs[0]?.cost_raw?.warnings?.length,
+  );
+  const activeRecords = taskRecords.filter((c) =>
+    ACTIVE_JOBS.has(c.jobs[0]?.status),
+  );
+  const pastRecords = taskRecords.filter(
+    (c) => !ACTIVE_JOBS.has(c.jobs[0]?.status),
+  );
+  const taskRecord = (c: Creation) => (
+    <details className="composer-task-record" key={c.id}>
+      <summary>
+        <ChevronRight size={14} />
+        <span className="composer-task-title">{c.title}</span>
+        <span className="composer-task-state">
+          {c.jobs[0]?.cost_raw?.warnings?.length
+            ? "参数有提示"
+            : JOB_LABEL[c.jobs[0]?.status] || "等待任务"}
+        </span>
+      </summary>
+      <div className="composer-task-detail">
+        {c.jobs[0] && <JobStatus projectId={projectId} jobId={c.jobs[0].id} />}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          onClick={() => reuseCreation(c)}
+        >
+          <Undo2 size={13} />
+          复用提示词与模型
+        </Button>
+      </div>
+    </details>
+  );
   return (
     <div className="creative-launch workbench-composer">
+      <div className="mb-4">
+        <WorkPicker
+          projectId={projectId}
+          value={searchParams.get("work") || ""}
+          disabled={submit.isPending}
+          onChange={(id) => {
+            setOffset(0);
+            const next = new URLSearchParams(searchParams);
+            id ? next.set("work", id) : next.delete("work");
+            setSearchParams(next);
+          }}
+        />
+      </div>
       {importMessage && (
         <div
           role="status"
@@ -404,6 +476,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           创作想法
         </label>
         <textarea
+          ref={promptRef}
           id="workbench-prompt"
           value={prompt}
           maxLength={6000}
@@ -439,28 +512,26 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
                   <X size={12} />
                 </button>
                 {mode === "video" && (
-                  <select
-                    aria-label={`参考角色 ${r.title}`}
-                    value={r.role}
+                  <SelectField
+                    label={`参考角色 ${r.title}`}
+                    className="composer-reference-role"
+                    value={r.role || "reference"}
                     disabled={busy}
-                    onChange={(e) =>
+                    options={[
+                      { value: "reference", label: "参考图" },
+                      { value: "first_frame", label: "首帧" },
+                      { value: "last_frame", label: "尾帧" },
+                    ]}
+                    onChange={(value) =>
                       setRefs((list) =>
                         list.map((v) =>
                           v.id === r.id
-                            ? {
-                                ...v,
-                                role: e.target
-                                  .value as ComposerReference["role"],
-                              }
+                            ? { ...v, role: value as ComposerReference["role"] }
                             : v,
                         ),
                       )
                     }
-                  >
-                    <option value="reference">参考图</option>
-                    <option value="first_frame">首帧</option>
-                    <option value="last_frame">尾帧</option>
-                  </select>
+                  />
                 )}
               </div>
             ))}
@@ -477,29 +548,27 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
         )}
         <div className="creative-composer-tools">
           <div className="composer-toolbar-options">
-            <label className="composer-mode-select composer-control">
-              {mode === "image" ? (
-                <Image size={19} />
-              ) : mode === "video" ? (
-                <Film size={19} />
-              ) : (
-                <MessageSquare size={19} />
-              )}
-              <span>{modes.find((m) => m.id === mode)?.label}</span>
-              <ChevronDown size={13} />
-              <select
-                aria-label="创作类型"
-                value={mode}
-                disabled={busy}
-                onChange={(e) => chooseMode(e.target.value as Mode)}
-              >
-                {modes.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="创作类型"
+              className="composer-control composer-mode-select"
+              value={mode}
+              disabled={busy}
+              onChange={(value) => chooseMode(value as Mode)}
+              options={[
+                {
+                  value: "image",
+                  label: "图片",
+                  description: "用文字与参考图创作画面",
+                  icon: <Image size={18} />,
+                },
+                {
+                  value: "video",
+                  label: "视频",
+                  description: "生成动态镜头与视频片段",
+                  icon: <Film size={18} />,
+                },
+              ]}
+            />
             <ComposerModelPicker
               models={options}
               value={provider}
@@ -698,7 +767,11 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           <header>
             <h2>最近创作</h2>
             <div className="flex gap-4">
-              <Link to={`${base}/generated`}>AI 生成素材 →</Link>
+              <Link
+                to={`${base}/materials?return=${encodeURIComponent(`${base}/workbench?${searchParams.toString()}`)}`}
+              >
+                全部素材 →
+              </Link>
               <Link to={`${base}/tasks`}>全部任务 →</Link>
             </div>
           </header>
@@ -708,76 +781,110 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
               <Button onClick={() => void creations.refetch()}>重试</Button>
             </p>
           )}
-          <div className="composer-result-grid">
-            {creations.data?.map((c) => (
-              <article
-                key={c.id}
-                className={`composer-result-card ${c.outputs.length ? "has-output" : ""}`}
-              >
-                <p className="composer-result-prompt">{c.title}</p>
-                {c.jobs[0] &&
-                  (c.jobs[0].status === "succeeded" &&
-                  !c.jobs[0].cost_raw?.warnings?.length ? (
-                    <div className="composer-result-status">
-                      <span>已完成</span>
-                      <Link to={`${base}/tasks?job=${c.jobs[0].id}`}>
-                        任务详情 ↗
-                      </Link>
-                    </div>
-                  ) : (
+          {activeRecords.length > 0 && (
+            <div className="composer-active-records" aria-label="正在生成">
+              <h3>正在生成 · {activeRecords.length}</h3>
+              {activeRecords.map((c) => (
+                <div key={c.id}>
+                  <p>{c.title}</p>
+                  {c.jobs[0] && (
                     <JobStatus projectId={projectId} jobId={c.jobs[0].id} />
-                  ))}
-                <div className="composer-outputs">
-                  {c.outputs.map((g) => (
-                    <div key={g.id}>
-                      {g.output_blob_hash &&
-                        (g.output_type === "video" ? (
-                          <MediaVideo
-                            presentation="studio"
-                            src={blobUrl(projectId, g.output_blob_hash)}
-                            label={c.title}
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {resultCreations.length > 0 && (
+            <div className="composer-result-grid">
+              {resultCreations.flatMap((c) =>
+                c.outputs
+                  .filter((g) => g.output_blob_hash)
+                  .map((g) => (
+                    <article key={g.id} className="composer-result-card">
+                      <Link
+                        className="composer-result-cover"
+                        aria-label={`预览${g.output_type === "video" ? "视频" : "图片"}：${c.title}`}
+                        to={`${base}/materials?generation=${g.id}&return=${encodeURIComponent(`${base}/workbench?${searchParams.toString()}`)}`}
+                      >
+                        {g.provider === "mock" ? (
+                          <span className="composer-test-cover">
+                            离线测试占位
+                          </span>
+                        ) : g.output_type === "video" ? (
+                          <MaterialVideoCover
+                            src={blobUrl(projectId, g.output_blob_hash!)}
                           />
                         ) : (
-                          <MediaPreview
-                            src={blobUrl(projectId, g.output_blob_hash)}
-                            label={c.title}
-                            filename={`inspiration-${g.id.slice(0, 8)}`}
+                          <MediaImage
+                            src={blobUrl(projectId, g.output_blob_hash!)}
+                            alt={c.title}
                           />
-                        ))}
-                      <a
-                        href={`${blobUrl(projectId, g.output_blob_hash!)}&download=true`}
-                        download
-                      >
-                        下载
-                      </a>
-                    </div>
-                  ))}
-                </div>
-                <div className="composer-result-actions">
-                  <span>
-                    {c.request.request_type === "video" ? "视频" : "图片"} ·{" "}
-                    {providers.data?.find(
-                      (p) => p.provider_name === c.request.provider,
-                    )?.display_name || c.request.provider}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setPrompt(c.request.prompt_override);
-                      setMode(c.request.request_type);
-                      setChoices((v) => ({
-                        ...v,
-                        [c.request.request_type]: c.request.provider,
-                      }));
-                    }}
-                  >
-                    复用提示词与模型
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+                        )}
+                        <span className="composer-cover-type">
+                          {g.output_type === "video" ? (
+                            <>
+                              <Play size={12} fill="currentColor" />
+                              视频
+                            </>
+                          ) : (
+                            <>
+                              <Image size={12} />
+                              图片
+                            </>
+                          )}
+                        </span>
+                        <span className="composer-cover-open">
+                          查看素材 <ChevronRight size={14} />
+                        </span>
+                      </Link>
+                      <div className="composer-result-caption">
+                        <p className="composer-result-prompt" title={c.title}>
+                          {c.title}
+                        </p>
+                        <div className="composer-result-meta">
+                          <span>
+                            {providers.data?.find(
+                              (p) => p.provider_name === c.request.provider,
+                            )?.display_name || c.request.provider}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            aria-label={`复用提示词与模型：${c.title}`}
+                            onClick={() => reuseCreation(c)}
+                          >
+                            <Undo2 size={13} />
+                            复用
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )),
+              )}
+            </div>
+          )}
+          {!resultCreations.length &&
+            !activeRecords.length &&
+            !creations.error && (
+              <p className="composer-results-empty">
+                这页还没有生成的作品。你可以查看任务记录，调整后继续创作。
+              </p>
+            )}
+          {pastRecords.length > 0 && (
+            <details className="composer-past-records">
+              <summary>
+                <ChevronRight size={14} />
+                <span>生成记录</span>
+                <span className="composer-record-count">
+                  {pastRecords.length}
+                </span>
+                <span className="composer-record-hint">
+                  查看未完成的任务与提示
+                </span>
+              </summary>
+              <div>{pastRecords.map(taskRecord)}</div>
+            </details>
+          )}
           {(offset > 0 || creations.data?.length === 12) && (
             <div className="flex gap-2">
               <Button

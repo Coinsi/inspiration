@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.models.generation import GenerationJob
 from app.modules.generation import jobs, schemas, service
+from app.modules.generation.adoption import Adopt, Selection
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["generation"])
 TRIGGER = require_action("generation.trigger")
@@ -114,7 +115,9 @@ def capabilities(
     db: Session = Depends(get_db, scope="function"),
 ):
     return (
-        service._provider_instance(db, ctx.project.id, name, user_id=ctx.user.id).capabilities().model_dump(mode="json")
+        service._provider_instance(db, ctx.project.id, name, user_id=ctx.user.id)
+        .capabilities()
+        .model_dump(mode="json")
     )
 
 
@@ -434,7 +437,52 @@ def patch_generation(
 @router.post("/generations/{gen_id}/select", response_model=schemas.GenerationOut)
 def select_variant(
     gen_id: uuid.UUID,
+    data: Selection | None = None,
     ctx: ProjectContext = Depends(TRIGGER),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return schemas.GenerationOut.model_validate(service.select_variant(db, ctx, gen_id))
+    from app.modules.generation import adoption, jobs
+
+    g = jobs.source(db, ctx.project.id, gen_id)
+    return schemas.GenerationOut.model_validate(
+        adoption.select_output(
+            db,
+            ctx,
+            g,
+            data.expected_generation_id if data else None,
+            bool(data and "expected_generation_id" in data.model_fields_set),
+        )
+    )
+
+
+@router.get("/adoption-targets")
+def adoption_targets(
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.adoption import destinations
+
+    return destinations(db, ctx.project.id)
+
+
+@router.get("/generations/{gen_id}/usage")
+def generation_usage(
+    gen_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.adoption import usage
+
+    return usage(db, ctx.project.id, gen_id)
+
+
+@router.post("/generations/{gen_id}/adopt", response_model=schemas.GenerationOut)
+def adopt_generation(
+    gen_id: uuid.UUID,
+    data: Adopt,
+    ctx: ProjectContext = Depends(TRIGGER),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.adoption import adopt
+
+    return schemas.GenerationOut.model_validate(adopt(db, ctx, gen_id, data))

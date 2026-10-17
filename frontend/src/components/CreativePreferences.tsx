@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -132,12 +133,12 @@ export default function CreativePreferences({
               ).map(([k, label]) => (
                 <label key={k} className="text-sm">
                   {label}
-                  <select
+                  <StudioSelect
                     aria-label={label + "默认数量"}
                     className={field}
                     value={draft[k]}
-                    onChange={(e) =>
-                      setDraft({ ...draft, [k]: Number(e.target.value) })
+                    onValueChange={(selectedValue) =>
+                      setDraft({ ...draft, [k]: Number(selectedValue) })
                     }
                   >
                     {[1, 2, 3, 4].map((n) => (
@@ -145,7 +146,7 @@ export default function CreativePreferences({
                         {n} 个
                       </option>
                     ))}
-                  </select>
+                  </StudioSelect>
                 </label>
               ))}
             </div>

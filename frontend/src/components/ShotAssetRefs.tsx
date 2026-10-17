@@ -1,3 +1,5 @@
+import { StudioSelect } from "@/components/ui/studio-select";
+import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { X, Check } from "lucide-react";
@@ -96,16 +98,17 @@ export default function ShotAssetRefs({
         ))}
       </div>
       <div className="reference-tools">
-        <input
-          aria-label="搜索参考资产"
+        <SearchField
+          className="flex-1"
+          label="搜索参考资产"
           placeholder="搜索角色、场景或编号…"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onValueChange={(value) => setQuery(value)}
         />
-        <select
+        <StudioSelect
           aria-label="参考资产分类"
           value={type}
-          onChange={(e) => setType(e.target.value)}
+          onValueChange={(selectedValue) => setType(selectedValue)}
         >
           <option value="">全部类型</option>
           {["character", "location", "prop", "costume", "vehicle", "style"].map(
@@ -115,7 +118,7 @@ export default function ShotAssetRefs({
               </option>
             ),
           )}
-        </select>
+        </StudioSelect>
       </div>
       {(refs.error || assets.error || save.error) && (
         <p role="alert" className="text-sm text-danger mb-3">

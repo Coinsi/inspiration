@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { PersonalModelServices } from "./PersonalModelServices";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -472,13 +473,15 @@ function SettingsContent({
               </div>
               <label className="account-language">
                 {zh ? "界面语言" : "Language"}
-                <select
+                <StudioSelect
                   value={lang}
-                  onChange={(e) => setLang(e.target.value as "zh" | "en")}
+                  onValueChange={(selectedValue) =>
+                    setLang(selectedValue as "zh" | "en")
+                  }
                 >
                   <option value="zh">简体中文</option>
                   <option value="en">English</option>
-                </select>
+                </StudioSelect>
               </label>
             </>
           )}

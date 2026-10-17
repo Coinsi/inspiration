@@ -1,3 +1,4 @@
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
@@ -178,32 +179,32 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
             {editing === "new" && (
               <label className="block text-sm">
                 保存为
-                <select
+                <StudioSelect
                   aria-label="提示词类型"
                   className="block w-full mt-2 rounded-lg border bg-bg p-2"
                   value={kind}
-                  onChange={(e) => setKind(e.target.value)}
+                  onValueChange={(selectedValue) => setKind(selectedValue)}
                 >
                   <option value="prompt">完整提示词</option>
                   <option value="fragment">可组合的片段</option>
-                </select>
+                </StudioSelect>
               </label>
             )}
             {kind === "fragment" && (
               <label className="block text-sm">
                 分类
-                <select
+                <StudioSelect
                   aria-label="片段分类"
                   className="block w-full mt-2 rounded-lg border bg-bg p-2"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  onValueChange={(selectedValue) => setCategory(selectedValue)}
                 >
                   {Object.entries(PROMPT_CATEGORIES).map(([key, label]) => (
                     <option key={key} value={key}>
                       {label}
                     </option>
                   ))}
-                </select>
+                </StudioSelect>
               </label>
             )}
             <label className="block text-sm">

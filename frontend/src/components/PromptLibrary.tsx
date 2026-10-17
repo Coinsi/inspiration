@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Copy, Search, Type } from "lucide-react";
+import { ArrowLeft, Copy, Type } from "lucide-react";
 import { api, type Prompt, type Fragment } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { SearchField } from "@/components/ui/search-field";
 
 export const PROMPT_CATEGORIES: Record<string, string> = {
   quality: "画质",
@@ -161,17 +162,12 @@ export function PromptLibrary({
     );
   return (
     <div className="space-y-5">
-      <label className="flex items-center gap-2 border rounded-xl px-4 py-3 bg-card">
-        <Search size={16} className="text-muted-foreground" />
-        <input
-          type="search"
-          aria-label="搜索提示词"
-          placeholder="搜索名称、内容或编号…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="bg-transparent outline-none flex-1 min-w-0 text-sm"
-        />
-      </label>
+      <SearchField
+        label="搜索提示词"
+        placeholder="搜索名称、内容或编号…"
+        value={query}
+        onValueChange={setQuery}
+      />
       <div className="flex flex-wrap gap-2" aria-label="提示词分类">
         {Object.entries({ "": "全部", ...categories }).map(([key, label]) => (
           <button

@@ -443,7 +443,7 @@
   color: hsl(var(--muted));
   min-width: 0;
 }
-.creative-project select {
+.creative-project .studio-select-trigger {
   background: transparent;
   max-width: 260px;
   min-width: 0;
@@ -727,7 +727,7 @@
   .creative-suggestions {
     gap: 6px;
   }
-  .creative-project select {
+  .creative-project .studio-select-trigger {
     max-width: 160px;
   }
 }
@@ -830,7 +830,7 @@
     flex: 1;
     max-width: calc(100% - 165px);
   }
-  .creative-project select {
+  .creative-project .studio-select-trigger {
     width: 100%;
   }
   .creative-project svg {
@@ -1016,12 +1016,12 @@
   padding-top: 16px;
   border-top: 1px solid hsl(var(--border) / 0.65);
 }
-.generation-parameters > select {
+.generation-parameters > .studio-select-trigger {
   max-width: 100%;
   flex: 1;
   min-width: 85px;
 }
-.generation-parameters > select:first-of-type {
+.generation-parameters > .studio-select-trigger:first-of-type {
   flex-basis: 100%;
   height: 38px;
 }

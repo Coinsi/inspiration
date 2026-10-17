@@ -1,3 +1,4 @@
+import { SelectField } from "@/components/ui/select-field";
 import {
   useCreativeDefaults,
   type CreativeDefaults,
@@ -93,7 +94,7 @@ function GenerationPanelContent({
       return false;
     }
   });
-  const [provider, setProvider] = usePersistentState<string>(
+  const [savedProvider, setSavedProvider] = usePersistentState<string>(
     `gen.provider.${projectId}`,
     "mock",
   );
@@ -102,8 +103,30 @@ function GenerationPanelContent({
     queryKey: ["providers", projectId],
     queryFn: () => api.get<ProviderConfig[]>(`${base}/providers`),
   });
+  const [providerOverride, setProviderOverride] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const defaultProvider =
+    providerConfigs?.find(
+      (p) =>
+        p.enabled &&
+        !p.config.hidden_from_catalog &&
+        p.kind === "generation" &&
+        p.config.is_default &&
+        p.config.modality === type,
+    )?.provider_name || "";
+  const provider =
+    targetType === "shot" ? providerOverride || defaultProvider : savedProvider;
+  const setProvider = (value: string) =>
+    targetType === "shot"
+      ? setProviderOverride(value)
+      : setSavedProvider(value);
   useEffect(() => {
-    if (!providerConfigs || defaultModelApplied.current) return;
+    if (
+      targetType === "shot" ||
+      !providerConfigs ||
+      defaultModelApplied.current
+    )
+      return;
     defaultModelApplied.current = true;
     if (hasSavedProvider) return;
     const model = providerConfigs.find(
@@ -132,6 +155,7 @@ function GenerationPanelContent({
   ];
   const { data: caps, error: capsError } = useQuery({
     queryKey: ["capabilities", projectId, provider],
+    enabled: !!provider,
     queryFn: () =>
       api.get<{
         modalities: string[];
@@ -145,6 +169,7 @@ function GenerationPanelContent({
   );
   const singleVideo =
     selectedModel?.config.protocol === "openai_video" ||
+    selectedModel?.config.protocol === "video_v1" ||
     (selectedModel?.config.protocol === "routed" &&
       selectedModel.config.modality === "video");
   useEffect(() => {
@@ -306,7 +331,23 @@ function GenerationPanelContent({
     onError: (e) => toast.push((e as Error).message, "error"),
   });
   const select = useMutation({
-    mutationFn: (id: string) => api.post(`${base}/generations/${id}/select`),
+    mutationFn: async (id: string) => {
+      const previous = gens?.find((g) => g.is_selected);
+      if (
+        previous &&
+        previous.id !== id &&
+        !(await confirm({
+          title: zh ? "更换当前采用版本？" : "Replace selected version?",
+          message: zh
+            ? "旧版本仍会保留，已有剪辑继续使用原画面。"
+            : "The previous version and existing timeline footage will be preserved.",
+        }))
+      )
+        return;
+      return api.post(`${base}/generations/${id}/select`, {
+        expected_generation_id: previous?.id || null,
+      });
+    },
     onSuccess: refresh,
     onError: (e) => toast.push((e as Error).message, "error"),
   });
@@ -396,73 +437,147 @@ function GenerationPanelContent({
           )}
           <fieldset disabled={generate.isPending} className="generation-fields">
             <div className="generation-parameters">
-              <span className="generation-field-title">
-                <SlidersHorizontal size={14} />
-                {zh ? "生成设置" : "Generation settings"}
-              </span>
-              <select
-                aria-label={tr("gen.provider")}
-                className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-                value={provider}
-                onChange={(e) => {
-                  defaultModelApplied.current = true;
-                  setProvider(e.target.value);
-                }}
-                title={tr("gen.provider")}
-              >
-                {!providerOptions.includes(provider) && (
-                  <option value={provider}>
-                    {provider} · {zh ? "不可用" : "Unavailable"}
-                  </option>
-                )}
-                {providerOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {providerConfigs?.find((c) => c.provider_name === p)
-                      ?.channel_name
-                      ? `${providerConfigs.find((c) => c.provider_name === p)?.channel_name} / ${providerConfigs.find((c) => c.provider_name === p)?.display_name}`
-                      : providerConfigs?.find((c) => c.provider_name === p)
-                          ?.display_name ||
-                        PROVIDER_LABEL[p] ||
-                        p}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label={zh ? "生成类型" : "Media type"}
-                className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-              >
-                {(!caps || caps.modalities.includes("image")) && (
-                  <option value="image">{tr("gen.image")}</option>
-                )}
-                {targetType === "shot" && supportsVideo && (
-                  <option value="video">{tr("gen.video")}</option>
-                )}
-              </select>
-              <select
-                aria-label={zh ? "生成数量" : "Output count"}
-                className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-                value={count}
-                onChange={(e) => setCount(Number(e.target.value))}
-              >
-                {(singleVideo ? [1] : [1, 2, 3, 4]).map((n) => (
-                  <option key={n} value={n}>
-                    {n} {tr("gen.count")}
-                  </option>
-                ))}
-              </select>
-              {targetType === "asset" && (
-                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={useRefs}
-                    onChange={(e) => setUseRefs(e.target.checked)}
-                    className="accent-[var(--primary)]"
+              {targetType === "shot" && (
+                <div className="generation-default-summary">
+                  <div>
+                    <span>
+                      {providerOverride
+                        ? zh
+                          ? "本次使用"
+                          : "This generation"
+                        : zh
+                          ? "沿用默认模型"
+                          : "Default model"}
+                    </span>
+                    <strong>
+                      {selectedModel?.display_name ||
+                        (provider
+                          ? PROVIDER_LABEL[provider] || provider
+                          : zh
+                            ? "尚未设置默认模型"
+                            : "No default model")}
+                    </strong>
+                    <small>
+                      {count}{" "}
+                      {type === "video"
+                        ? zh
+                          ? "个视频"
+                          : "videos"
+                        : zh
+                          ? "张图片"
+                          : "images"}
+                    </small>
+                  </div>
+                  <SelectField
+                    label={zh ? "生成内容" : "Generate"}
+                    value={type}
+                    options={[
+                      { value: "image", label: zh ? "图片" : "Image" },
+                      { value: "video", label: zh ? "视频" : "Video" },
+                    ]}
+                    onChange={(value) => {
+                      setProviderOverride("");
+                      setType(value);
+                    }}
                   />
-                  {tr("gen.useRefs")}
-                </label>
+                  <button
+                    type="button"
+                    className="studio-link text-xs"
+                    aria-expanded={settingsOpen}
+                    onClick={() => setSettingsOpen(!settingsOpen)}
+                  >
+                    {settingsOpen
+                      ? zh
+                        ? "收起调整"
+                        : "Hide settings"
+                      : zh
+                        ? "本次调整"
+                        : "Adjust this time"}
+                  </button>
+                  {(providerOverride || settingsOpen) && (
+                    <button
+                      type="button"
+                      className="studio-link text-xs"
+                      onClick={() => {
+                        setProviderOverride("");
+                        setControls({});
+                        setCount(
+                          type === "video" && singleVideo
+                            ? 1
+                            : (defaults?.shot_count ?? 3),
+                        );
+                      }}
+                    >
+                      {zh ? "恢复默认" : "Use default"}
+                    </button>
+                  )}
+                  {!provider && (
+                    <Link
+                      className="studio-link text-xs"
+                      to={`${base}/settings?section=channels`}
+                    >
+                      {zh ? "设置默认模型 →" : "Set a default model →"}
+                    </Link>
+                  )}
+                </div>
               )}
+              <div
+                className={
+                  targetType === "shot" && !settingsOpen
+                    ? "hidden"
+                    : "generation-settings-fields grid gap-2"
+                }
+                hidden={targetType === "shot" && !settingsOpen}
+              >
+                <span className="generation-field-title">
+                  <SlidersHorizontal size={14} />
+                  {zh ? "生成设置" : "Generation settings"}
+                </span>
+                <SelectField
+                  label={tr("gen.provider")}
+                  value={provider}
+                  onChange={(value) => {
+                    defaultModelApplied.current = true;
+                    setProvider(value);
+                  }}
+                  options={providerOptions.map((p) => ({
+                    value: p,
+                    label:
+                      providerConfigs?.find((c) => c.provider_name === p)
+                        ?.display_name ||
+                      PROVIDER_LABEL[p] ||
+                      p,
+                  }))}
+                />
+                {targetType === "asset" && (
+                  <SelectField
+                    label={zh ? "生成类型" : "Media type"}
+                    value={type}
+                    onChange={setType}
+                    options={[{ value: "image", label: tr("gen.image") }]}
+                  />
+                )}
+                <SelectField
+                  label={zh ? "生成数量" : "Output count"}
+                  value={String(count)}
+                  onChange={(value) => setCount(Number(value))}
+                  options={(singleVideo ? [1] : [1, 2, 3, 4]).map((n) => ({
+                    value: String(n),
+                    label: `${n} ${tr("gen.count")}`,
+                  }))}
+                />
+                {targetType === "asset" && (
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={useRefs}
+                      onChange={(e) => setUseRefs(e.target.checked)}
+                      className="accent-[var(--primary)]"
+                    />
+                    {tr("gen.useRefs")}
+                  </label>
+                )}
+              </div>
             </div>
 
             <div className="generation-prompt-fields">
@@ -564,22 +679,24 @@ function GenerationPanelContent({
               {type === "image" && caps?.features.includes("img2img") && (
                 <label className="block text-xs">
                   {zh ? "参考已有图片进行 AI 重绘" : "AI edit source"}
-                  <select
-                    className="mt-1 h-9 w-full rounded-md border bg-bg px-2"
+                  <SelectField
+                    label={zh ? "重绘参考" : "Edit source"}
                     value={sourceId}
-                    onChange={(e) => setSourceId(e.target.value)}
-                  >
-                    <option value="">{zh ? "不指定" : "None"}</option>
-                    {gens
-                      ?.filter(
-                        (g) => g.output_type === "image" && g.output_blob_hash,
-                      )
-                      .map((g, i) => (
-                        <option key={g.id} value={g.id}>
-                          {zh ? "图片" : "Image"} {i + 1} · {g.id.slice(0, 8)}
-                        </option>
-                      ))}
-                  </select>
+                    onChange={setSourceId}
+                    options={[
+                      { value: "", label: zh ? "不指定" : "None" },
+                      ...(gens || [])
+                        .filter(
+                          (g) =>
+                            g.output_type === "image" && g.output_blob_hash,
+                        )
+                        .map((g, i) => ({
+                          value: g.id,
+                          label: `${zh ? "候选图片" : "Candidate"} ${i + 1}`,
+                        })),
+                    ]}
+                  />
+
                   {reference?.output_blob_hash && (
                     <div className="generation-reference-preview">
                       <div className="h-16 w-24 shrink-0 overflow-hidden rounded-lg">
@@ -613,7 +730,13 @@ function GenerationPanelContent({
                 !!caps?.param_schema.size ||
                 !!caps?.param_schema.quality) && (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div
+                    className={
+                      targetType === "shot" && !settingsOpen
+                        ? "hidden"
+                        : "grid grid-cols-1 gap-2 sm:grid-cols-3"
+                    }
+                  >
                     {(type === "image"
                       ? ["size", "quality"]
                       : singleVideo
@@ -632,8 +755,8 @@ function GenerationPanelContent({
                                 resolution: "清晰度",
                               }[name]
                             : name}
-                          <select
-                            aria-label={
+                          <SelectField
+                            label={
                               zh
                                 ? {
                                     duration: "时长（秒）",
@@ -641,40 +764,38 @@ function GenerationPanelContent({
                                     quality: "图片质量",
                                     aspect_ratio: "画面比例",
                                     resolution: "清晰度",
-                                  }[name]
+                                  }[name] || name
                                 : name
                             }
-                            className="mt-1 h-9 w-full rounded-md border bg-bg px-2 disabled:opacity-50"
                             disabled={!values.length}
-                            value={controls[name] ?? ""}
-                            onChange={(e) =>
+                            value={String(controls[name] ?? "")}
+                            onChange={(value) =>
                               setControls((c) => {
-                                const n = { ...c };
-                                if (!e.target.value) delete n[name];
+                                const next = { ...c };
+                                if (!value) delete next[name];
                                 else
-                                  n[name] =
-                                    name === "duration"
-                                      ? Number(e.target.value)
-                                      : e.target.value;
-                                return n;
+                                  next[name] =
+                                    name === "duration" ? Number(value) : value;
+                                return next;
                               })
                             }
-                          >
-                            <option value="">
-                              {values.length
-                                ? zh
-                                  ? "供应商默认"
-                                  : "Provider default"
-                                : zh
-                                  ? "未接入"
-                                  : "Unavailable"}
-                            </option>
-                            {values.map((v) => (
-                              <option key={v} value={v}>
-                                {v}
-                              </option>
-                            ))}
-                          </select>
+                            options={[
+                              {
+                                value: "",
+                                label: values.length
+                                  ? zh
+                                    ? "默认"
+                                    : "Default"
+                                  : zh
+                                    ? "暂不支持"
+                                    : "Unavailable",
+                              },
+                              ...values.map((v) => ({
+                                value: String(v),
+                                label: String(v),
+                              })),
+                            ]}
+                          />
                         </label>
                       );
                     })}
@@ -691,45 +812,33 @@ function GenerationPanelContent({
                               ? "首帧图片"
                               : "尾帧图片"
                             : (feature as string)}
-                          <select
-                            aria-label={
+                          <SelectField
+                            label={
                               zh
                                 ? feature === "first_frame"
                                   ? "首帧图片"
                                   : "尾帧图片"
                                 : (feature as string)
                             }
-                            className="mt-1 h-9 w-full rounded-md border bg-bg px-2 disabled:opacity-50"
                             disabled={
                               !caps?.features.includes(feature as string)
                             }
                             value={value as string}
-                            onChange={(e) =>
-                              (setter as (v: string) => void)(e.target.value)
-                            }
-                          >
-                            <option value="">
-                              {caps?.features.includes(feature as string)
-                                ? zh
-                                  ? "不指定"
-                                  : "None"
-                                : zh
-                                  ? "供应商未接入"
-                                  : "Unavailable"}
-                            </option>
-                            {gens
-                              ?.filter(
-                                (g) =>
-                                  g.output_type === "image" &&
-                                  g.output_blob_hash,
-                              )
-                              .map((g, i) => (
-                                <option key={g.id} value={g.id}>
-                                  {zh ? "图片" : "Image"} {i + 1} ·{" "}
-                                  {g.id.slice(0, 8)}
-                                </option>
-                              ))}
-                          </select>
+                            onChange={setter as (v: string) => void}
+                            options={[
+                              { value: "", label: zh ? "不指定" : "None" },
+                              ...(gens || [])
+                                .filter(
+                                  (g) =>
+                                    g.output_type === "image" &&
+                                    g.output_blob_hash,
+                                )
+                                .map((g, i) => ({
+                                  value: g.id,
+                                  label: `${zh ? "候选图片" : "Candidate"} ${i + 1}`,
+                                })),
+                            ]}
+                          />
                         </label>
                       ))}
                     </div>
@@ -846,7 +955,7 @@ function GenerationPanelContent({
             </span>
             <div>
               <h3>
-                {zh ? "作品与版本" : "Results & versions"}{" "}
+                {zh ? "候选与采用版本" : "Candidates & selected version"}{" "}
                 <span className="text-xs font-normal text-faint">
                   {gens?.length ?? "—"}
                 </span>
@@ -857,7 +966,7 @@ function GenerationPanelContent({
                     ? "预览、比较，选择最合适的那一版。"
                     : "Preview, compare and choose the right version."
                   : zh
-                    ? "预览作品，选择最合适的那一版。"
+                    ? "新结果先作为候选；采用后成为当前画面，旧版本仍保留。"
                     : "Preview and choose the right version."}
               </p>
             </div>
@@ -973,7 +1082,12 @@ function GenerationPanelContent({
                             className="aspect-square w-full bg-elevated object-contain"
                           />
                           <p className="text-xs text-muted-foreground">
-                            {g.provider} · {g.id.slice(0, 8)}
+                            {g.provider === "library"
+                              ? zh
+                                ? "来自素材库"
+                                : "From library"
+                              : g.provider}{" "}
+                            · {g.id.slice(0, 8)}
                             {g.input_refs?.source_generation_id
                               ? ` · ${zh ? "来源" : "Source"} ${g.input_refs.source_generation_id.slice(0, 8)}`
                               : ""}
@@ -1039,7 +1153,11 @@ function GenerationPanelContent({
                           ? zh
                             ? "测试素材"
                             : "Test media"
-                          : g.provider}
+                          : g.provider === "library"
+                            ? zh
+                              ? "来自素材库"
+                              : "From library"
+                            : g.provider}
                       </span>
                       <span>{g.id.slice(0, 8)}</span>
                     </div>
