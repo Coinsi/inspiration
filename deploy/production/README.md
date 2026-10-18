@@ -1,6 +1,6 @@
 # 4 核 / 4GB 单机部署
 
-独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。原文件使用 MinIO 对象存储，API 和单并发 Celery worker 共用持久暂存/导出目录；PostgreSQL、Redis AOF、MinIO 各有独立卷。网站发布 HTTP 80，MinIO 的 9000/9001 仅监听宿主回环地址，不影响已有 1Panel。
+独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。原文件使用 MinIO 对象存储，API 和单并发 Celery worker 共用持久暂存/导出目录；PostgreSQL、Redis AOF、MinIO 各有独立卷。项目默认只发布 `127.0.0.1:18080`，公网 80/443 由 1Panel 的 OpenResty 管理；MinIO 的 9000/9001 仅监听宿主回环地址。
 
 MinIO 由 GitHub 从官方源码固定提交 `7aac2a2c5b7c882e68c1ce017d8256be2feea27f` 构建，不拉取已失效的旧 MinIO 镜像。构建层通过 GitHub Actions 缓存，普通业务更新复用编译结果；源码和许可证来源记录在镜像标签及 `/usr/share/doc/minio/LICENSE`。MinIO 内存上限 512MiB，Go 软内存目标 384MiB；需按实际上传负载观察。
 
@@ -16,7 +16,13 @@ GitHub 构建主 API、前端和 MinIO 三个镜像，将镜像与生产 Compose
 
 ## 运行与更新
 
-入口为 `http://服务器IP`。首次安装不创建 demo，也不自动创建正式用户；通过服务器中的应用代码创建个人账号后，可执行 `python -m app.modules.website.admin grant 用户名` 授予平台管理权限。公网注册接口在生产 Nginx 中暂时关闭。
+先在 1Panel 安装 OpenResty 并创建反向代理网站：域名 `coinisi.com`、代理地址 `http://127.0.0.1:18080`。参考 `openresty-site.conf.example`，保留 1Panel 生成的证书、ACME 和日志配置，设置 260MiB 请求上限、300 秒代理超时、关闭请求/响应缓冲，并覆盖转发客户端 IP 和协议。项目内部 Nginx 只信任回环及 Docker 默认 172.16.0.0/12 的代理来源；使用自定义 Docker 子网时应相应调整。项目不负责重启或重写面板管理的 OpenResty 配置。
+
+旧版本从公网 80 直出切换时，先确认 OpenResty 安装准备与回退路径，再设置私有 runtime.env 的 `WEB_BIND=127.0.0.1`、`WEB_PORT=18080` 并重建 web 服务释放 80。不要在 OpenResty 已占用 80 后把项目重新改回直出。后续 GitHub 发布会继续使用内部端口，不争用 OpenResty 的 80/443。
+
+域名 A 记录指向服务器公网 IP；修复错误的 NS/解析区以及旧 AAAA 记录后再在面板申请 HTTPS 证书。上线前可以通过 IP 或本机 Host 覆盖验证代理，域名尚未正确解析时不能宣称 HTTPS 已完成。
+
+首次安装不创建 demo，也不自动创建正式用户；通过服务器中的应用代码创建个人账号后，可执行 `python -m app.modules.website.admin grant 用户名` 授予平台管理权限。公网注册接口在生产 Nginx 中暂时关闭。
 
 每次升级先加载新镜像，等待基础服务健康，再停止应用服务并创建数据库备份，然后运行数据库迁移、启动新应用并等待就绪。升级期间有短暂停机，正在运行的任务应提前结束；120 秒优雅退出不能保证任意长任务完成。迁移或健康检查失败会标记 GitHub 部署失败，不自动恢复数据库，也不宣称已经回滚。检查 `/opt/inspiration/backups`、容器日志和数据库版本后再决定恢复方式。
 

@@ -99,7 +99,8 @@ services:
 
   web:
     image: inspiration-web:${RELEASE:?RELEASE is required}
-    ports: ['80:80']
+    # OpenResty owns the public 80/443 ports. Do not expose this backend publicly.
+    ports: ['${WEB_BIND:-127.0.0.1}:${WEB_PORT:-18080}:80']
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     mem_limit: 64m
