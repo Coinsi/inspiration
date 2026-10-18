@@ -31,18 +31,47 @@ export function TimelineVisuals({
 }) {
   const zh = useI18n().lang === "zh";
   const [addError, setAddError] = useState("");
-  const [shot, setShot] = useState("");
+  const [shot, setShot] = useState("__timeline");
   const [generation, setGeneration] = useState("");
   const total = timelineDuration(content.items),
     visuals = content.visuals;
   const current = visuals.find((v) => v.id === selected) || visuals[0];
+  const timelineSources = [
+    ...new Set(
+      content.items
+        .map(
+          (c) =>
+            c.generation_id ||
+            shots.find((s) => s.id === c.shot_id)?.selected_generation_id,
+        )
+        .filter(Boolean),
+    ),
+  ] as string[];
+  const sourceName = (id: string) => {
+    const clip = content.items.find(
+      (c) =>
+        c.generation_id === id ||
+        shots.find((s) => s.id === c.shot_id)?.selected_generation_id === id,
+    );
+    return (
+      clip?.note ||
+      shots.find((s) => s.id === clip?.shot_id)?.title ||
+      "叠加画面"
+    );
+  };
   const sources = useQuery({
-    queryKey: ["gens", "shot", shot],
+    queryKey: ["overlay-sources", projectId, shot, timelineSources],
     enabled: !!shot,
     queryFn: () =>
-      api.get<Generation[]>(
-        `/projects/${projectId}/generations?target_type=shot&target_id=${shot}`,
-      ),
+      shot === "__timeline"
+        ? Promise.all(
+            timelineSources.map((id) =>
+              api.get<Generation>(`/projects/${projectId}/generations/${id}`),
+            ),
+          )
+        : api.get<Generation[]>(
+            `/projects/${projectId}/generations?target_type=shot&target_id=${shot}`,
+          ),
   });
   const candidate = sources.data?.find((g) => g.id === generation);
   const info = useQuery({
@@ -88,7 +117,9 @@ export function TimelineVisuals({
       id: crypto.randomUUID(),
       generation_id: generation,
       name:
-        shots.find((s) => s.id === shot)?.title ||
+        (shot === "__timeline"
+          ? sourceName(generation)
+          : shots.find((s) => s.id === shot)?.title) ||
         (zh ? "叠加画面" : "Overlay"),
       track,
       start_ms: start,
@@ -163,6 +194,7 @@ export function TimelineVisuals({
           <option value="">
             {zh ? "选择素材所在镜头" : "Choose a source shot"}
           </option>
+          <option value="__timeline">本次剪辑的素材</option>
           {shots.map((s) => (
             <option key={s.id} value={s.id}>
               {s.title || s.code}
@@ -198,7 +230,10 @@ export function TimelineVisuals({
                   : zh
                     ? "视频"
                     : "Video"}{" "}
-                {i + 1} · {g.id.slice(0, 8)}
+                {i + 1} ·{" "}
+                {shot === "__timeline"
+                  ? sourceName(g.id)
+                  : g.input_refs?.original_prompt?.slice(0, 30) || "候选画面"}
               </option>
             ))}
         </StudioSelect>

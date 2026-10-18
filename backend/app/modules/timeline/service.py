@@ -64,20 +64,31 @@ def _replace_items(db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, ite
     from app.modules.generation.jobs import source, validate_target
 
     for it in items:
-        validate_target(db, ctx.project.id, "shot", it.shot_id)
+        if it.shot_id:
+            validate_target(db, ctx.project.id, "shot", it.shot_id)
         if it.generation_id:
             g = source(db, ctx.project.id, it.generation_id)
             if g.output_type not in ("image", "video"):
                 raise CapabilityUnsupported("画面片段仅支持图片或视频")
-            if g.target_type != "shot" or g.target_id != it.shot_id:
+            if it.shot_id and (g.target_type != "shot" or g.target_id != it.shot_id):
                 raise CapabilityUnsupported("素材不属于该镜头")
         if it.out_point_ms and it.out_point_ms <= it.in_point_ms:
             raise CapabilityUnsupported("出点必须晚于入点")
-    db.query(TimelineItem).filter(TimelineItem.timeline_id == t.id).delete()
+    existing = {it.id: it for it in list_items(db, ctx.project.id, t.id)}
+    ids = [it.id for it in items if it.id]
+    if len(ids) != len(set(ids)):
+        raise CapabilityUnsupported("片段标识不能重复")
+    for item_id in ids:
+        other = db.get(TimelineItem, item_id)
+        if other and other.timeline_id != t.id:
+            raise Conflict("片段不属于该时间线")
     created = []
     for i, it in enumerate(items):
-        ti = TimelineItem(
-            timeline_id=t.id,
+        ti = existing.pop(it.id, None) if it.id else None
+        if ti is None:
+            ti = TimelineItem(id=it.id or uuid.uuid4(), timeline_id=t.id)
+            db.add(ti)
+        values = dict(
             shot_id=it.shot_id,
             generation_id=it.generation_id or validate_target(db, ctx.project.id, "shot", it.shot_id).selected_generation_id,
             ordinal=i,
@@ -87,8 +98,11 @@ def _replace_items(db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, ite
             transition=it.transition,
             note=it.note,
         )
-        db.add(ti)
+        for key, value in values.items():
+            setattr(ti, key, value)
         created.append(ti)
+    for removed in existing.values():
+        db.delete(removed)
     db.flush()
     return created
 
@@ -169,7 +183,7 @@ def finalize_cut(db: Session, ctx: ProjectContext, cut_id: uuid.UUID) -> Baselin
     )
     seen = set()
     for it in items:
-        if it.shot_id in seen:
+        if not it.shot_id or it.shot_id in seen:
             continue
         seen.add(it.shot_id)
         shot = db.get(Shot, it.shot_id)

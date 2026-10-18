@@ -66,6 +66,8 @@ class Tool:
     description: str
     schema: type[BaseModel]
     review: bool = False
+    group: str = "project"
+    version: int = 1
 
 
 CATALOG = {
@@ -111,15 +113,34 @@ CATALOG = {
 }
 
 
-def catalogue():
+_HANDLERS = {}
+_REVIEW_HANDLERS = {}
+
+
+def register(tool, handler, review_handler=None):
+    """Trusted application plugins only; callers cannot install arbitrary code."""
+    if tool.name in CATALOG or tool.version < 1 or not callable(handler):
+        raise ValueError("Tool identity already registered or invalid")
+    if tool.review != (review_handler is not None):
+        raise ValueError("Review tools require an explicit adoption handler")
+    CATALOG[tool.name] = tool
+    _HANDLERS[tool.name] = handler
+    if review_handler is not None:
+        _REVIEW_HANDLERS[tool.name] = review_handler
+
+
+def catalogue(group=None):
     return [
         {
             "name": t.name,
             "description": t.description,
             "arguments": t.schema.model_json_schema(),
             "requires_review": t.review,
+            "group": t.group,
+            "version": t.version,
         }
         for t in CATALOG.values()
+        if group is None or t.group == group
     ]
 
 
@@ -160,6 +181,10 @@ def object_state(db, ctx, args, lock=False):
 
 def execute(db, ctx, run, name, args):
     tool, a = parse(name, args)
+    if name in _HANDLERS:
+        from fastapi.encoders import jsonable_encoder
+
+        return jsonable_encoder(_HANDLERS[name](db, ctx, run, a))
     if name in ("skill.load", "skill.read_file"):
         skill = next((s for s in (run.skill_snapshot or []) if s["id"] == str(a.id)), None)
         if not skill:
@@ -299,6 +324,8 @@ def generation_input(a):
 def apply_review(db, ctx, run, step):
     name = step["tool"]
     _, a = parse(name, step["arguments"])
+    if name in _REVIEW_HANDLERS:
+        return _REVIEW_HANDLERS[name](db, ctx, run, a, step["result"])
     scoped(run, a)
     adapter, state = object_state(db, ctx, a, True)
     if fingerprint(state) != step["result"]["expected"]:
@@ -316,3 +343,8 @@ def apply_review(db, ctx, run, step):
             db, ctx, a.target_type, a.target_id, generation_input(a), defer_dispatch=True
         )
     raise CapabilityUnsupported("此工具没有可批准的修改")
+
+
+from app.modules.engineering.tools import register_tools  # noqa: E402
+
+register_tools(register, Tool)

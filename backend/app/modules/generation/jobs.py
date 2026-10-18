@@ -39,8 +39,10 @@ def validate_target(db, project_id, target_type, target_id):
     from app.models.shot import Shot
     from app.models.timeline import Timeline
     from app.models.creation import Creation
+    from app.models.work import CreativeWork
 
-    cls = {"shot": Shot, "asset": Asset, "timeline": Timeline, "creation": Creation}.get(target_type)
+    cls = {"shot": Shot, "asset": Asset, "timeline": Timeline, "creation": Creation,
+           "work": CreativeWork}.get(target_type)
     target = db.get(cls, target_id) if cls else None
     if target is None or target.project_id != project_id or getattr(target, "deleted_at", None):
         raise NotFound("目标不存在")
@@ -89,6 +91,16 @@ def dispatch(db, job):
         **(job.cost_raw or {}),
         "executor": "eager" if settings.celery_eager else settings.generation_executor,
     }
+    from app.modules.engineering import delivery
+
+    if delivery.eligible(job):
+        delivery.enqueue(db, job)
+        db.commit()
+        if settings.celery_eager:
+            execute(db, job.id)
+        # Normal workers publish from the durable outbox, including after restart.
+        db.refresh(job)
+        return job
     db.commit()
     if settings.celery_eager:
         execute(db, job.id)
@@ -127,6 +139,11 @@ def recover_local():
         )
         pending = []
         for job in rows:
+            from app.models.engineering import EngineeringDelivery
+            from app.modules.engineering import delivery
+
+            if delivery.eligible(job) and db.get(EngineeringDelivery, job.id):
+                continue  # Durable dispatcher and expiring ownership handle this job.
             if job.status == "pending":
                 pending.append(job.id)
             else:
@@ -137,7 +154,7 @@ def recover_local():
             pool.submit(_local, job_id)
 
 
-def local_job(db, ctx, target_type, target_id, operation, snapshot, output_type):
+def local_job(db, ctx, target_type, target_id, operation, snapshot, output_type, *, defer=False):
     validate_target(db, ctx.project.id, target_type, target_id)
     job = GenerationJob(
         project_id=ctx.project.id,
@@ -167,7 +184,7 @@ def local_job(db, ctx, target_type, target_id, operation, snapshot, output_type)
         target_id=target_id,
         detail={"job": str(job.id)},
     )
-    return dispatch(db, job)
+    return job if defer else dispatch(db, job)
 
 
 def refine(db, ctx, gen_id, options):
@@ -198,32 +215,40 @@ def refine(db, ctx, gen_id, options):
     )
 
 
-def render_timeline(db, ctx, timeline_id, options):
+def timeline_render_snapshot(db, ctx, timeline_id, revision=None):
     from app.modules.timeline import editing
-    from app.modules.timeline.service import list_items
+    from app.modules.timeline.schemas import TimelineDocumentIn
 
     timeline = editing.lock(db, ctx.project.id, timeline_id)
-    if options.revision is not None and options.revision != timeline.revision:
+    if revision is not None and revision != timeline.revision:
         raise Conflict("时间线已修改，请重新载入后再导出")
 
-    items = list_items(db, ctx.project.id, timeline_id)
+    data = TimelineDocumentIn.model_validate(editing.document(db, ctx.project.id, timeline_id))
+    return document_render_snapshot(db, ctx, timeline_id, data)[1]
+
+
+def document_render_snapshot(db, ctx, timeline_id, data):
+    from app.modules.timeline import editing
+
+    data, cues, audio, visuals = editing.prepare_document(db, ctx, timeline_id, data)
     clips = []
-    for item in items:
-        shot = validate_target(db, ctx.project.id, "shot", item.shot_id)
-        gen_id = item.generation_id or shot.selected_generation_id
+    for item in data.items:
+        shot = validate_target(db, ctx.project.id, "shot", item.shot_id) if item.shot_id else None
+        gen_id = item.generation_id or (shot.selected_generation_id if shot else None)
         if not gen_id:
-            raise CapabilityUnsupported(f"镜头 {shot.code} 尚未选择素材")
+            raise CapabilityUnsupported("片段尚未选择素材")
         g = source(db, ctx.project.id, gen_id)
+        item.generation_id = g.id
         if g.output_type not in ("image", "video"):
             raise CapabilityUnsupported("画面片段仅支持图片或视频")
-        if g.target_type != "shot" or g.target_id != shot.id:
+        if shot and (g.target_type != "shot" or g.target_id != shot.id):
             raise CapabilityUnsupported("素材不属于该镜头")
         duration = (item.out_point_ms - item.in_point_ms) if item.out_point_ms else item.duration_ms
         if duration <= 0:
             raise CapabilityUnsupported("请为每个片段设置正数时长或有效的出点")
         clips.append(
             {
-                "shot_id": str(shot.id),
+                "shot_id": str(shot.id) if shot else None,
                 "generation_id": str(g.id),
                 "blob_hash": g.output_blob_hash,
                 "output_type": g.output_type,
@@ -240,6 +265,19 @@ def render_timeline(db, ctx, timeline_id, options):
         raise CapabilityUnsupported(str(exc)) from exc
     if not clips or len(clips) > 100 or total > 1_800_000:
         raise CapabilityUnsupported("请选择 1–100 段素材，总时长不超过 30 分钟")
+    return data.model_dump(mode="json"), {
+        "clips": clips,
+        "tracks": {
+            "timeline_revision": data.revision,
+            "subtitles": cues,
+            "audio": [{**a.model_dump(mode="json"), "blob_hash": blob.hash} for a, blob in audio],
+            "visuals": visuals,
+        },
+    }
+
+
+def render_timeline(db, ctx, timeline_id, options):
+    snapshot = timeline_render_snapshot(db, ctx, timeline_id, options.revision)
     return local_job(
         db,
         ctx,
@@ -247,8 +285,8 @@ def render_timeline(db, ctx, timeline_id, options):
         timeline_id,
         "render",
         {
-            "clips": clips,
-            "options": {**options.model_dump(), **editing.render_tracks(db, ctx, timeline_id)},
+            "clips": snapshot["clips"],
+            "options": {**options.model_dump(), **snapshot["tracks"]},
         },
         "video",
     )
@@ -382,8 +420,12 @@ def execute(db, job_id):
     if not job or job.status != "pending":
         db.rollback()
         return
+    from app.modules.engineering import delivery
+
+    lease_token = delivery.claim(db, job) if delivery.eligible(job) else None
     event(job, "submitted", "正在准备输入")
     db.commit()
+    stop_heartbeat = None
     snap = copy.deepcopy(job.input_snapshot)
     project_id, provider_name = job.project_id, job.provider
     db.commit()
@@ -393,6 +435,7 @@ def execute(db, job_id):
             return (
                 check.scalar(select(GenerationJob.status).where(GenerationJob.id == job_id))
                 == "canceled"
+                or not delivery.owned(check, job_id, lease_token)
             )
 
     files = ExitStack()
@@ -416,6 +459,8 @@ def execute(db, job_id):
             raise ValueError("无法读取源文件，请检查对象存储服务或重新上传素材") from exc
 
     try:
+        if lease_token:
+            stop_heartbeat = delivery.heartbeat(job_id, lease_token, SessionLocal)
         from app.modules.generation.service import _materialize_references, _provider_instance
 
         validate_target(db, project_id, job.target_type, job.target_id)
@@ -442,7 +487,7 @@ def execute(db, job_id):
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if job.status == "canceled":
+        if job.status == "canceled" or not delivery.owned(db, job_id, lease_token):
             db.rollback()
             return
         event(
@@ -451,6 +496,8 @@ def execute(db, job_id):
             {
                 "refine": "正在处理图片",
                 "render": "正在合成 MP4",
+                "engineering_image": "正在合成工程图像",
+                "engineering_render": "正在渲染工程内容",
                 "video_frames": "正在提取视频帧",
                 "video_audio": "正在提取音轨",
                 "video_trim": "正在导出视频片段",
@@ -462,6 +509,7 @@ def execute(db, job_id):
         cost_raw = {}
         warnings = []
         media_details = []
+        output_mimes = []
         if operation == "refine":
             outputs = [
                 (
@@ -469,6 +517,13 @@ def execute(db, job_id):
                     "image",
                 )
             ]
+        elif operation in ("engineering_image", "engineering_render"):
+            from app.modules.engineering import executors
+
+            outputs = [files.enter_context(executors.execute(
+                snap["engineering_plan"], read_blob, disk_blob, canceled
+            ))]
+            output_mimes = [executors.resolve(snap["engineering_plan"]["executor"]).mime]
         elif operation == "render":
             outputs = [
                 (
@@ -559,6 +614,7 @@ def execute(db, job_id):
                 (cas.put_file if isinstance(data, Path) else cas.put_bytes)(
                     db,
                     data,
+                    output_mimes[index] if index < len(output_mimes) else
                     {"video": "video/mp4", "image": "image/png", "audio": "audio/mp4"}[typ],
                     **{
                         name: media_details[index][name]
@@ -576,7 +632,7 @@ def execute(db, job_id):
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if job.status == "canceled":
+        if job.status == "canceled" or not delivery.owned(db, job_id, lease_token):
             db.rollback()
             return
         points = (
@@ -625,6 +681,16 @@ def execute(db, job_id):
                             else {}
                         ),
                         "operation": operation,
+                        **({"engineering_plan": {
+                            "executor": snap["engineering_plan"]["executor"],
+                            "root": snap["engineering_plan"]["root"],
+                            "fingerprint": snap["engineering_plan"]["fingerprint"],
+                        }} if snap.get("engineering_plan") else {}),
+                        **(
+                            {"engineering_change_id": snap["engineering_change_id"],
+                             "engineering_work_id": snap["engineering_work_id"]}
+                            if snap.get("engineering_change_id") else {}
+                        ),
                         **(
                             {"library_origin": snap["library_origin"]}
                             if snap.get("library_origin")
@@ -671,11 +737,13 @@ def execute(db, job_id):
     except Exception as exc:
         db.rollback()
         job = db.scalar(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update())
-        if job and job.status != "canceled":
+        if job and job.status != "canceled" and delivery.owned(db, job_id, lease_token):
             job.error = str(exc)[:2000]
             event(job, "failed", job.error)
             from app.modules.generation.personal import record_result
             record_result(db, job)
             db.commit()
     finally:
+        if stop_heartbeat:
+            stop_heartbeat()
         files.close()

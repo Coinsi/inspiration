@@ -137,17 +137,11 @@ def _process(db, snapshot, canceled):
     origin, options = snapshot["library_origin"], snapshot["options"]
     kind = options["output_type"]
     source_kind = origin.get("media_type", "video")
-    with tempfile.TemporaryDirectory(prefix="library-clip-") as tmp:
+    with (
+        tempfile.TemporaryDirectory(prefix="library-clip-") as tmp,
+        cas.local_file(blob, canceled) as src,
+    ):
         root = Path(tmp)
-        # Local CAS can be sought directly. Object storage streams to disk in 1 MiB blocks.
-        src = Path(blob.storage_uri)
-        if not src.is_file():
-            src = root / "source.mp4"
-            with cas.open_range(blob) as stream, src.open("wb") as target:
-                while chunk := stream.read(1024 * 1024):
-                    if canceled():
-                        raise media_engine.Canceled()
-                    target.write(chunk)
         if canceled():
             raise media_engine.Canceled()
         if source_kind == "image":

@@ -26,6 +26,7 @@
 
 ## 开发与扩展
 
+- [可编辑作品工程设计](architecture/editable-project/README.md)：设计草案，包含工程结构、修改契约、48 个场景覆盖和可运行的设计探针；不是已上线功能清单。
 - [后端开发](../backend/README.md) · [前端开发](../frontend/README.md)
 - [技术架构](architecture/README.md) · [术语](00-术语表.md) · [数据模型](03-详细设计-数据模型.md) · [接口设计](04-详细设计-接口契约.md)
 - [视频索引服务](../services/media-indexer/README.md) · [转写服务](../services/transcriber/README.md) · [MCP 网关](../services/mcp-gateway/README.md)

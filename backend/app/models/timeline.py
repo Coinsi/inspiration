@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,7 +38,7 @@ class TimelineItem(Base, TimestampMixin):
     timeline_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("timeline.id", ondelete="CASCADE")
     )
-    shot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("shot.id"))
+    shot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("shot.id"))
     generation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     in_point_ms: Mapped[int] = mapped_column(Integer, default=0)
@@ -47,7 +47,12 @@ class TimelineItem(Base, TimestampMixin):
     transition: Mapped[dict | None] = mapped_column(JSONB)
     note: Mapped[str | None] = mapped_column(String(255))
 
-    __table_args__ = (Index("ix_timeline_item_order", "timeline_id", "ordinal"),)
+    __table_args__ = (
+        Index("ix_timeline_item_order", "timeline_id", "ordinal"),
+        CheckConstraint(
+            "shot_id IS NOT NULL OR generation_id IS NOT NULL", name="ck_timeline_item_source"
+        ),
+    )
 
 
 class Cut(Base, CodedMixin, TimestampMixin):

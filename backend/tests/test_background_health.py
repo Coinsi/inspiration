@@ -39,3 +39,23 @@ def test_health_tracks_actual_worker_lifecycle(module, monkeypatch):
     finally:
         stop()
     assert health.background_status()["library"] == "unavailable"
+
+
+def test_engineering_delivery_reports_actual_worker_liveness(monkeypatch):
+    monkeypatch.setattr(health.settings, "celery_eager", False)
+    monkeypatch.setattr(health, "background_workers", {})
+    assert health.background_status()["engineering_delivery"] == "unavailable"
+    monkeypatch.setattr(health, "background_workers", {"engineering_delivery": lambda: True})
+    assert health.background_status()["engineering_delivery"] == "ok"
+    monkeypatch.setattr(health.settings, "celery_eager", True)
+    assert health.background_status()["engineering_delivery"] == "disabled"
+
+
+def test_archive_dispatcher_reports_actual_worker_liveness(monkeypatch):
+    monkeypatch.setattr(health.settings, "celery_eager", False)
+    monkeypatch.setattr(health, "background_workers", {})
+    assert health.background_status()["engineering_archives"] == "unavailable"
+    monkeypatch.setattr(health, "background_workers", {"engineering_archives": lambda: True})
+    assert health.background_status()["engineering_archives"] == "ok"
+    monkeypatch.setattr(health.settings, "celery_eager", True)
+    assert health.background_status()["engineering_archives"] == "disabled"

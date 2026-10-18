@@ -1,18 +1,20 @@
 """Atomic timeline documents: revision checks, source ownership and restorable history."""
 
 import copy
+import uuid
 
 from sqlalchemy import select
 
 from app.core import audit
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.models.storage import Blob
-from app.models.timeline import AudioTrack, Timeline, TimelineRevision
+from app.models.timeline import AudioTrack, Timeline, TimelineItem, TimelineRevision
 from app.modules.timeline import schemas, service
 
 
 def lock(db, project_id, timeline_id):
     from app.models.identity import Project
+
     # Match adoption's lock order so replacing a shot cannot race a timeline save.
     db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     t = db.scalar(
@@ -44,8 +46,14 @@ def document(db, project_id, timeline_id):
             schemas.TimelineItemIn.model_validate(it, from_attributes=True).model_dump(mode="json")
             for it in items
         ],
-        "audio": [schemas.AudioIn.model_validate(a.config).model_dump(mode="json") for a in audio],
-        "subtitles": copy.deepcopy(t.subtitles),
+        "audio": [
+            schemas.AudioIn.model_validate({**a.config, "id": str(a.id)}).model_dump(mode="json")
+            for a in audio
+        ],
+        "subtitles": [
+            {**c, "id": c.get("id") or str(uuid.uuid5(t.id, f"subtitle:{i}"))}
+            for i, c in enumerate(t.subtitles)
+        ],
         "visuals": copy.deepcopy(t.visuals),
     }
 
@@ -70,12 +78,37 @@ def remember(db, t, user_id, label):
         db.flush()
 
 
-def save_document(db, ctx, timeline_id, data, label="保存剪辑"):
+def prepare_document(db, ctx, timeline_id, data):
+    """Validate and normalize without persisting; shared by drafts and accepted saves."""
     from app.modules.generation import jobs
 
-    t = lock(db, ctx.project.id, timeline_id)
-    if data.revision != t.revision:
-        raise Conflict("时间线已在其他页面修改。请保留当前草稿，重新载入后再编辑。")
+    current = document(db, ctx.project.id, timeline_id)
+    data = data.model_copy(deep=True)
+    for field, key in (("items", "shot_id"), ("audio", "generation_id"), ("subtitles", None)):
+        available = list(current[field])
+        used = {str(item.id) for item in getattr(data, field) if item.id}
+        for item in getattr(data, field):
+            if item.id is None:
+                match = next(
+                    (
+                        old
+                        for old in available
+                        if str(old.get("id")) not in used
+                        and (key is None or str(old[key]) == str(getattr(item, key)))
+                    ),
+                    None,
+                )
+                item.id = uuid.UUID(match["id"]) if match and match.get("id") else uuid.uuid4()
+                used.add(str(item.id))
+        ids = [item.id for item in getattr(data, field)]
+        if len(ids) != len(set(ids)):
+            raise CapabilityUnsupported("同一轨道中的使用标识不能重复")
+        model = {"items": TimelineItem, "audio": AudioTrack}.get(field)
+        if model:
+            for item_id in ids:
+                existing = db.get(model, item_id)
+                if existing and existing.timeline_id != timeline_id:
+                    raise Conflict("片段或音轨不属于该时间线")
     from app.modules.media.timing import duration
 
     try:
@@ -88,9 +121,9 @@ def save_document(db, ctx, timeline_id, data, label="保存剪辑"):
     visuals = (
         data.visuals
         if "visuals" in data.model_fields_set
-        else [schemas.VisualIn.model_validate(v) for v in t.visuals]
+        else [schemas.VisualIn.model_validate(v) for v in current["visuals"]]
     )
-    resolve_visuals(db, ctx, visuals, total)
+    resolved_visuals = resolve_visuals(db, ctx, visuals, total)
     cues = [c.model_dump(mode="json", exclude_none=True) for c in data.subtitles]
     if any(
         c["end_ms"] - c["start_ms"] < 100
@@ -116,18 +149,34 @@ def save_document(db, ctx, timeline_id, data, label="保存剪辑"):
         if a.fade_in_ms + a.fade_out_ms > a.duration_ms:
             raise CapabilityUnsupported("淡入与淡出总时长不能超过音频片段")
         tracks.append((a, blob))
+    data.visuals = visuals
+    return data, cues, tracks, resolved_visuals
+
+
+def save_document(db, ctx, timeline_id, data, label="保存剪辑"):
+    t = lock(db, ctx.project.id, timeline_id)
+    if data.revision != t.revision:
+        raise Conflict("时间线已在其他页面修改。请保留当前草稿，重新载入后再编辑。")
+    data, cues, tracks, _ = prepare_document(db, ctx, timeline_id, data)
+    visuals = data.visuals
     remember(db, t, ctx.user.id, "初始状态")
     service._replace_items(db, ctx, t.id, data.items)
-    db.query(AudioTrack).filter(AudioTrack.timeline_id == t.id).delete()
+    existing_audio = {
+        a.id: a for a in db.scalars(select(AudioTrack).where(AudioTrack.timeline_id == t.id))
+    }
     for ordinal, (a, blob) in enumerate(tracks):
-        db.add(
-            AudioTrack(
-                timeline_id=t.id,
-                kind=a.kind,
-                blob_hash=blob.hash,
-                config={**a.model_dump(mode="json"), "_ordinal": ordinal},
-            )
-        )
+        other = db.get(AudioTrack, a.id)
+        if other and other.timeline_id != t.id:
+            raise Conflict("音轨不属于该时间线")
+        track = existing_audio.pop(a.id, None)
+        if track is None:
+            track = AudioTrack(id=a.id, timeline_id=t.id)
+            db.add(track)
+        track.kind = a.kind
+        track.blob_hash = blob.hash
+        track.config = {**a.model_dump(mode="json"), "_ordinal": ordinal}
+    for removed in existing_audio.values():
+        db.delete(removed)
     t.subtitles = sorted(cues, key=lambda c: (c["start_ms"], c["end_ms"]))
     t.visuals = [v.model_dump(mode="json") for v in visuals]
     t.revision += 1
@@ -142,6 +191,8 @@ def save_document(db, ctx, timeline_id, data, label="保存剪辑"):
         target_id=t.id,
         detail={"revision": t.revision, "label": label},
     )
+    from app.modules.engineering.documents import sync_linked
+    sync_linked(db, ctx, t.id)
     return document(db, ctx.project.id, t.id)
 
 

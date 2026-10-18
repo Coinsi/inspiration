@@ -10,6 +10,7 @@ import io
 import os
 import shutil
 import tempfile
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -21,8 +22,23 @@ from app.models.storage import Blob
 _client = None
 
 
+def _write_lock(db, digest):
+    """Serialize logical CAS publication, including repairs, until DB commit."""
+    from sqlalchemy import func, select
+
+    if db.get_bind().dialect.name == "postgresql":
+        key = int.from_bytes(bytes.fromhex(digest[:16]), "big", signed=True)
+        db.execute(select(func.pg_advisory_xact_lock(key)))
+
+
+def _object_name(digest):
+    # Logical hash is stable; physical identities are never reused after repair.
+    # A delayed delete receipt must only ever name the old physical object.
+    return f"{digest[:2]}/{digest}.{uuid.uuid4().hex}"
+
+
 @contextmanager
-def local_file(blob, canceled=lambda: False, *, temp_dir=None):
+def _local_file(blob, canceled=lambda: False, *, temp_dir=None):
     """Seek local objects directly; download remote objects with bounded RAM and cleanup."""
     path = Path(blob.storage_uri)
     if path.is_absolute() or path.is_file():
@@ -50,11 +66,16 @@ def put_file(db, path: Path, mime: str, *, force_store=False, **metadata):
     """Hash and store a disk file with bounded memory on either storage backend."""
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    existing = db.get(Blob, digest)
+    _write_lock(db, digest)
+    existing = db.get(Blob, digest, populate_existing=True)
     if existing:
         for name, value in metadata.items():
             if value is not None and getattr(existing, name, None) is None:
                 setattr(existing, name, value)
+    from app.storage.lifecycle import blocked
+
+    if existing and blocked(db, existing.storage_uri):
+        force_store = True
     if existing and not force_store:
         try:
             with open_range(existing, 0, 1) as stream:
@@ -63,7 +84,7 @@ def put_file(db, path: Path, mime: str, *, force_store=False, **metadata):
                     return existing
         except (OSError, ValueError):
             pass  # An exact re-upload may repair a missing object, preserving all references.
-    object_name = f"{digest[:2]}/{digest}"
+    object_name = _object_name(digest)
     if settings.storage_backend == "fs":
         target = (Path(settings.fs_storage_dir) / object_name).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +117,7 @@ def put_file(db, path: Path, mime: str, *, force_store=False, **metadata):
 
 
 @contextmanager
-def open_range(blob, start=0, length=None):
+def _open_range(blob, start=0, length=None):
     """Open a bounded range without loading a whole video into process memory."""
     path = Path(blob.storage_uri)
     if path.is_absolute() or path.is_file():
@@ -163,20 +184,30 @@ def put_bytes(
 ) -> Blob:
     """写入二进制,返回 Blob(按内容哈希去重)。"""
     digest = hashlib.sha256(data).hexdigest()
-    existing = db.get(Blob, digest)
+    _write_lock(db, digest)
+    existing = db.get(Blob, digest, populate_existing=True)
     if existing is not None:
         # Verified technical metadata may arrive after the same immutable bytes were stored.
         for name, value in {"width": width, "height": height, "duration_ms": duration_ms}.items():
             if value is not None and getattr(existing, name) is None:
                 setattr(existing, name, value)
-        if settings.storage_backend == "fs" and not Path(existing.storage_uri).is_file():
-            # Re-uploading the same bytes can repair an unavailable legacy object.
-            existing.storage_uri = _store_fs(f"{digest[:2]}/{digest}", data)
+        from app.storage.lifecycle import blocked
+
+        if blocked(db, existing.storage_uri) or (
+            settings.storage_backend == "fs" and not Path(existing.storage_uri).is_file()
+        ):
+            # Never revive a tombstoned physical identity, even if old bytes remain.
+            object_name = _object_name(digest)
+            existing.storage_uri = (
+                _store_fs(object_name, data)
+                if settings.storage_backend == "fs"
+                else _store_minio(object_name, data, mime)
+            )
             db.flush()
         db.flush()
         return existing
 
-    object_name = f"{digest[:2]}/{digest}"
+    object_name = _object_name(digest)
     if settings.storage_backend == "fs":
         uri = _store_fs(object_name, data)
     else:
@@ -200,7 +231,7 @@ def put_bytes(
     return db.get(Blob, digest)
 
 
-def read_bytes(blob: Blob) -> bytes:
+def _read_bytes(blob: Blob) -> bytes:
     # A verified local CAS copy can survive an unavailable legacy MinIO object.
     local_copy = Path(settings.fs_storage_dir) / blob.hash[:2] / blob.hash
     if local_copy.is_file():
@@ -217,3 +248,23 @@ def read_bytes(blob: Blob) -> bytes:
     finally:
         response.close()
         response.release_conn()
+
+
+@contextmanager
+def local_file(blob, canceled=lambda: False, *, temp_dir=None):
+    from app.storage.lifecycle import reading
+    with reading(blob), _local_file(blob, canceled, temp_dir=temp_dir) as path:
+        yield path
+
+
+@contextmanager
+def open_range(blob, start=0, length=None):
+    from app.storage.lifecycle import reading
+    with reading(blob), _open_range(blob, start, length) as stream:
+        yield stream
+
+
+def read_bytes(blob):
+    from app.storage.lifecycle import reading
+    with reading(blob):
+        return _read_bytes(blob)

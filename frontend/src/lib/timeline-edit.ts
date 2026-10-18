@@ -1,5 +1,6 @@
 export interface Clip {
-  shot_id: string;
+  id?: string;
+  shot_id: string | null;
   generation_id: string | null;
   in_point_ms: number;
   out_point_ms: number;
@@ -8,6 +9,7 @@ export interface Clip {
   note?: string | null;
 }
 export interface SubtitleCue {
+  id?: string;
   start_ms: number;
   end_ms: number;
   text: string;
@@ -21,6 +23,7 @@ export interface SubtitleCue {
   };
 }
 export interface AudioClip {
+  id?: string;
   generation_id: string;
   name: string;
   kind: "dialogue" | "music" | "effect";
@@ -93,6 +96,37 @@ export interface TimelineContent {
 export interface TimelineDocument extends TimelineContent {
   revision: number;
 }
+export function withInstanceIds(content: TimelineContent): TimelineContent {
+  return {
+    ...content,
+    items: content.items.map((c) => ({
+      ...c,
+      id: c.id || crypto.randomUUID(),
+    })),
+    audio: content.audio.map((c) => ({
+      ...c,
+      id: c.id || crypto.randomUUID(),
+    })),
+    subtitles: content.subtitles.map((c) => ({
+      ...c,
+      id: c.id || crypto.randomUUID(),
+    })),
+  };
+}
+export function editableContent(doc: TimelineContent): TimelineContent {
+  return withInstanceIds({
+    audio: doc.audio,
+    subtitles: doc.subtitles,
+    visuals: doc.visuals || [],
+    items: doc.items.map((c) => ({
+      ...c,
+      duration_ms: c.out_point_ms
+        ? c.out_point_ms - c.in_point_ms
+        : c.duration_ms || 3000,
+      out_point_ms: 0,
+    })),
+  });
+}
 export function timelineDuration(clips: Clip[]): number {
   return clips.reduce(
     (total, c) =>
@@ -147,10 +181,20 @@ export function splitClip(
     { ...c, duration_ms: offset, out_point_ms: 0, transition: null },
     {
       ...c,
+      id: crypto.randomUUID(),
       in_point_ms: c.in_point_ms + offset,
       duration_ms: c.duration_ms - offset,
       out_point_ms: 0,
     },
+    ...clips.slice(index + 1),
+  ];
+}
+
+export function duplicateClip(clips: Clip[], index: number): Clip[] {
+  if (!clips[index] || clips.length >= 100) return clips;
+  return [
+    ...clips.slice(0, index + 1),
+    { ...clips[index], id: crypto.randomUUID(), transition: null },
     ...clips.slice(index + 1),
   ];
 }

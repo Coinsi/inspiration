@@ -29,6 +29,11 @@ def background_status():
             continue
         check = background_workers.get(name)
         result[name] = "ok" if check and check() else "unavailable"
+    for name in ("engineering_delivery", "engineering_archives"):
+        check = background_workers.get(name)
+        result[name] = (
+            "disabled" if settings.celery_eager else "ok" if check and check() else "unavailable"
+        )
     return result
 
 

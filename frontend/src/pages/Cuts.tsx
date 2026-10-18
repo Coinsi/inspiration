@@ -1,10 +1,11 @@
 import { StudioSelect } from "@/components/ui/studio-select";
 import "./cuts.css";
+import "./editing-workspace.css";
 import { Film, Plus, X } from "lucide-react";
 import { TimelineStudio } from "@/components/TimelineStudio";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
@@ -15,6 +16,7 @@ import { useI18n } from "@/lib/i18n";
 
 export default function Cuts() {
   const { projectId } = useParams();
+  const [search, setSearch] = useSearchParams();
   const base = `/projects/${projectId}`;
   const qc = useQueryClient();
   const { t: tr, lang } = useI18n();
@@ -39,9 +41,21 @@ export default function Cuts() {
 
   const [tlName, setTlName] = useState("");
   const createTl = useMutation({
-    mutationFn: () =>
-      api.post(`${base}/timelines`, { name: tlName.trim(), kind: "main" }),
-    onSuccess: () => {
+    mutationFn: async () => {
+      const timeline = await api.post<Timeline>(`${base}/timelines`, {
+        name: tlName.trim(),
+        kind: "main",
+      });
+      if (search.get("work"))
+        await api.post(`${base}/works/${search.get("work")}/timelines`, {
+          timeline_id: timeline.id,
+        });
+      return timeline;
+    },
+    onSuccess: (timeline) => {
+      const next = new URLSearchParams(search);
+      next.set("timeline", timeline.id);
+      setSearch(next);
       setTlName("");
       setCreateOpen(false);
       void qc.invalidateQueries({ queryKey: ["timelines", projectId] });

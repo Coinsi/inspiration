@@ -520,12 +520,20 @@ def impact(db, project_id, media_id):
         )
     )
     shared_count = retained_count(db, media_id)
+    from app.models.engineering import EngineeringResource
+
+    engineering_count = db.scalar(
+        select(func.count()).select_from(EngineeringResource)
+        .join(MediaVersion, MediaVersion.id == EngineeringResource.media_version_id)
+        .where(MediaVersion.media_id == media_id)
+    )
     return {
         "references": refs,
         "active_versions": active,
         "evidence_count": evidence_count,
         "shared_count": shared_count,
-        "can_trash": not refs and not active and not evidence_count and not shared_count,
+        "engineering_count": engineering_count,
+        "can_trash": not any((refs, active, evidence_count, shared_count, engineering_count)),
         "physical_delete": False,
     }
 
@@ -535,12 +543,13 @@ def trash(db, ctx, media_id, restore=False):
     info = impact(db, ctx.project.id, media_id)
     if not restore and not info["can_trash"]:
         raise Conflict(
-            "仍有镜头引用、跨项目复用、身份判断证据或上传/处理任务，无法移入回收站",
+            "仍有工程保留、镜头引用、跨项目复用、身份判断证据或上传/处理任务，无法移入回收站",
             {
                 "reference_count": len(info["references"]),
                 "active_count": len(info["active_versions"]),
                 "evidence_count": info["evidence_count"],
                 "shared_count": info["shared_count"],
+                "engineering_count": info["engineering_count"],
             },
         )
     item.deleted_at = None if restore else datetime.now(UTC)

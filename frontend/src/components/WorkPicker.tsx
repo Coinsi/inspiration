@@ -6,17 +6,24 @@ import { api, type Script } from "@/lib/api";
 import { Modal } from "./ui/modal";
 import { Button } from "./ui/button";
 
-export type Work = { id: string; title: string; script_id: string };
+export type Work = {
+  id: string;
+  title: string;
+  script_id: string | null;
+  engineering_revision: number;
+};
 export function WorkPicker({
   projectId,
   value,
   onChange,
   disabled = false,
+  createOnly = false,
 }: {
   projectId: string;
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  createOnly?: boolean;
 }) {
   const base = `/projects/${projectId}`;
   const qc = useQueryClient();
@@ -50,23 +57,28 @@ export function WorkPicker({
   });
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <label className="flex items-center gap-2 text-muted-foreground">
-        作品
-        <SelectField
-          label="所属作品"
-          className="max-w-64"
-          value={value}
-          disabled={disabled || works.isPending || works.isError}
-          onChange={onChange}
-          options={[
-            { value: "", label: "自由探索 · 暂不关联作品" },
-            ...(value && !chosen
-              ? [{ value, label: "已关联作品（暂不可用）" }]
-              : []),
-            ...(works.data || []).map((w) => ({ value: w.id, label: w.title })),
-          ]}
-        />
-      </label>
+      {!createOnly && (
+        <label className="flex items-center gap-2 text-muted-foreground">
+          作品
+          <SelectField
+            label="所属作品"
+            className="max-w-64"
+            value={value}
+            disabled={disabled || works.isPending || works.isError}
+            onChange={onChange}
+            options={[
+              { value: "", label: "自由探索 · 暂不关联作品" },
+              ...(value && !chosen
+                ? [{ value, label: "已关联作品（暂不可用）" }]
+                : []),
+              ...(works.data || []).map((w) => ({
+                value: w.id,
+                label: w.title,
+              })),
+            ]}
+          />
+        </label>
+      )}
       <Button
         variant="ghost"
         size="sm"
@@ -75,12 +87,17 @@ export function WorkPicker({
       >
         新建作品
       </Button>
-      {chosen && (
+      {chosen && !createOnly && (
+        <Link className="text-primary" to={`${base}/works/${chosen.id}`}>
+          查看作品 ↗
+        </Link>
+      )}
+      {chosen?.script_id && !createOnly && (
         <Link
           className="text-primary"
           to={`${base}/scripts/${chosen.script_id}`}
         >
-          查看作品内容 ↗
+          查看关联剧本 ↗
         </Link>
       )}
       {works.isError && (

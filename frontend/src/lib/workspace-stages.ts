@@ -2,6 +2,7 @@ import { WORKSPACE_DESTINATIONS } from "./workspace-navigation";
 
 // Full route catalog stays available to quick search. Sidebar shows stages and only related tools.
 export const WORKSPACE_STAGES = [
+  { id: "works", zh: "作品", en: "Works", routes: ["works"] },
   { id: "home", zh: "工作台", en: "Home", routes: ["workbench"] },
   {
     id: "story",

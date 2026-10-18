@@ -1,3 +1,4 @@
+import { TimelineTimeInput } from "./TimelineTimeInput";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -46,16 +47,13 @@ function Seconds({
   return (
     <label className="min-w-0 text-xs text-muted-foreground">
       {label}
-      <input
+      <TimelineTimeInput
         aria-label={label}
-        type="number"
-        min={0}
-        max={max == null ? undefined : max / 1000}
-        step={0.1}
+        value={value}
+        max={max}
         className={`${input} mt-1 text-foreground tabular-nums`}
-        value={value / 1000}
         disabled={disabled}
-        onChange={(e) => onChange(Math.round(Number(e.target.value) * 1000))}
+        onChange={onChange}
       />
     </label>
   );
@@ -92,6 +90,7 @@ export function TimelineTracks({
   activeTab,
   onTabChange,
   onBusy,
+  onAddLibraryAudio,
 }: {
   projectId: string;
   timelineId: string;
@@ -102,6 +101,7 @@ export function TimelineTracks({
   activeTab?: "audio" | "subtitles";
   onTabChange?: (tab: "audio" | "subtitles") => void;
   onBusy?: (busy: boolean) => void;
+  onAddLibraryAudio: () => void;
 }) {
   const zh = useI18n().lang === "zh";
   const [localTab, setLocalTab] = useState<"audio" | "subtitles">("audio");
@@ -138,6 +138,29 @@ export function TimelineTracks({
     ),
   ];
   const source = allSources.find((s) => s.id === sourceId);
+  const appendAudio = (source: AudioSource) => {
+    if (!source.duration_ms || durationMs < 100 || content.audio.length >= 24)
+      return;
+    onChange({
+      ...content,
+      audio: [
+        ...content.audio,
+        {
+          generation_id: source.id,
+          id: crypto.randomUUID(),
+          name: source.name,
+          kind: "music",
+          start_ms: 0,
+          in_point_ms: 0,
+          duration_ms: Math.min(source.duration_ms, durationMs),
+          gain_db: 0,
+          fade_in_ms: 0,
+          fade_out_ms: 0,
+          muted: false,
+        },
+      ],
+    });
+  };
   const upload = useMutation({
     mutationFn: async (file: File) => {
       if (file.size > 100 * 1024 * 1024)
@@ -151,6 +174,7 @@ export function TimelineTracks({
     onSuccess: (s) => {
       setLocalSources((previous) => [s, ...previous]);
       setSourceId(s.id);
+      appendAudio(s);
       void qc.invalidateQueries({ queryKey: ["audio-sources", projectId] });
     },
   });
@@ -266,6 +290,18 @@ export function TimelineTracks({
                 ? "将配乐、对白和音效放到时间线上，可叠加播放。上传的原音频会保留在项目中，移除音轨不删除素材。"
                 : "Place music, dialogue and effects on the timeline. Removing a track keeps the original in the project."}
             </p>
+            <Button
+              variant="outline"
+              disabled={busy || content.audio.length >= 24}
+              onClick={onAddLibraryAudio}
+            >
+              从素材库添加音频
+            </Button>
+            {durationMs < 100 && (
+              <p role="status" className="text-xs text-muted-foreground">
+                请先添加图片或视频，再加入声音轨。
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <StudioSelect
                 aria-label={zh ? "音频素材" : "Audio source"}
@@ -275,7 +311,7 @@ export function TimelineTracks({
                 disabled={busy}
               >
                 <option value="">
-                  {zh ? "选择项目音频…" : "Choose project audio…"}
+                  {zh ? "选择已生成或上传的音频…" : "Choose project audio…"}
                 </option>
                 {allSources.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -291,27 +327,7 @@ export function TimelineTracks({
                   durationMs < 100 ||
                   content.audio.length >= 24
                 }
-                onClick={() =>
-                  source &&
-                  onChange({
-                    ...content,
-                    audio: [
-                      ...content.audio,
-                      {
-                        generation_id: source.id,
-                        name: source.name,
-                        kind: "music",
-                        start_ms: 0,
-                        in_point_ms: 0,
-                        duration_ms: Math.min(source.duration_ms, durationMs),
-                        gain_db: 0,
-                        fade_in_ms: 0,
-                        fade_out_ms: 0,
-                        muted: false,
-                      },
-                    ],
-                  })
-                }
+                onClick={() => source && appendAudio(source)}
               >
                 <Plus className="h-4 w-4" />
                 {zh ? "添加音轨" : "Add audio"}
@@ -323,14 +339,16 @@ export function TimelineTracks({
                     ? "读取音频…"
                     : "Reading…"
                   : zh
-                    ? "上传音频"
+                    ? "上传并加入音轨"
                     : "Upload audio"}
                 <input
                   aria-label={zh ? "上传音频文件" : "Upload audio file"}
                   type="file"
                   accept=".wav,.mp3,.m4a,.ogg,.flac"
                   className="absolute inset-0 w-full cursor-pointer opacity-0"
-                  disabled={busy}
+                  disabled={
+                    busy || durationMs < 100 || content.audio.length >= 24
+                  }
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) upload.mutate(file);
@@ -634,6 +652,7 @@ export function TimelineTracks({
                       ...content.subtitles,
                       {
                         start_ms: start,
+                        id: crypto.randomUUID(),
                         end_ms: Math.min(start + 2000, durationMs),
                         text: "",
                       },

@@ -25,6 +25,12 @@ export const WORKSPACE_GROUPS = [
     title: "nav.overview",
     items: [
       {
+        to: "works",
+        label: "nav.works",
+        icon: Film,
+        keywords: "作品 工程 候选 版本 works project review",
+      },
+      {
         to: "workbench",
         label: "nav.workbench",
         icon: LayoutDashboard,

@@ -13,6 +13,7 @@ const DICT: Record<Lang, Record<string, string>> = {
   zh: {
     "app.tagline": "影视 / 动漫 AIGC 资产管理与生产平台",
     "nav.overview": "总览",
+    "nav.works": "作品",
     "nav.workbench": "工作台",
     "nav.create": "创作",
     "nav.assets": "资产",
@@ -32,7 +33,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nav.agent": "助理任务记录",
     "nav.canvas": "自由画布",
     "nav.shots": "制作进度",
-    "nav.cuts": "成片 / 基线",
+    "nav.cuts": "剪辑成片",
     "nav.tasks": "任务中心",
     "nav.members": "成员",
     "nav.settings": "设置",
@@ -242,7 +243,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "shot.refsHint":
       "在上方「引用资产」加入角色 / 场景后,会自动拼入它们的提示词片段与风格。",
     // 成片 / 时间线 / 基线
-    "cuts.title": "成片 / 基线",
+    "cuts.title": "剪辑成片",
     "cuts.subtitle": "时间线组装 · 定剪冻结 · 基线对比",
     "cuts.preview": "成片预览",
     "cuts.previewHint": "定剪后在此预览成片;下方为入剪镜头时间线。",
@@ -486,6 +487,7 @@ const DICT: Record<Lang, Record<string, string>> = {
   en: {
     "app.tagline": "AIGC asset & production platform for film / anime",
     "nav.overview": "Overview",
+    "nav.works": "Works",
     "nav.workbench": "Studio",
     "nav.create": "Create",
     "nav.assets": "Assets",
@@ -505,7 +507,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "nav.agent": "Assistant task history",
     "nav.canvas": "Creative Canvas",
     "nav.shots": "Production progress",
-    "nav.cuts": "Cut / Baseline",
+    "nav.cuts": "Film editor",
     "nav.tasks": "Task center",
     "nav.members": "Members",
     "nav.settings": "Settings",
@@ -717,7 +719,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "shot.refsHint":
       "Add cast / scenes under “Referenced assets” and their prompt fragments & styles are composed in automatically.",
     // Cuts / Timeline / Baseline
-    "cuts.title": "Cut / Baseline",
+    "cuts.title": "Film editor",
     "cuts.subtitle": "Timeline assembly · Final-cut freeze · Baseline diff",
     "cuts.preview": "Film Preview",
     "cuts.previewHint":

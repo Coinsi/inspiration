@@ -201,3 +201,15 @@ def compare_baselines(
     db: Session = Depends(get_db, scope="function"),
 ):
     return service.compare_baselines(db, ctx.project.id, a, b)
+
+
+@router.post("/timelines/{timeline_id}/library-sources/{version_id}")
+def attach_library_source(
+    timeline_id: uuid.UUID,
+    version_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.timeline.library_sources import attach
+
+    return attach(db, ctx, timeline_id, version_id)

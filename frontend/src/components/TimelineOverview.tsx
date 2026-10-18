@@ -11,6 +11,7 @@ import {
   dragTimeline,
   type TrackKind,
   type DragMode,
+  type SourceBounds,
 } from "@/lib/timeline-interaction";
 import type { Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -29,6 +30,7 @@ type Gesture = {
 };
 export function TimelineOverview({
   content,
+  bounds,
   shots,
   selected,
   onSelect,
@@ -39,6 +41,7 @@ export function TimelineOverview({
   time,
   onTime,
 }: {
+  bounds: Record<string, SourceBounds | undefined>;
   content: TimelineContent;
   shots: Shot[];
   selected: number;
@@ -54,13 +57,14 @@ export function TimelineOverview({
     [zoom, setZoom] = useState(1),
     [draft, setDraft] = useState<TimelineContent | null>(null),
     [error, setError] = useState("");
+  const [showEmptyLayers, setShowEmptyLayers] = useState(false);
   const gesture = useRef<Gesture | null>(null),
     latest = useRef({ content, disabled, onChange, onSelect }),
     suppress = useRef(false);
   latest.current = { content, disabled, onChange, onSelect };
   const displayed = draft ?? content,
     clips = clipSpans(displayed),
-    span = Math.max(1000, timelineDuration(content.items));
+    span = Math.max(1000, timelineDuration(content.items) * 1.2);
   useEffect(() => {
     const cancel = () => {
       gesture.current = null;
@@ -85,6 +89,16 @@ export function TimelineOverview({
       setDraft(null);
     }
   }, [disabled, content]);
+  const sourceFor = (kind: TrackKind, index: number) => {
+    if (kind === "subtitles") return undefined;
+    const clip = content[kind][index];
+    const id =
+      clip.generation_id ||
+      ("shot_id" in clip
+        ? shots.find((s) => s.id === clip.shot_id)?.selected_generation_id
+        : undefined);
+    return id ? bounds[id] : undefined;
+  };
   const position = (start: number, length: number) => ({
     left: `${(start / span) * 100}%`,
     width: `${Math.max(0.2, (length / span) * 100)}%`,
@@ -134,6 +148,7 @@ export function TimelineOverview({
       g.mode,
       delta,
       lane ? Number(lane.dataset.visualTrack) : undefined,
+      sourceFor(g.kind, g.index),
     );
     setDraft(g.result.content);
     setError(g.result.error);
@@ -208,7 +223,7 @@ export function TimelineOverview({
           disabled={disabled}
           data-drag-mode={mode}
           aria-label={`${mode === "start" ? "裁切起点" : "裁切终点"} ${kind} ${index + 1}`}
-          title="向内拖动裁切；方向键每次裁切 0.1 秒"
+          title="向内缩短，向外延长；方向键每次调整 0.1 秒"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (!["ArrowLeft", "ArrowRight"].includes(e.key) || disabled)
@@ -220,6 +235,8 @@ export function TimelineOverview({
               index,
               mode,
               e.key === "ArrowRight" ? 100 : -100,
+              undefined,
+              sourceFor(kind, index),
             );
             setError(result.error);
             if (!result.error) onChange(result.content);
@@ -243,6 +260,12 @@ export function TimelineOverview({
           </span>
         </div>
         <div>
+          <button
+            aria-expanded={showEmptyLayers}
+            onClick={() => setShowEmptyLayers(!showEmptyLayers)}
+          >
+            {showEmptyLayers ? "收起空叠加轨" : "显示叠加轨"}
+          </button>
           <button
             aria-label="缩小时间线"
             disabled={zoom === 1}
@@ -272,11 +295,14 @@ export function TimelineOverview({
               onPointerDown={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 onTime(
-                  Math.round(
-                    Math.max(
-                      0,
-                      Math.min(1, (e.clientX - rect.left) / rect.width),
-                    ) * Math.max(0, span - 1),
+                  Math.min(
+                    Math.max(0, timelineDuration(content.items) - 1),
+                    Math.round(
+                      Math.max(
+                        0,
+                        Math.min(1, (e.clientX - rect.left) / rect.width),
+                      ) * span,
+                    ),
                   ),
                 );
               }}
@@ -313,7 +339,8 @@ export function TimelineOverview({
                     <span>
                       {index + 1} ·{" "}
                       {shots.find((s) => s.id === clip.shot_id)?.title ||
-                        "镜头"}
+                        clip.note ||
+                        "素材片段"}
                     </span>
                     <small>
                       {(clip.duration_ms / 1000).toFixed(1)}s
@@ -324,51 +351,57 @@ export function TimelineOverview({
               )}
               {!clips.length && (
                 <span className="timeline-lane-empty">
-                  添加镜头后在这里排列画面
+                  添加素材后在这里排列画面
                 </span>
               )}
             </div>
           </div>
-          {[3, 2, 1].map((track) => (
-            <div className="timeline-overview-row" key={track}>
-              <button
-                className="timeline-track-label"
-                onClick={() => onVisualSelect("")}
-              >
-                <Film />
-                叠加 {track}
-              </button>
-              <div
-                className="timeline-overview-lane timeline-visual-lane"
-                data-visual-track={track}
-              >
-                {displayed.visuals.map((v, index) =>
-                  (gesture.current
-                    ? content.visuals[index]?.track
-                    : v.track) === track
-                    ? block(
-                        "visuals",
-                        index,
-                        `叠加画面 ${v.name}`,
-                        v.start_ms,
-                        v.duration_ms,
-                        `timeline-visual-block ${v.hidden ? "is-muted" : ""}`,
-                        () => onVisualSelect(v.id),
-                        v.name,
-                      )
-                    : null,
-                )}
-                {!displayed.visuals.some((v) => v.track === track) && (
-                  <button
-                    className="timeline-lane-empty"
-                    onClick={() => onVisualSelect("")}
-                  >
-                    + 添加叠加画面
-                  </button>
-                )}
+          {[3, 2, 1]
+            .filter(
+              (track) =>
+                showEmptyLayers ||
+                displayed.visuals.some((v) => v.track === track),
+            )
+            .map((track) => (
+              <div className="timeline-overview-row" key={track}>
+                <button
+                  className="timeline-track-label"
+                  onClick={() => onVisualSelect("")}
+                >
+                  <Film />
+                  叠加 {track}
+                </button>
+                <div
+                  className="timeline-overview-lane timeline-visual-lane"
+                  data-visual-track={track}
+                >
+                  {displayed.visuals.map((v, index) =>
+                    (gesture.current
+                      ? content.visuals[index]?.track
+                      : v.track) === track
+                      ? block(
+                          "visuals",
+                          index,
+                          `叠加画面 ${v.name}`,
+                          v.start_ms,
+                          v.duration_ms,
+                          `timeline-visual-block ${v.hidden ? "is-muted" : ""}`,
+                          () => onVisualSelect(v.id),
+                          v.name,
+                        )
+                      : null,
+                  )}
+                  {!displayed.visuals.some((v) => v.track === track) && (
+                    <button
+                      className="timeline-lane-empty"
+                      onClick={() => onVisualSelect("")}
+                    >
+                      + 添加叠加画面
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
           <div className="timeline-overview-row">
             <button
               className="timeline-track-label"

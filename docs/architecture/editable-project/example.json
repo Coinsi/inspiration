@@ -1,0 +1,723 @@
+{
+  "format": "studio.editable-project",
+  "schema_version": 2,
+  "status": "design_fixture_not_renderable_media",
+  "work": {
+    "id": "film",
+    "title": "挥剑与动态歌词"
+  },
+  "commit": {
+    "id": "commit-1",
+    "roots": {
+      "main": {
+        "target": {
+          "id": "sequence",
+          "revision": 1
+        },
+        "streams": {
+          "picture": {
+            "port": "video",
+            "accepts": "video"
+          },
+          "sound": {
+            "port": "audio",
+            "accepts": "audio"
+          }
+        },
+        "profile": {
+          "kind": "av",
+          "width": 1920,
+          "height": 1080,
+          "frame_rate": {
+            "n": "24",
+            "d": "1"
+          },
+          "sample_rate": 48000,
+          "channel_layout": "stereo"
+        }
+      },
+      "poster": {
+        "target": {
+          "id": "poster",
+          "revision": 1
+        },
+        "streams": {
+          "image": {
+            "port": "image",
+            "accepts": "image"
+          }
+        },
+        "profile": {
+          "kind": "image",
+          "width": 1200,
+          "height": 1800
+        }
+      }
+    }
+  },
+  "objects": [
+    {
+      "id": "footage",
+      "revision": 1,
+      "kind": "resource",
+      "schema_version": 1,
+      "inputs": {},
+      "outputs": {
+        "video": "video",
+        "audio": "audio"
+      },
+      "payload": {
+        "fixture_blob": "original-video",
+        "duration": {
+          "n": "10",
+          "d": "1"
+        },
+        "frame_rate": {
+          "n": "24",
+          "d": "1"
+        },
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "id": "music",
+      "revision": 1,
+      "kind": "resource",
+      "schema_version": 1,
+      "inputs": {},
+      "outputs": {
+        "audio": "audio"
+      },
+      "payload": {
+        "fixture_blob": "music",
+        "duration": {
+          "n": "30",
+          "d": "1"
+        },
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+      }
+    },
+    {
+      "id": "voice",
+      "revision": 1,
+      "kind": "resource",
+      "schema_version": 1,
+      "inputs": {},
+      "outputs": {
+        "audio": "audio"
+      },
+      "payload": {
+        "fixture_blob": "voice",
+        "duration": {
+          "n": "8",
+          "d": "1"
+        },
+        "sample_rate": 48000,
+        "channel_layout": "mono"
+      }
+    },
+    {
+      "id": "font",
+      "revision": 1,
+      "kind": "resource",
+      "schema_version": 1,
+      "inputs": {},
+      "outputs": {
+        "font": "font"
+      },
+      "payload": {
+        "fixture_blob": "font-file"
+      }
+    },
+    {
+      "id": "tracking",
+      "revision": 1,
+      "kind": "analysis",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "footage",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "motion": "transform_track"
+      },
+      "payload": {
+        "analyzer_version": "fixture-tracker-1",
+        "coordinate_space": "footage.v1.pixel",
+        "confidence": 0.8
+      }
+    },
+    {
+      "id": "occlusion",
+      "revision": 1,
+      "kind": "analysis",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "footage",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "mask": "mask"
+      },
+      "payload": {
+        "analyzer_version": "fixture-mask-1",
+        "coordinate_space": "footage.v1.pixel",
+        "confidence": 0.7
+      }
+    },
+    {
+      "id": "trail",
+      "revision": 1,
+      "kind": "effect",
+      "schema_version": 1,
+      "inputs": {
+        "motion": {
+          "target": {
+            "id": "tracking",
+            "revision": 1
+          },
+          "port": "motion",
+          "accepts": "transform_track"
+        }
+      },
+      "outputs": {
+        "image": "video"
+      },
+      "payload": {
+        "operator": "studio.trail@1",
+        "duration": {
+          "n": "10",
+          "d": "1"
+        },
+        "temporal_support": {
+          "kind": "window",
+          "before": {
+            "n": "1",
+            "d": "4"
+          },
+          "after": {
+            "n": "0",
+            "d": "1"
+          }
+        },
+        "parameters": {
+          "length": {
+            "mode": "constant",
+            "value": 0.25,
+            "unit": "seconds"
+          }
+        }
+      }
+    },
+    {
+      "id": "glow",
+      "revision": 1,
+      "kind": "effect",
+      "schema_version": 1,
+      "inputs": {
+        "image": {
+          "target": {
+            "id": "trail",
+            "revision": 1
+          },
+          "port": "image",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "image": "video"
+      },
+      "payload": {
+        "operator": "studio.glow@1",
+        "duration": {
+          "n": "10",
+          "d": "1"
+        },
+        "temporal_support": {
+          "kind": "frame_local"
+        },
+        "parameters": {
+          "intensity": {
+            "mode": "constant",
+            "value": 0.7,
+            "unit": "ratio"
+          }
+        }
+      }
+    },
+    {
+      "id": "sword-comp",
+      "revision": 1,
+      "kind": "composition",
+      "schema_version": 1,
+      "inputs": {
+        "background": {
+          "target": {
+            "id": "footage",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        },
+        "glow": {
+          "target": {
+            "id": "glow",
+            "revision": 1
+          },
+          "port": "image",
+          "accepts": "video"
+        },
+        "occlusion": {
+          "target": {
+            "id": "occlusion",
+            "revision": 1
+          },
+          "port": "mask",
+          "accepts": "mask"
+        }
+      },
+      "outputs": {
+        "video": "video"
+      },
+      "payload": {
+        "operator": "studio.occluded_over@1",
+        "duration": {
+          "n": "10",
+          "d": "1"
+        },
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": {
+          "n": "24",
+          "d": "1"
+        },
+        "working_color": "linear-srgb",
+        "alpha": "premultiplied"
+      }
+    },
+    {
+      "id": "lyrics",
+      "revision": 1,
+      "kind": "composition",
+      "schema_version": 1,
+      "inputs": {
+        "font": {
+          "target": {
+            "id": "font",
+            "revision": 1
+          },
+          "port": "font",
+          "accepts": "font"
+        },
+        "music": {
+          "target": {
+            "id": "music",
+            "revision": 1
+          },
+          "port": "audio",
+          "accepts": "audio"
+        }
+      },
+      "outputs": {
+        "video": "video"
+      },
+      "payload": {
+        "operator": "studio.lyrics@1",
+        "duration": {
+          "n": "4",
+          "d": "1"
+        },
+        "width": 1920,
+        "height": 1080,
+        "alpha": "premultiplied",
+        "source_alignment": {
+          "source_start": {
+            "n": "4",
+            "d": "1"
+          }
+        },
+        "cues": [
+          {
+            "id": "line-1",
+            "start": {
+              "n": "0",
+              "d": "1"
+            },
+            "end": {
+              "n": "2",
+              "d": "1"
+            },
+            "text": "举剑向前"
+          },
+          {
+            "id": "line-2",
+            "start": {
+              "n": "2",
+              "d": "1"
+            },
+            "end": {
+              "n": "4",
+              "d": "1"
+            },
+            "text": "穿过长夜"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fight-a",
+      "revision": 1,
+      "kind": "instance",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "sword-comp",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "video": "video"
+      },
+      "payload": {
+        "placement": {
+          "start": {
+            "n": "0",
+            "d": "1"
+          },
+          "duration": {
+            "n": "4",
+            "d": "1"
+          }
+        },
+        "source_mapping": {
+          "mode": "linear",
+          "source_start": {
+            "n": "2",
+            "d": "1"
+          },
+          "rate": {
+            "n": "1",
+            "d": "1"
+          }
+        },
+        "bounds_policy": "error"
+      }
+    },
+    {
+      "id": "fight-b",
+      "revision": 1,
+      "kind": "instance",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "sword-comp",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "video": "video"
+      },
+      "payload": {
+        "placement": {
+          "start": {
+            "n": "4",
+            "d": "1"
+          },
+          "duration": {
+            "n": "3",
+            "d": "1"
+          }
+        },
+        "source_mapping": {
+          "mode": "linear",
+          "source_start": {
+            "n": "0",
+            "d": "1"
+          },
+          "rate": {
+            "n": "1",
+            "d": "1"
+          }
+        },
+        "bounds_policy": "error"
+      }
+    },
+    {
+      "id": "music-use",
+      "revision": 1,
+      "kind": "instance",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "music",
+            "revision": 1
+          },
+          "port": "audio",
+          "accepts": "audio"
+        }
+      },
+      "outputs": {
+        "audio": "audio"
+      },
+      "payload": {
+        "placement": {
+          "start": {
+            "n": "0",
+            "d": "1"
+          },
+          "duration": {
+            "n": "7",
+            "d": "1"
+          }
+        },
+        "source_mapping": {
+          "mode": "linear",
+          "source_start": {
+            "n": "1",
+            "d": "1"
+          },
+          "rate": {
+            "n": "1",
+            "d": "1"
+          }
+        },
+        "bounds_policy": "error",
+        "gain_db": -8
+      }
+    },
+    {
+      "id": "voice-use",
+      "revision": 1,
+      "kind": "instance",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "voice",
+            "revision": 1
+          },
+          "port": "audio",
+          "accepts": "audio"
+        }
+      },
+      "outputs": {
+        "audio": "audio"
+      },
+      "payload": {
+        "placement": {
+          "start": {
+            "n": "0",
+            "d": "1"
+          },
+          "duration": {
+            "n": "4",
+            "d": "1"
+          }
+        },
+        "source_mapping": {
+          "mode": "linear",
+          "source_start": {
+            "n": "0",
+            "d": "1"
+          },
+          "rate": {
+            "n": "1",
+            "d": "1"
+          }
+        },
+        "bounds_policy": "error",
+        "gain_db": 0
+      }
+    },
+    {
+      "id": "lyrics-use",
+      "revision": 1,
+      "kind": "instance",
+      "schema_version": 1,
+      "inputs": {
+        "source": {
+          "target": {
+            "id": "lyrics",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "video": "video"
+      },
+      "payload": {
+        "placement": {
+          "start": {
+            "n": "3",
+            "d": "1"
+          },
+          "duration": {
+            "n": "4",
+            "d": "1"
+          }
+        },
+        "source_mapping": {
+          "mode": "linear",
+          "source_start": {
+            "n": "0",
+            "d": "1"
+          },
+          "rate": {
+            "n": "1",
+            "d": "1"
+          }
+        },
+        "bounds_policy": "error"
+      }
+    },
+    {
+      "id": "sequence",
+      "revision": 1,
+      "kind": "sequence",
+      "schema_version": 1,
+      "inputs": {
+        "first": {
+          "target": {
+            "id": "fight-a",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        },
+        "second": {
+          "target": {
+            "id": "fight-b",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        },
+        "music": {
+          "target": {
+            "id": "music-use",
+            "revision": 1
+          },
+          "port": "audio",
+          "accepts": "audio"
+        },
+        "voice": {
+          "target": {
+            "id": "voice-use",
+            "revision": 1
+          },
+          "port": "audio",
+          "accepts": "audio"
+        },
+        "lyrics": {
+          "target": {
+            "id": "lyrics-use",
+            "revision": 1
+          },
+          "port": "video",
+          "accepts": "video"
+        }
+      },
+      "outputs": {
+        "video": "video",
+        "audio": "audio"
+      },
+      "payload": {
+        "duration": {
+          "n": "7",
+          "d": "1"
+        },
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": {
+          "n": "24",
+          "d": "1"
+        },
+        "audio_sample_rate": 48000,
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "video",
+            "items": [
+              "first",
+              "second"
+            ],
+            "overlap_policy": "reject"
+          },
+          {
+            "id": "overlay",
+            "kind": "video",
+            "items": [
+              "lyrics"
+            ],
+            "overlap_policy": "stack"
+          },
+          {
+            "id": "music",
+            "kind": "audio",
+            "items": [
+              "music"
+            ],
+            "overlap_policy": "mix"
+          },
+          {
+            "id": "voice",
+            "kind": "audio",
+            "items": [
+              "voice"
+            ],
+            "overlap_policy": "mix"
+          }
+        ]
+      }
+    },
+    {
+      "id": "poster",
+      "revision": 1,
+      "kind": "image_document",
+      "schema_version": 1,
+      "inputs": {
+        "font": {
+          "target": {
+            "id": "font",
+            "revision": 1
+          },
+          "port": "font",
+          "accepts": "font"
+        }
+      },
+      "outputs": {
+        "image": "image"
+      },
+      "payload": {
+        "width": 1200,
+        "height": 1800,
+        "text": "挥剑与长夜"
+      }
+    }
+  ]
+}

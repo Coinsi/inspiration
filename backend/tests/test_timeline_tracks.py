@@ -186,7 +186,9 @@ def test_document_history_subtitles_audio_isolation_and_render_snapshot(studio, 
     assert restored["revision"] == 2 and restored["items"] == [] and restored["audio"] == []
     assert client.post(path + "/history/1/restore", json={"revision": 1}).status_code == 409
     restored = post_ok(client, path + "/history/1/restore", {"revision": 2})
-    assert restored["revision"] == 3 and restored["subtitles"] == parsed["items"]
+    assert restored["revision"] == 3
+    assert [{k: v for k, v in cue.items() if k != "id"} for cue in restored["subtitles"]] == parsed["items"]
+    assert all(cue["id"] for cue in restored["subtitles"])
     assert client.get(f"{base}/timelines/{uuid.uuid4()}/history").status_code == 404
     assert client.get(
         f"/api/v1/projects/{ids['other']}/timelines/{t['id']}/document"

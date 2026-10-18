@@ -17,3 +17,4 @@ class ToolContext:
 
     scope: list[dict] = field(default_factory=list)
     skill_snapshot: list[dict] = field(default_factory=list)
+    work_id: uuid.UUID | None = None

@@ -28,7 +28,11 @@ def start(db, ctx, conversation, message, data, history):
         from app.modules.conversation.works import get as get_work
 
         work = get_work(db, ctx.project.id, conversation.work_id)
-        work_context = {"id": str(work.id), "title": work.title, "script_id": str(work.script_id)}
+        work_context = {
+            "id": str(work.id), "title": work.title,
+            "script_id": str(work.script_id) if work.script_id else None,
+            "engineering_revision": work.engineering_revision,
+        }
     # Namespaced idempotency prevents a key reused in another conversation from
     # accidentally attaching somebody else's execution.
     key = uuid.uuid5(conversation.id, str(data.request_key))

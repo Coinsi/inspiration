@@ -20,3 +20,21 @@ assert.equal(transitionAt(transition,3500).progress,.5);assert.equal(transitionA
 assert.equal(audioEnvelope(0,2000,200,200),0);assert.equal(audioEnvelope(1000,2000,200,200),1);assert.equal(audioEnvelope(1900,2000,200,200),.5);assert.equal(audioEnvelope(2000,2000,200,200),0);
 assert.deepEqual(undo(edit({past:[],present:initial,future:[]},trim.content)).present,initial);
 console.log('Timeline drag/trim bounds, transitions, audio envelopes and undo passed');
+
+// Extending stills, restoring trimmed media, and timeline-bound subtitles.
+assert.equal(dragTimeline(initial,'items',0,'end',2000,undefined,{image:true}).content.items[0].duration_ms,6000);
+assert.equal(dragTimeline(initial,'items',0,'end',9000,undefined,{image:false,duration_ms:7000}).content.items[0].duration_ms,6000);
+assert.equal(dragTimeline(initial,'items',0,'start',-9000,undefined,{image:false,duration_ms:7000}).content.items[0].in_point_ms,0);
+assert.equal(dragTimeline(initial,'items',0,'start',-9000,undefined,{image:false,duration_ms:7000}).content.items[0].duration_ms,5000);
+assert.match(dragTimeline(initial,'items',0,'end',100).error,/素材时长/);
+assert.equal(dragTimeline(c,'subtitles',0,'start',-9999).content.subtitles[0].start_ms,0);
+assert.equal(dragTimeline(c,'subtitles',0,'end',99999).content.subtitles[0].end_ms,12000);
+assert.equal(dragTimeline(c,'audio',0,'end',99999,undefined,{image:false,duration_ms:4000}).content.audio[0].duration_ms,3500);
+assert.equal(dragTimeline(c,'audio',0,'start',-99999,undefined,{image:false,duration_ms:4000}).content.audio[0].start_ms,500);
+assert.equal(dragTimeline(c,'visuals',0,'end',1000,undefined,{image:true}).content.visuals[0].duration_ms,3000);
+assert.deepEqual(undo(edit({past:[],present:initial,future:[]},dragTimeline(initial,'items',0,'end',2000,undefined,{image:true}).content)).present, initial);
+
+const tailMove = dragTimeline(transition,'items',0,'move',99999);
+assert.equal(tailMove.error, '');
+assert.equal(tailMove.content.items.at(-1).transition, null);
+assert.deepEqual(undo(edit({past:[],present:transition,future:[]},tailMove.content)).present, transition);

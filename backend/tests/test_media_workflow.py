@@ -394,7 +394,7 @@ def test_character_presets_preview_is_free_and_validates_combinations(studio, mo
         files={"file": ("ref.png", media_engine.mock_image(), "image/png")},
     ).json()
     provider = GptImageProvider(token="test")
-    monkeypatch.setattr(service, "_provider_instance", lambda *args: provider)
+    monkeypatch.setattr(service, "_provider_instance", lambda *args, **kwargs: provider)
     monkeypatch.setattr(
         provider, "submit", lambda *_: pytest.fail("Preview must not invoke generation")
     )
@@ -450,7 +450,7 @@ def test_character_generation_transmits_reference_and_retains_retry_provenance(s
         return {"data": [{"b64_json": base64.b64encode(media_engine.mock_image(1)).decode()}]}
 
     monkeypatch.setattr(provider, "_http", reply)
-    monkeypatch.setattr(service, "_provider_instance", lambda *args: provider)
+    monkeypatch.setattr(service, "_provider_instance", lambda *args, **kwargs: provider)
     url = f"{base}/generations/{source['id']}"
     for mode, preset in [
         ("view", "profile_left"),
@@ -503,7 +503,9 @@ def test_character_guards_provider_source_scope_and_permissions(studio, monkeypa
     url = f"{base}/generations/{source['id']}"
     body = {"provider": "mock", "mode": "expression", "preset": "happy"}
     assert client.post(url + "/character", json=body).status_code == 422
-    monkeypatch.setattr(service, "_provider_instance", lambda *args: GptImageProvider(token="test"))
+    monkeypatch.setattr(
+        service, "_provider_instance", lambda *args, **kwargs: GptImageProvider(token="test")
+    )
     body["provider"] = "gpt_image"
     with sessions() as db:
         g = db.get(Generation, uuid.UUID(source["id"]))
@@ -561,7 +563,7 @@ def test_inpaint_mask_provenance_and_project_guards(studio, monkeypatch):
             or {"data": [{"b64_json": base64.b64encode(media_engine.mock_image()).decode()}]}
         ),
     )
-    monkeypatch.setattr(service, "_provider_instance", lambda *args: provider)
+    monkeypatch.setattr(service, "_provider_instance", lambda *args, **kwargs: provider)
     job = post_ok(client, f"{base}/generations/{original['id']}/inpaint", body)
     assert job["status"] == "succeeded", job
     assert job["input_snapshot"]["operation"] == "inpaint"
@@ -591,7 +593,7 @@ def test_inpaint_rejects_unsupported_empty_and_invalid_selection(studio, monkeyp
         f"{base}/media/shot/{ids['shot']}/upload",
         files={"file": ("source.png", media_engine.mock_image(), "image/png")},
     ).json()
-    monkeypatch.setattr(service, "_provider_instance", lambda *args: MockProvider())
+    monkeypatch.setattr(service, "_provider_instance", lambda *args, **kwargs: MockProvider())
     path = f"{base}/generations/{original['id']}/inpaint"
     body = {
         "provider": "mock",

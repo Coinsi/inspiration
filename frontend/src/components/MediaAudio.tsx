@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 
-export function MediaAudio({ src }: { src: string }) {
+export function MediaAudio({ src, label }: { src: string; label?: string }) {
   const [failed, setFailed] = useState(false);
   const zh = useI18n().lang === "zh";
   return (
     <div className="space-y-3 bg-elevated p-3">
       <p className="text-xs text-muted-foreground">
-        {zh ? "提取的音轨" : "Extracted audio"}
+        {label || (zh ? "提取的音轨" : "Extracted audio")}
       </p>
       <audio
         src={src}

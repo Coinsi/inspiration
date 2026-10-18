@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pause, Play, RotateCcw, Maximize, Minimize } from "lucide-react";
 import { api, blobUrl, type Generation, type Shot } from "@/lib/api";
 import { timelineDuration, type TimelineContent } from "@/lib/timeline-edit";
 import { audioEnvelope, transitionAt } from "@/lib/timeline-interaction";
@@ -175,6 +175,20 @@ export function TimelinePlayback({
   subtitleMode?: string;
   disabled?: boolean;
 }) {
+  const qc = useQueryClient();
+  const shell = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const changed = () =>
+      setFullscreen(document.fullscreenElement === shell.current);
+    document.addEventListener("fullscreenchange", changed);
+    return () => document.removeEventListener("fullscreenchange", changed);
+  }, []);
+  const stamp = (ms: number) => {
+    const seconds = Math.floor(ms / 1000);
+    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  };
   const root = useRef<HTMLDivElement>(null),
     [size, setSize] = useState({ width: 640, height: 360 }),
     [playing, setPlaying] = useState(false),
@@ -283,12 +297,15 @@ export function TimelinePlayback({
     }
   }
   const seek = (value: number) => {
-      setPlaying(false);
-      onTime(value);
+      const target = Math.max(0, Math.min(value, Math.max(0, total - 1)));
+      // Seeking changes position, not the user's playback intent.
+      // Update the clock immediately so the next animation frame cannot restore the old position.
+      latest.current.time = target;
+      onTime(target);
     },
     width = Math.min(size.width, Math.max(1, size.height) * ratio);
   return (
-    <div className="timeline-composition">
+    <div ref={shell} className="timeline-composition">
       <div ref={root} className="timeline-composition-stage">
         <div
           className="timeline-composition-frame"
@@ -312,7 +329,7 @@ export function TimelinePlayback({
               transition.active.length === 2 ? (incoming ? p : 1 - p) : 1;
             return (
               <div
-                key={`base-${s.index}`}
+                key={`${attempt}-base-${s.index}`}
                 data-preview-base={s.index}
                 style={{ position: "absolute", inset: 0, opacity, clipPath }}
               >
@@ -336,7 +353,7 @@ export function TimelinePlayback({
           })}
           {visual.map((v) => (
             <div
-              key={v.id}
+              key={`${attempt}-${v.id}`}
               data-layer-id={v.id}
               className={v.id === selected ? "is-selected" : ""}
               style={{
@@ -375,7 +392,7 @@ export function TimelinePlayback({
       {!mute &&
         audio.map((a) => (
           <PlaybackMedia
-            key={`audio-${a.index}`}
+            key={`${attempt}-audio-${a.index}`}
             projectId={projectId}
             generationId={a.generation_id}
             mediaKey={`audio-${a.index}`}
@@ -392,7 +409,10 @@ export function TimelinePlayback({
             status={status}
           />
         ))}
-      <div className="timeline-live-controls">
+      <div
+        className="timeline-live-controls"
+        style={{ width: Math.max(280, width), maxWidth: "100%" }}
+      >
         <button
           aria-label={playing ? "暂停时间线" : "播放时间线"}
           disabled={!total || !!error || disabled}
@@ -404,9 +424,10 @@ export function TimelinePlayback({
           <RotateCcw size={14} />
         </button>
         <label className="timeline-composition-scrub">
-          <span>{(now / 1000).toFixed(2)}s</span>
+          <span>{stamp(now)}</span>
           <input
             aria-label="合成预览位置"
+            aria-valuetext={`${stamp(now)} / ${stamp(total)}`}
             type="range"
             min={0}
             max={Math.max(0, total - 1)}
@@ -414,12 +435,44 @@ export function TimelinePlayback({
             value={now}
             onChange={(e) => seek(Number(e.target.value))}
           />
-          <span>{(total / 1000).toFixed(1)}s</span>
+          <span>{stamp(total)}</span>
         </label>
+        <button
+          aria-label={fullscreen ? "退出全屏预览" : "全屏预览"}
+          onClick={() => {
+            const action = fullscreen
+              ? document.exitFullscreen()
+              : shell.current?.requestFullscreen();
+            void action?.catch(() =>
+              setError("无法进入全屏，请使用浏览器支持的预览方式"),
+            );
+          }}
+        >
+          {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
       </div>
+      {!allReady && !error && total > 0 && (
+        <p role="status" className="timeline-preview-notice">
+          正在载入当前画面与声音…
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-danger text-xs p-2">
           {error}
+          <button
+            className="ml-3 underline"
+            onClick={() => {
+              setPlaying(false);
+              setError("");
+              ready.current = {};
+              void qc.invalidateQueries({
+                queryKey: ["generation", projectId],
+              });
+              setAttempt((n) => n + 1);
+            }}
+          >
+            重新加载预览
+          </button>
         </p>
       )}
     </div>

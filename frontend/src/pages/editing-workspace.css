@@ -1,0 +1,284 @@
+/* A bounded editing workspace: panels scroll, the picture and tracks stay in view. */
+.cuts-page {
+  max-width: none;
+  padding: 8px 16px 12px;
+}
+.cuts-page-header {
+  height: 34px;
+  margin-bottom: 6px;
+}
+.cuts-page-header p {
+  display: none;
+}
+.cuts-page-header h1 {
+  font-size: 16px;
+}
+.editing-project-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+}
+.editing-project-bar .timeline-work-links {
+  flex: 1;
+  padding: 0;
+  min-width: 0;
+}
+.editing-project-bar .timeline-document-bar {
+  border: 0;
+  padding: 0;
+  max-width: 360px;
+}
+.editing-project-bar .timeline-document-bar label {
+  font-size: 0;
+}
+.editing-project-bar .timeline-document-bar .studio-select-trigger {
+  width: 240px;
+}
+.timeline-draft.editing-workspace {
+  height: calc(100dvh - 196px);
+  min-height: 510px;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 310px;
+  grid-template-rows: 44px minmax(180px, 1fr) 36px var(--track-height, 210px);
+  gap: 8px;
+  position: relative;
+}
+.editing-workspace > * {
+  min-width: 0;
+  min-height: 0;
+}
+.editing-workspace > .timeline-edit-bar {
+  grid-column: 1/-1;
+  grid-row: 1;
+  position: static;
+  padding: 4px 8px;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.editing-workspace .timeline-edit-bar h3 {
+  font-size: 0;
+}
+.editing-workspace .timeline-edit-bar h3 span {
+  font-size: 12px;
+}
+.editing-main-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.editing-workspace > .editing-media {
+  grid-column: 1;
+  grid-row: 2;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.editing-media header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  gap: 6px;
+}
+.editing-media header span {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+.editing-media-list {
+  display: grid;
+  gap: 10px;
+}
+.editing-media-list .timeline-thumbnail {
+  width: 100%;
+  text-align: left;
+}
+.editing-media-list .timeline-thumbnail > div:first-child {
+  height: 82px;
+}
+.editing-media-list .timeline-thumbnail > div:last-child p {
+  font-size: 12px;
+}
+.editing-workspace > .timeline-preview-grid {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  margin: 0;
+  overflow: hidden;
+}
+.editing-workspace > .timeline-preview-grid[hidden] {
+  display: flex;
+}
+.editing-workspace .timeline-monitor {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.editing-workspace .timeline-monitor .timeline-monitor-screen {
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  flex: 1;
+  border-radius: 10px;
+}
+.editing-workspace .timeline-monitor > div:last-child {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.editing-workspace .timeline-monitor > div:last-child > span {
+  max-width: 65%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editing-workspace > .editing-properties {
+  grid-column: 3;
+  grid-row: 2;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.editing-properties .timeline-editor-tabs {
+  padding: 0 6px;
+  gap: 0;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.editing-properties .timeline-editor-tabs button {
+  padding: 12px 6px;
+  font-size: 11px;
+}
+.editing-properties .timeline-editor-panel {
+  padding: 10px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.editing-properties .timeline-clip-inspector > .grid {
+  grid-template-columns: 1fr;
+}
+.editing-properties .timeline-clip-inspector {
+  padding: 8px;
+}
+.editing-properties .timeline-editor-panel h3 {
+  font-size: 12px;
+}
+.editing-properties .grid {
+  grid-template-columns: 1fr;
+}
+.editing-workspace > .timeline-selection-tools {
+  grid-column: 1/3;
+  grid-row: 3;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: auto;
+  white-space: nowrap;
+}
+.editing-workspace .timeline-selection-tools > span:last-child {
+  display: none;
+}
+.editing-track-size {
+  grid-column: 3;
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.editing-track-size input {
+  width: 100px;
+  accent-color: hsl(var(--primary));
+}
+.editing-workspace > .timeline-overview {
+  grid-column: 1/-1;
+  grid-row: 4;
+  overflow: auto;
+}
+.editing-workspace .timeline-overview header {
+  padding: 6px 12px;
+  position: sticky;
+  top: 0;
+  background: hsl(var(--card));
+  z-index: 4;
+}
+.editing-workspace > .timeline-render-feedback,
+.editing-workspace > .timeline-validation,
+.editing-workspace > p[role="alert"] {
+  position: absolute;
+  bottom: calc(var(--track-height) + 48px);
+  left: 190px;
+  right: 320px;
+  z-index: 10;
+  max-height: 150px;
+  overflow: auto;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+}
+.cuts-delivery-management {
+  margin-top: 8px;
+}
+@media (max-width: 1150px) {
+  .timeline-draft.editing-workspace {
+    grid-template-columns: 140px minmax(0, 1fr) 260px;
+  }
+  .editing-workspace .timeline-edit-bar {
+    overflow-x: auto;
+  }
+  .editing-workspace .timeline-edit-bar > div {
+    flex-shrink: 0;
+  }
+  .editing-workspace > .timeline-render-feedback,
+  .editing-workspace > .timeline-validation {
+    left: 150px;
+    right: 270px;
+  }
+}
+@media (max-width: 950px) {
+  .timeline-draft.editing-workspace {
+    height: auto;
+    min-height: 0;
+    grid-template-columns: 130px minmax(0, 1fr);
+    grid-template-rows: auto 330px auto var(--track-height) auto;
+  }
+  .editing-workspace > .timeline-edit-bar {
+    flex-wrap: wrap;
+  }
+  .editing-workspace > .editing-properties {
+    grid-column: 1/-1;
+    grid-row: 5;
+    max-height: 460px;
+  }
+  .editing-workspace > .timeline-selection-tools {
+    grid-column: 1;
+    grid-row: 3;
+    flex-wrap: wrap;
+  }
+  .editing-workspace > .editing-track-size {
+    grid-column: 2;
+  }
+  .editing-workspace > .timeline-render-feedback,
+  .editing-workspace > .timeline-validation {
+    left: 8px;
+    right: 8px;
+    bottom: auto;
+    top: 70px;
+  }
+  .editing-project-bar {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding-bottom: 6px;
+  }
+}

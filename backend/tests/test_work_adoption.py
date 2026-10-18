@@ -29,7 +29,7 @@ def test_work_shared_by_conversations_but_not_messages(studio):
     client, sessions, ids = studio
     root = f"/api/v1/projects/{ids['project']}"
     work = post_ok(client, root + "/works", {"title": "雨夜短片"})
-    assert client.get(root + "/scripts/" + work["script_id"]).status_code == 200
+    assert work["script_id"] is None  # A work no longer creates an unrelated empty script.
     a = post_ok(client, root + "/conversations", {"title": "方向甲", "work_id": work["id"]})
     b = post_ok(client, root + "/conversations", {"title": "方向乙", "work_id": work["id"]})
     assert a["id"] != b["id"] and a["work_id"] == b["work_id"]

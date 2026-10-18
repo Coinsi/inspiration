@@ -56,6 +56,17 @@ async def lifespan(app):
         from app.modules.generation.jobs import recover_local
 
         recover_local()
+    delivery_stop = None
+    archive_stop = None
+    if not settings.celery_eager:
+        from app.modules.engineering.delivery import start as start_delivery
+
+        delivery_stop = start_delivery()
+        background_workers["engineering_delivery"] = delivery_stop.is_alive
+        from app.modules.engineering.archive_jobs import start as start_archives
+
+        archive_stop = start_archives()
+        background_workers["engineering_archives"] = archive_stop.is_alive
     agent_stop = None
     transcription_stop = None
     if settings.transcription_worker_enabled:
@@ -74,6 +85,10 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if archive_stop:
+            await to_thread(archive_stop)
+        if delivery_stop:
+            await to_thread(delivery_stop)
         if processing_stop:
             await to_thread(processing_stop)
         if transcription_stop:
@@ -120,6 +135,8 @@ app.include_router(agent_router, prefix="/api/v1")
 app.include_router(conversation_router, prefix="/api/v1")
 from app.modules.conversation.works import router as works_router
 app.include_router(works_router, prefix="/api/v1")
+from app.modules.engineering.router import router as engineering_router
+app.include_router(engineering_router, prefix="/api/v1")
 from app.modules.activity.router import router as activity_router
 app.include_router(activity_router, prefix="/api/v1")
 app.include_router(canvas_router, prefix="/api/v1")

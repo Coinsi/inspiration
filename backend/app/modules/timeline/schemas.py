@@ -23,13 +23,20 @@ class TimelineOut(BaseModel):
 
 
 class TimelineItemIn(BaseModel):
-    shot_id: uuid.UUID
+    id: uuid.UUID | None = None
+    shot_id: uuid.UUID | None = None
     generation_id: uuid.UUID | None = None
     in_point_ms: int = Field(0, ge=0, le=1_800_000)
     out_point_ms: int = Field(0, ge=0, le=1_800_000)
     duration_ms: int = Field(0, ge=0, le=1_800_000)
     transition: dict | None = None
     note: str | None = None
+
+    @model_validator(mode="after")
+    def source_required(self):
+        if not self.shot_id and not self.generation_id:
+            raise ValueError("片段需要固定素材或关联镜头")
+        return self
 
 
 class SetItemsIn(BaseModel):
@@ -47,6 +54,7 @@ class SubtitleSource(BaseModel):
 
 
 class SubtitleCue(BaseModel):
+    id: uuid.UUID | None = None
     start_ms: int = Field(ge=0, le=1_800_000)
     end_ms: int = Field(ge=100, le=1_800_000)
     text: str = Field(min_length=1, max_length=4000)
@@ -54,6 +62,7 @@ class SubtitleCue(BaseModel):
 
 
 class AudioIn(BaseModel):
+    id: uuid.UUID | None = None
     generation_id: uuid.UUID
     name: str = Field(default="音轨", max_length=255)
     kind: Literal["dialogue", "music", "effect"] = "music"
@@ -108,7 +117,7 @@ class SubtitleParseIn(BaseModel):
 class TimelineItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
-    shot_id: uuid.UUID
+    shot_id: uuid.UUID | None
     generation_id: uuid.UUID | None
     ordinal: int
     in_point_ms: int

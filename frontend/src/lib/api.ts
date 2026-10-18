@@ -446,6 +446,8 @@ export interface GenJob {
 }
 export interface Generation {
   input_refs?: {
+    engineering_change_id?: string;
+    engineering_work_id?: string;
     original_prompt?: string;
     skills?: { id: string; name: string; revision: number }[];
     library_origin?: {

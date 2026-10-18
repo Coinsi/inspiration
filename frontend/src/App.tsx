@@ -18,6 +18,7 @@ const Canvas = lazy(() => import("@/pages/Canvas"));
 const Director = lazy(() => import("@/pages/Director"));
 const Evidence = lazy(() => import("@/pages/Evidence"));
 const Transcriptions = lazy(() => import("@/pages/Transcriptions"));
+const Works = lazy(() => import("@/pages/Works"));
 const Cuts = lazy(() => import("@/pages/Cuts"));
 const Narrative = lazy(() => import("@/pages/Narrative"));
 const ProjectMembers = lazy(() => import("@/pages/ProjectMembers"));
@@ -87,6 +88,8 @@ export default function App() {
             <Route path="transcriptions" element={<Transcriptions />} />
             <Route path="agent" element={<Agent />} />
             <Route path="canvas" element={<Canvas />} />
+            <Route path="works" element={<Works />} />
+            <Route path="works/:workId" element={<Works />} />
             <Route path="cuts" element={<Cuts />} />
             <Route path="tasks" element={<Tasks />} />
             <Route path="members" element={<ProjectMembers />} />

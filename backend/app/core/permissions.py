@@ -7,6 +7,8 @@ from app.models.enums import Role
 
 # 写/敏感动作 → 允许的角色
 PERMISSIONS: dict[str, set[Role]] = {
+    "engineering.edit": {Role.admin, Role.director, Role.artist, Role.writer},
+    "engineering.adopt": {Role.admin, Role.director},
     "project.manage": {Role.admin},
     "director.edit": {Role.admin, Role.director, Role.artist},
     "member.manage": {Role.admin},

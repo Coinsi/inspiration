@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
 
     # 对象存储:minio(生产)| fs(本地文件系统,轻量自托管/开发)
     storage_backend: str = "minio"
+    storage_gc_enabled: bool = False
+    archive_staging_quota_bytes: int = Field(default=200 * 1024**3, ge=0)
+    archive_project_quota_bytes: int = Field(default=50 * 1024**3, ge=0)
+    archive_disk_headroom_bytes: int = Field(default=512 * 1024**2, ge=0)
+    archive_retention_days: int = Field(default=7, ge=1)
     fs_storage_dir: str = "./_storage"
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"

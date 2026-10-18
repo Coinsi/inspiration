@@ -762,3 +762,212 @@
   margin: 12px auto 20px;
   color: hsl(var(--muted-foreground));
 }
+
+/* Editing comes first; export and engineering controls open on demand. */
+.timeline-workflow-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0;
+}
+.timeline-workflow-bar p {
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.timeline-preview-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.timeline-preview-grid.is-exporting {
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+.timeline-export-panel[hidden] {
+  display: none;
+}
+.timeline-monitor-screen {
+  max-height: 48vh;
+  min-height: 220px;
+}
+.timeline-source-browser {
+  margin-top: 12px;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.timeline-source-browser summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.timeline-engineering-tools {
+  margin-top: 24px;
+  border-top: 1px solid hsl(var(--border));
+  padding: 16px 0;
+}
+.timeline-engineering-tools > summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+.timeline-engineering-tools > summary span {
+  margin-left: 12px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.timeline-render-feedback {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+}
+@media (max-width: 800px) {
+  .timeline-preview-grid.is-exporting {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .timeline-workflow-bar {
+    align-items: flex-start;
+  }
+  .timeline-engineering-tools > summary span {
+    display: block;
+    margin: 8px 0;
+  }
+}
+
+/* Fit the preview to the viewport and keep transport controls beside the image. */
+.timeline-monitor-screen {
+  height: clamp(300px, 54vh, 720px);
+  max-height: none;
+  border: 0;
+  background: #0b0c0f;
+}
+.timeline-composition {
+  align-items: center;
+  padding: 16px;
+  position: relative;
+}
+.timeline-composition-stage {
+  width: 100%;
+}
+.timeline-live-controls {
+  flex-shrink: 0;
+  border-radius: 8px;
+  min-height: 40px;
+}
+.timeline-live-controls button {
+  min-width: 32px;
+  min-height: 32px;
+}
+.timeline-live-controls input {
+  cursor: pointer;
+  accent-color: hsl(var(--primary));
+}
+.timeline-live-controls span {
+  white-space: nowrap;
+}
+.timeline-composition:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #0b0c0f;
+}
+.timeline-preview-notice {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  padding: 6px 10px;
+  background: #111c;
+  border-radius: 8px;
+  color: #eee;
+  font-size: 12px;
+}
+.timeline-editor-tabs {
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.timeline-editor-tabs button {
+  white-space: nowrap;
+}
+.timeline-overview header {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.timeline-workflow-bar {
+  flex-wrap: wrap;
+}
+.cuts-page {
+  padding-top: 12px;
+}
+@media (max-width: 700px) {
+  .cuts-page {
+    padding: 12px 12px 28px;
+  }
+  .timeline-monitor-screen {
+    height: clamp(260px, 45vh, 480px);
+  }
+  .timeline-composition {
+    padding: 8px;
+  }
+  .timeline-document-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .timeline-document-bar label {
+    min-width: 0;
+  }
+  .cuts-create-timeline {
+    flex-wrap: wrap;
+  }
+  .timeline-workflow-bar p {
+    order: 3;
+    width: 100%;
+  }
+}
+
+.timeline-monitor {
+  container-type: inline-size;
+}
+.timeline-monitor-screen {
+  height: clamp(220px, min(54vh, calc(56.25cqw + 90px)), 720px);
+}
+.timeline-monitor[data-aspect="9:16"] .timeline-monitor-screen {
+  height: clamp(260px, 54vh, 720px);
+}
+.timeline-monitor[data-aspect="1:1"] .timeline-monitor-screen {
+  height: clamp(220px, min(54vh, calc(100cqw + 90px)), 720px);
+}
+
+/* Remove repeated framing above the editor so the timeline stays within reach. */
+.timeline-work-links {
+  padding: 8px 0;
+  font-size: 12px;
+}
+.timeline-document-bar {
+  padding-bottom: 8px;
+}
+.timeline-document-bar h2 {
+  display: none;
+}
+.timeline-document-bar label {
+  white-space: nowrap;
+}
+.timeline-edit-bar {
+  padding-top: 6px;
+}
+.timeline-draft {
+  gap: 10px;
+}
+.timeline-workflow-bar {
+  margin: 4px 0;
+}
+.timeline-monitor-screen {
+  height: clamp(220px, min(46vh, calc(56.25cqw + 90px)), 640px);
+}
+.timeline-monitor[data-aspect="9:16"] .timeline-monitor-screen {
+  height: clamp(260px, 46vh, 640px);
+}
+.timeline-monitor[data-aspect="1:1"] .timeline-monitor-screen {
+  height: clamp(220px, min(46vh, calc(100cqw + 90px)), 640px);
+}
+
+/* Keep recovery and saving available while editing long timelines. */
+.timeline-edit-bar { position: sticky; top: 0; z-index: 20; background: hsl(var(--bg)); padding: 8px 10px; border: 1px solid hsl(var(--border)); border-radius: 10px; }
+.timeline-selection-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+.timeline-clip-inspector > div:first-child { flex-wrap: wrap; }
+
+.timeline-validation { border: 1px solid hsl(var(--border)); border-left: 3px solid #cc7833; padding: 12px; border-radius: 8px; display: grid; gap: 8px; font-size: 13px; }

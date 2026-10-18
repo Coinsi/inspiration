@@ -264,13 +264,14 @@ def test_materialization_cancellation_keeps_type_and_closes_stream_and_temp(
     from app.modules.generation import media_engine
 
     stream = io.BytesIO(b"object storage upload")
-    blob = SimpleNamespace(storage_uri=str(tmp_path / "not-local"))
+    blob = SimpleNamespace(storage_uri="test-bucket/not-local")
     db = SimpleNamespace(get=lambda *_: blob)
     temporary_directory = materialization.tempfile.TemporaryDirectory
     created = []
 
     def tracked_directory(**kwargs):
-        directory = temporary_directory(dir=tmp_path, **kwargs)
+        kwargs["dir"] = tmp_path
+        directory = temporary_directory(**kwargs)
         created.append(Path(directory.name))
         return directory
 

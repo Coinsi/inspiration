@@ -18,6 +18,9 @@ def library_migration_schema(monkeypatch):
     """An actual 0027 installation; never run migrations on the caller's schema."""
     from app.core.config import settings
 
+    # Alembic runs inside pytest here; retain pytest's handlers and logger state.
+    monkeypatch.setattr("logging.config.fileConfig", lambda *args, **kwargs: None)
+
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL required")
