@@ -8,7 +8,11 @@
 
 面向短片、动漫和 AI 影视创作的 Web 工作台。从整理故事、积累参考，到探索画面、编排镜头和剪辑成片，让每一步创作都有上下文，每一份素材都能继续使用。
 
-[界面预览](#界面预览) · [核心能力](#核心能力) · [快速开始](#快速开始) · [文档导航](docs/README.md) · [反馈与建议](https://github.com/Coinsi/inspiration/issues)
+[访问在线网站](https://coinisi.com) · [界面预览](#界面预览) · [核心能力](#核心能力) · [快速开始](#快速开始) · [文档导航](docs/README.md) · [反馈与建议](https://github.com/Coinsi/inspiration/issues)
+
+**在线网站：[coinisi.com](https://coinisi.com)** · [进入工作台](https://coinisi.com/login)
+
+无需在本地安装即可访问线上版本。工作台需要登录；下文的演示账号仅用于本地开发环境，不适用于在线网站。
 
 ![Inspiration 创作工作台：从故事想法开始，连接项目中的各个创作环节](docs/screenshots/workbench.png)
 
@@ -71,6 +75,12 @@ Inspiration 把这些事情组织在一起：
 
 ## 快速开始
 
+### 在线访问
+
+打开 **[https://coinisi.com](https://coinisi.com)** 查看官网，通过[登录页面](https://coinisi.com/login)进入创作工作台。
+
+当前线上版本使用 HTTPS，由 OpenResty 代理到应用服务；PostgreSQL 保存业务数据，MinIO 保存上传文件及处理产物。语义检索及 MediaCMS 外部处理服务暂未启用，相关能力以实际配置为准。
+
 ### Windows 本地体验
 
 准备 **Python 3.11+、Node.js 20+**；没有本地 PostgreSQL 等基础服务时，需要 Docker Desktop。克隆仓库后，双击根目录的 **`启动项目.bat`**，或运行：
@@ -99,14 +109,20 @@ docker compose up --build -d
 
 [完整安装与排错](docs/GETTING_STARTED.md) · [后端开发](backend/README.md) · [前端开发](frontend/README.md)
 
+### 服务器部署与自动更新
+
+生产部署使用独立的 [Compose 配置与部署指南](deploy/production/README.md)，配合 1Panel / OpenResty 管理域名和 HTTPS。应用容器更新时，数据库和对象存储的数据卷保留。
+
+本仓库已配置 GitHub Actions：推送到 `main` 后先运行回归检查，通过后构建镜像并经专用 SSH 部署密钥更新服务器。只修改或提交本地代码不会触发部署；自建部署需要另外配置服务器、运行环境及 GitHub Secrets，详见部署指南。
+
 ## 当前进展与边界
 
-项目持续开发中，适合本地体验、创作流程验证和二次开发。
+项目持续开发中，已提供在线网站，也支持本地体验、创作流程验证和二次开发。
 
 - **真实模型接入仍需验收。** 已有 OpenAI Chat / Images / Videos 兼容协议及旧自定义网关适配；供应商实际可用性、生成质量和计费需逐一验证。Mock 结果用于流程演示。
 - **素材检索与转写按需开启。** WISE 提供画面/声音检索，MediaCMS 提供预览/转码/字幕处理；物体区域检索须单独准备模型并验收，人脸默认关闭。语义检索返回候选，转写结果需要校对；短样本通过不代表任意长片、码率和批量规模都已验证。
 - **声音创作与部分账号能力仍在后续计划。** 已有音轨和字幕编排；完整声音创作、邮件验证、邮件找回密码、具体第三方登录尚未接通。
-- **面向公网部署需单独配置。** 替换开发密钥与默认凭据，配置供应商密钥加密、TLS、访问范围和备份。参见[部署与运行说明](docs/59-运行可靠性与部署修复.md)。
+- **自建公网部署需单独配置。** 替换开发密钥与默认凭据，配置供应商密钥加密、TLS、访问范围和备份。参见[生产部署指南](deploy/production/README.md)和[部署与运行说明](docs/59-运行可靠性与部署修复.md)。
 
 ## 面向开发者
 
