@@ -47,9 +47,6 @@ def library_migration_schema(monkeypatch):
 def seed_legacy_library(conn, schema):
     """Use real FKs and 0027 column metadata, including a pre-upgrade ranged use."""
     from app.models.identity import Project, User
-    from app.models.library import LibraryMedia
-    from app.models.narrative import Scene, Script
-    from app.models.shot import Shot
 
     with Session(bind=conn, join_transaction_mode="create_savepoint") as db:
         user = User(username="migration", email="migration@example.test", display_name="Migration")
@@ -58,19 +55,32 @@ def seed_legacy_library(conn, schema):
         project = Project(code="MIGRATION", name="Migration", owner_id=user.id)
         db.add(project)
         db.flush()
-        script = Script(project_id=project.id, code="SCR-1", title="Script")
-        db.add(script)
-        db.flush()
-        scene = Scene(
-            project_id=project.id, script_id=script.id, code="SC-1", ordinal=1, title="Scene"
-        )
-        db.add(scene)
-        db.flush()
-        shot = Shot(project_id=project.id, scene_id=scene.id, code="SH-1", ordinal=1, title="Shot")
-        media = LibraryMedia(project_id=project.id, name="Legacy video")
-        db.add_all([shot, media])
-        db.flush()
-        ids = {"shot": shot.id, "media": media.id, "version": uuid.uuid4()}
+        # This database is deliberately older than the current ORM models.
+        # Reflect the historical tables instead of inserting newly added columns.
+        legacy = MetaData()
+        scripts = Table("script", legacy, schema=schema, autoload_with=conn)
+        scenes = Table("scene", legacy, schema=schema, autoload_with=conn)
+        shots = Table("shot", legacy, schema=schema, autoload_with=conn)
+        script_id, scene_id, shot_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        db.execute(scripts.insert().values(
+            id=script_id, project_id=project.id, code="SCR-1", title="Script",
+            status="draft", content_blocks=[],
+        ))
+        db.execute(scenes.insert().values(
+            id=scene_id, project_id=project.id, script_id=script_id,
+            code="SC-1", ordinal=1, title="Scene", body="", status="draft",
+        ))
+        db.execute(shots.insert().values(
+            id=shot_id, project_id=project.id, scene_id=scene_id,
+            code="SH-1", ordinal=1, title="Shot", description="",
+            production_status="draft", status="draft",
+        ))
+        media_table = Table("library_media", legacy, schema=schema, autoload_with=conn)
+        media_id = uuid.uuid4()
+        db.execute(media_table.insert().values(
+            id=media_id, project_id=project.id, name="Legacy video",
+        ))
+        ids = {"shot": shot_id, "media": media_id, "version": uuid.uuid4()}
         db.commit()
     metadata = MetaData()
     versions = Table("media_version", metadata, schema=schema, autoload_with=conn)
