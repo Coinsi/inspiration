@@ -12,9 +12,13 @@ compose=(docker compose --env-file "$root/runtime.env" -f "$release_dir/compose.
 # Leave enough headroom for database backup and uploaded media.
 available=$(df -Pk "$root" | awk 'NR==2 {print $4}')
 (( available >= 3145728 )) || { echo 'Less than 3 GiB free; deployment stopped'; exit 1; }
-docker load -i images.tar.gz
-rm images.tar.gz
-"${compose[@]}" up -d --wait postgres redis minio
+if [[ -f images.tar.gz ]]; then
+    docker load -i images.tar.gz
+    rm images.tar.gz
+else
+    docker image inspect "inspiration-api:$release" "inspiration-web:$release" >/dev/null
+fi
+"${compose[@]}" up -d --wait postgres redis
 mkdir -p "$root/backups"
 previous=$(readlink -f "$root/current" 2>/dev/null || true)
 if [[ -n "$previous" && -f "$previous/compose.yml" ]]; then

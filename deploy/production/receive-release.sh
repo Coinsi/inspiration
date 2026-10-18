@@ -27,9 +27,8 @@ PY
 tar -xzf "$work/bundle.tgz" -C "$work" --no-same-owner --no-same-permissions
 rm "$work/bundle.tgz"
 target="$root/releases/$release"
-if [[ -e "$target" ]]; then
-    echo 'This release directory already exists; inspect it before retrying' >&2
-    exit 1
-fi
-mv "$work" "$target"
+mkdir -p "$target"
+for file in compose.yml nginx.conf deploy.sh images.tar.gz; do
+    mv "$work/$file" "$target/$file"
+done
 bash "$target/deploy.sh" "$release"

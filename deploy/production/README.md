@@ -1,6 +1,6 @@
 # 4 核 / 4GB 单机部署
 
-独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。API 和单并发 Celery worker 共用持久工作目录；PostgreSQL、Redis AOF、MinIO 分别使用独立卷。仅发布 HTTP 80 端口，不影响已有 1Panel。
+独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。API 和单并发 Celery worker 共用持久工作目录，使用项目自带的 fs 存储；PostgreSQL、Redis AOF 分别使用独立卷。仅发布 HTTP 80 端口，不影响已有 1Panel。该单机方案不依赖 MinIO 的镜像供应，也减少内存占用。
 
 ## 首次准备
 
@@ -18,7 +18,7 @@ GitHub 构建两个镜像，将镜像与生产 Compose、Nginx 配置一并经 S
 
 每次升级先加载新镜像，等待基础服务健康，再停止应用服务并创建数据库备份，然后运行数据库迁移、启动新应用并等待就绪。升级期间有短暂停机，正在运行的任务应提前结束；120 秒优雅退出不能保证任意长任务完成。迁移或健康检查失败会标记 GitHub 部署失败，不自动恢复数据库，也不宣称已经回滚。检查 `/opt/inspiration/backups`、容器日志和数据库版本后再决定恢复方式。
 
-更新不会删除数据库、MinIO、Redis、工作目录数据卷，也不会重新初始化密钥。仅清理较旧的应用镜像以及超过七天的升级前数据库备份。数据库备份不包含素材；素材与环境密钥需另做异地备份。不要执行 `down -v` 或 `docker system prune --volumes`。
+更新不会删除数据库、Redis、工作目录数据卷，也不会重新初始化密钥。仅清理较旧的应用镜像以及超过七天的升级前数据库备份。数据库备份不包含素材；素材与环境密钥需另做异地备份。不要执行 `down -v` 或 `docker system prune --volumes`。
 
 生产配置默认单文件 512MiB、暂存总额 2GiB、预留 3GiB；这是业务软限制，不是磁盘硬配额。40GB 根盘仍需监控素材和卷占用。没有域名时仅有 HTTP，正式使用供应商密钥前应补域名和 HTTPS，或使用 SSH 隧道访问。
 
