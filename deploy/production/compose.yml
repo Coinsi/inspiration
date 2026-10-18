@@ -1,0 +1,111 @@
+name: inspiration-production
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: '3'
+
+x-app: &app
+  image: inspiration-api:${RELEASE:?RELEASE is required}
+  env_file: /opt/inspiration/runtime.env
+  environment:
+    DATABASE_URL: postgresql+psycopg://inspiration:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/inspiration
+    REDIS_URL: redis://redis:6379/0
+    MINIO_ENDPOINT: minio:9000
+  volumes:
+    - app-data:/data
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 120s
+  logging: *logging
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: inspiration
+      POSTGRES_DB: inspiration
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=60]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U inspiration -d inspiration']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes', --maxmemory, 96mb, --maxmemory-policy, noeviction]
+    volumes: [redis-data:/data]
+    mem_limit: 192m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
+    volumes: [minio-data:/data]
+    mem_limit: 384m
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    <<: *app
+    command: [uvicorn, 'app.main:app', --host, 0.0.0.0, --port, '8000', --proxy-headers, --forwarded-allow-ips, '*']
+    mem_limit: 1280m
+    cpus: 2
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=15).close()"]
+      interval: 30s
+      timeout: 20s
+      start_period: 60s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: [celery, -A, app.tasks.celery_app.celery_app, worker, -l, info, --concurrency=1, --prefetch-multiplier=1, --max-tasks-per-child=20]
+    mem_limit: 768m
+    cpus: 1
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+
+  web:
+    image: inspiration-web:${RELEASE:?RELEASE is required}
+    ports: ['80:80']
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  pgdata:
+  redis-data:
+  minio-data:
+  app-data:

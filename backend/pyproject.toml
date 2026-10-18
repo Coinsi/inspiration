@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "pyjwt>=2.8",
     "bcrypt>=4.1",
+    "cryptography>=42",
     "python-multipart>=0.0.9",
     "celery>=5.3",
     "redis>=5.0",

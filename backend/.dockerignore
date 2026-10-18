@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.venv
+venv
+__pycache__
+**/__pycache__
+*.egg-info
+.pytest_cache
+.ruff_cache
+.runtime
+_storage
+_library_staging
+_media_processing
+*.log
+tests

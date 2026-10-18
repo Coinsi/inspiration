@@ -1,0 +1,55 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: ['Regression checks']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Build release images
+        run: |
+          set -euo pipefail
+          RELEASE=$(git rev-parse HEAD)
+          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
+          docker build -t "inspiration-api:$RELEASE" backend
+          docker build -t "inspiration-web:$RELEASE" frontend
+          mkdir bundle
+          docker save "inspiration-api:$RELEASE" "inspiration-web:$RELEASE" | gzip -1 > bundle/images.tar.gz
+          cp deploy/production/{compose.yml,nginx.conf,deploy.sh} bundle/
+          tar -czf release.tgz -C bundle compose.yml nginx.conf deploy.sh images.tar.gz
+      - name: Transfer and deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy_key' EXIT
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=20 -o ServerAliveCountMax=30 \
+            "root@$DEPLOY_HOST" "deploy $RELEASE" < release.tgz
