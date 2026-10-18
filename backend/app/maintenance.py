@@ -153,8 +153,8 @@ def inventory():
         ).all()
     return {
         "objects": count,
-        "stored_bytes": size,
-        "by_mime": [{"mime": mime, "objects": n, "bytes": b} for mime, n, b in kinds],
+        "stored_bytes": int(size),
+        "by_mime": [{"mime": mime, "objects": n, "bytes": int(b)} for mime, n, b in kinds],
         "note": "去重后的当前数据库登记量，包含回收站和历史版本；不等于可回收空间。",
     }
 
@@ -203,6 +203,46 @@ def restore_objects(destination):
     return {"status": "restored", "objects": len(blobs)}
 
 
+def migrate_fs_to_minio():
+    """Run with all writers stopped. Keep sources and commit only verified copies."""
+    if settings.storage_backend != "minio":
+        raise ValueError("对象存储迁移要求 STORAGE_BACKEND=minio")
+    source_root = Path(settings.fs_storage_dir).resolve()
+    migrated = 0
+    with SessionLocal() as db:
+        blobs = list(db.scalars(select(Blob).with_for_update()))
+        local = [blob for blob in blobs if Path(blob.storage_uri).is_absolute()]
+        # Validate every source before uploading or changing any database address.
+        for blob in local:
+            path = Path(blob.storage_uri).resolve()
+            if (
+                not path.is_relative_to(source_root)
+                or not path.is_file()
+                or path.stat().st_size != blob.size_bytes
+                or digest(path) != blob.hash
+            ):
+                raise ValueError("本地素材缺失或校验失败；未修改数据库存储地址")
+        # Also initialize/verify the target bucket on a fresh installation.
+        client = cas._minio()
+        for blob in local:
+            cas.put_file(db, Path(blob.storage_uri), blob.mime, force_store=True)
+            bucket, object_name = blob.storage_uri.split("/", 1)
+            response = client.get_object(bucket, object_name)
+            hasher, size = hashlib.sha256(), 0
+            try:
+                while chunk := response.read(1024 * 1024):
+                    hasher.update(chunk)
+                    size += len(chunk)
+            finally:
+                response.close()
+                response.release_conn()
+            if hasher.hexdigest() != blob.hash or size != blob.size_bytes:
+                raise ValueError("对象存储副本校验失败；未提交数据库存储地址")
+            migrated += 1
+        db.commit()
+    return {"status": "verified", "migrated": migrated, "local_sources_preserved": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -221,6 +261,7 @@ def main():
     restore.add_argument("destination")
     sub.add_parser("inventory")
     sub.add_parser("audit")
+    sub.add_parser("migrate-fs-to-minio")
     args = parser.parse_args()
     if args.command == "backup":
         result = backup(args.destination, args.pg_dump, args.database_only, args.allow_missing)
@@ -230,6 +271,8 @@ def main():
         result = restore_objects(args.destination)
     elif args.command == "audit":
         result = audit_storage()
+    elif args.command == "migrate-fs-to-minio":
+        result = migrate_fs_to_minio()
     else:
         result = inventory()
     print(json.dumps(result, ensure_ascii=False, indent=2))

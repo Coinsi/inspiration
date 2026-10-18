@@ -50,6 +50,27 @@ services:
       timeout: 3s
       retries: 20
 
+  minio:
+    image: inspiration-minio:source-7aac2a2c5b7c
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
+      GOMEMLIMIT: 384MiB
+      GOGC: '50'
+    volumes: [minio-data:/data]
+    ports: ['127.0.0.1:9000:9000', '127.0.0.1:9001:9001']
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 256
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: [CMD, curl, -fsS, 'http://127.0.0.1:9000/minio/health/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
   api:
     <<: *app
     command: [uvicorn, 'app.main:app', --host, 0.0.0.0, --port, '8000', --proxy-headers, --forwarded-allow-ips, '*']
@@ -58,6 +79,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=15).close()"]
       interval: 30s
@@ -73,6 +95,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
 
   web:
     image: inspiration-web:${RELEASE:?RELEASE is required}
@@ -89,3 +112,4 @@ volumes:
   pgdata:
   redis-data:
   app-data:
+  minio-data:

@@ -1,6 +1,8 @@
 # 4 核 / 4GB 单机部署
 
-独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。API 和单并发 Celery worker 共用持久工作目录，使用项目自带的 fs 存储；PostgreSQL、Redis AOF 分别使用独立卷。仅发布 HTTP 80 端口，不影响已有 1Panel。该单机方案不依赖 MinIO 的镜像供应，也减少内存占用。
+独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。原文件使用 MinIO 对象存储，API 和单并发 Celery worker 共用持久暂存/导出目录；PostgreSQL、Redis AOF、MinIO 各有独立卷。网站发布 HTTP 80，MinIO 的 9000/9001 仅监听宿主回环地址，不影响已有 1Panel。
+
+MinIO 由 GitHub 从官方源码固定提交 `7aac2a2c5b7c882e68c1ce017d8256be2feea27f` 构建，不拉取已失效的旧 MinIO 镜像。构建层通过 GitHub Actions 缓存，普通业务更新复用编译结果；源码和许可证来源记录在镜像标签及 `/usr/share/doc/minio/LICENSE`。MinIO 内存上限 512MiB，Go 软内存目标 384MiB；需按实际上传负载观察。
 
 ## 首次准备
 
@@ -10,7 +12,7 @@
 4. 配置 GitHub `production` 环境的 Secrets：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`。known_hosts 应来自已核对的服务器主机密钥，不能在流水线中盲目信任新密钥。
 5. 手动运行 `Deploy production` 首次部署，或推送到 main 等待 `Regression checks` 全部通过后自动部署。手动运行用于首次部署与排错，不会等待另一条测试流水线。
 
-GitHub 构建两个镜像，将镜像与生产 Compose、Nginx 配置一并经 SSH 流传到服务器。无需服务器访问私有镜像仓库或在 4GB 内存中编译项目。只有 main 的 push 测试成功才触发自动发布；PR 测试不会部署。工作流手动运行应选择 main。
+GitHub 构建主 API、前端和 MinIO 三个镜像，将镜像与生产 Compose、Nginx 配置一并经 SSH 流传到服务器。无需服务器访问私有镜像仓库或在 4GB 内存中编译项目。只有 main 的 push 测试成功才触发自动发布；PR 测试不会部署。工作流手动运行应选择 main。
 
 ## 运行与更新
 
@@ -18,7 +20,11 @@ GitHub 构建两个镜像，将镜像与生产 Compose、Nginx 配置一并经 S
 
 每次升级先加载新镜像，等待基础服务健康，再停止应用服务并创建数据库备份，然后运行数据库迁移、启动新应用并等待就绪。升级期间有短暂停机，正在运行的任务应提前结束；120 秒优雅退出不能保证任意长任务完成。迁移或健康检查失败会标记 GitHub 部署失败，不自动恢复数据库，也不宣称已经回滚。检查 `/opt/inspiration/backups`、容器日志和数据库版本后再决定恢复方式。
 
-更新不会删除数据库、Redis、工作目录数据卷，也不会重新初始化密钥。仅清理较旧的应用镜像以及超过七天的升级前数据库备份。数据库备份不包含素材；素材与环境密钥需另做异地备份。不要执行 `down -v` 或 `docker system prune --volumes`。
+更新不会删除数据库、Redis、MinIO、工作目录数据卷，也不会重新初始化密钥。仅清理较旧的应用镜像以及超过七天的升级前数据库备份。数据库备份不包含素材；对象存储与环境密钥需另做异地备份。不要执行 `down -v` 或 `docker system prune --volumes`。
+
+从此前 fs 试用版切换时，先备份 `/opt/inspiration/runtime.env`，设置 `STORAGE_BACKEND=minio`、`MINIO_ENDPOINT=minio:9000`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET=inspiration`、`MINIO_SECURE=false`，保留原加密密钥和 app-data 卷。发布脚本在停写、备份数据库、执行结构迁移之后运行 `python -m app.maintenance migrate-fs-to-minio`：先核验全部本地源文件，再上传并回读校验每份副本，全部成功才提交数据库地址，原本地文件保留。失败会停止发布，不删除源文件；已上传但未提交的孤立对象不自动删除。后续发布重复执行时仅迁移尚为本地地址的对象。
+
+管理控制台可通过 SSH 转发 `127.0.0.1:9001` 访问，凭据位于服务器私有 runtime.env；不要把对象存储管理端口直接开放公网。业务下载仍经过主站鉴权。
 
 生产配置默认单文件 512MiB、暂存总额 2GiB、预留 3GiB；这是业务软限制，不是磁盘硬配额。40GB 根盘仍需监控素材和卷占用。没有域名时仅有 HTTP，正式使用供应商密钥前应补域名和 HTTPS，或使用 SSH 隧道访问。
 

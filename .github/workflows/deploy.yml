@@ -25,6 +25,15 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build pinned MinIO source
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/production/minio
+          load: true
+          tags: inspiration-minio:source-7aac2a2c5b7c
+          cache-from: type=gha,scope=inspiration-minio
+          cache-to: type=gha,mode=max,scope=inspiration-minio
       - name: Build release images
         run: |
           set -euo pipefail
@@ -33,7 +42,7 @@ jobs:
           docker build -t "inspiration-api:$RELEASE" backend
           docker build -t "inspiration-web:$RELEASE" frontend
           mkdir bundle
-          docker save "inspiration-api:$RELEASE" "inspiration-web:$RELEASE" | gzip -1 > bundle/images.tar.gz
+          docker save "inspiration-api:$RELEASE" "inspiration-web:$RELEASE" inspiration-minio:source-7aac2a2c5b7c | gzip -1 > bundle/images.tar.gz
           cp deploy/production/{compose.yml,nginx.conf,deploy.sh} bundle/
           tar -czf release.tgz -C bundle compose.yml nginx.conf deploy.sh images.tar.gz
       - name: Transfer and deploy

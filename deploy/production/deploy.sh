@@ -16,20 +16,21 @@ if [[ -f images.tar.gz ]]; then
     docker load -i images.tar.gz
     rm images.tar.gz
 else
-    docker image inspect "inspiration-api:$release" "inspiration-web:$release" >/dev/null
+    docker image inspect "inspiration-api:$release" "inspiration-web:$release" inspiration-minio:source-7aac2a2c5b7c >/dev/null
 fi
-"${compose[@]}" up -d --wait postgres redis
+"${compose[@]}" up -d --wait postgres redis minio
 mkdir -p "$root/backups"
 previous=$(readlink -f "$root/current" 2>/dev/null || true)
 if [[ -n "$previous" && -f "$previous/compose.yml" ]]; then
     "${compose[@]}" stop -t 120 api worker web
-    "${compose[@]}" exec -T postgres pg_dump -U inspiration -d inspiration -Fc > "$root/backups/before-$release.dump"
+    "${compose[@]}" exec -T postgres pg_dump -U inspiration -d inspiration -Fc > "$root/backups/before-$(date -u +%Y%m%dT%H%M%SZ)-$release.dump"
 fi
 if ! "${compose[@]}" run --rm --no-deps api alembic upgrade head; then
     echo 'Database migration failed. No automatic database restore was attempted.'
     echo 'Services remain stopped for inspection; backups are in /opt/inspiration/backups.'
     exit 1
 fi
+"${compose[@]}" run --rm --no-deps api python -m app.maintenance migrate-fs-to-minio
 "${compose[@]}" up -d --wait --wait-timeout 240
 "${compose[@]}" exec -T api python -c "from app.core.crypto import encrypt,decrypt; assert decrypt(encrypt('deployment-check')) == 'deployment-check'"
 ln -sfn "$release_dir" "$root/current"
