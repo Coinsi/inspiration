@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 PORTS = (8000, 5173, 15173, 25173, 35173)
 
@@ -55,7 +55,7 @@ def owned_processes(root: Path, processes):
         command = (p.get("CommandLine") or "").replace("/", "\\").lower()
         exe = (p.get("ExecutablePath") or "").replace("/", "\\").lower()
         # Match an actual argument, not an arbitrary substring in another checkout.
-        frontend = Path(exe).name == "node.exe" and re.search(
+        frontend = PureWindowsPath(exe).name == "node.exe" and re.search(
             r'(?:^|\s)"?' + re.escape(vite) + r'"?(?:\s|$)', command
         )
         backend = exe == python and re.search(
