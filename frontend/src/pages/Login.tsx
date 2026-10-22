@@ -97,13 +97,13 @@ export default function Login() {
           <span>
             Inspiration
             <span className="block text-[10px] font-normal tracking-[.24em] text-white/60">
-              CREATIVE STUDIO
+              {t("login.studio")}
             </span>
           </span>
         </div>
         <div className="login-story">
           <p className="text-[11px] tracking-[.24em] text-white/60">
-            FROM IMAGINATION TO FRAME
+            {t("login.storyEyebrow")}
           </p>
           <h1>
             {zh ? (
@@ -137,28 +137,33 @@ export default function Login() {
         </div>
       </section>
       <section className="login-pane">
-        <div className="login-appearance">
-          <Link to="/" className="text-xs text-muted-foreground mr-3">
-            返回官网
+        <div className="login-appearance" role="group" aria-label={t("login.appearance")}>
+          <Link to="/" className="login-home-link">
+            {t("login.home")}
           </Link>
           <button
+            type="button"
             onClick={() => setLang(zh ? "en" : "zh")}
-            className="studio-icon-button"
-            aria-label={t("shell.language")}
+            className="studio-icon-button login-language-button"
+            aria-label={t("login.switchLanguage")}
+            title={t("login.switchLanguage")}
           >
-            <Languages size={18} />
+            <Languages size={18} aria-hidden="true" />
+            <span>{t("login.languageName")}</span>
           </button>
           <button
+            type="button"
             onClick={toggle}
             className="studio-icon-button"
-            aria-label={t("shell.theme")}
+            aria-label={t(theme === "dark" ? "login.switchToLight" : "login.switchToDark")}
+            title={t(theme === "dark" ? "login.switchToLight" : "login.switchToDark")}
           >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === "dark" ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
           </button>
         </div>
         <div className="login-form-wrap">
           <p className="text-[11px] tracking-[.2em] text-faint">
-            WELCOME TO INSPIRATION
+            {t("login.welcome")}
           </p>
           <h2>
             {registering

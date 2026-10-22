@@ -5,6 +5,7 @@ import {
   Folder,
   PanelLeft,
   PanelLeftClose,
+  PanelLeftOpen,
   X,
   Search,
   ChevronRight,
@@ -162,6 +163,7 @@ export default function AppShell() {
         />
       )}
       <aside
+        id="workspace-sidebar"
         ref={mobileRef}
         role={narrow ? "dialog" : undefined}
         aria-modal={narrow && mobileOpen ? true : undefined}
@@ -173,30 +175,11 @@ export default function AppShell() {
         )}
       >
         {/* 头部 */}
-        <div
-          className={cn(
-            "flex items-center gap-2",
-            compact ? "flex-col px-2 pt-5 pb-3" : "min-h-20 px-4",
-          )}
-        >
-          <span className="studio-brand-mark shrink-0" aria-hidden="true">
-            <Clapperboard className="h-[18px] w-[18px]" />
-          </span>
-          {!compact && (
-            <span className="font-semibold tracking-tight flex-1">
-              Inspiration
-              <small className="block text-[11px] font-normal text-muted-foreground">
-                {lang === "zh" ? "创作工作台" : "Creative studio"}
-              </small>
-            </span>
-          )}
+        <div className="studio-sidebar-header">
           <button
+            type="button"
             onClick={() => (narrow ? setMobileOpen(false) : toggleCollapse())}
-            className={
-              compact
-                ? "flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-[11px] text-muted-foreground hover:bg-elevated"
-                : iconBtn
-            }
+            className="studio-sidebar-toggle"
             title={
               narrow
                 ? lang === "zh"
@@ -215,17 +198,25 @@ export default function AppShell() {
                   ? t("shell.expand")
                   : t("shell.collapse")
             }
-            aria-expanded={!compact}
+            aria-controls="workspace-sidebar"
+            aria-expanded={narrow ? mobileOpen : !compact}
           >
             {narrow ? (
-              <X className="h-4 w-4" />
+              <X size={18} aria-hidden="true" />
             ) : compact ? (
-              <PanelLeft className="h-4 w-4" />
+              <PanelLeftOpen size={18} aria-hidden="true" />
             ) : (
-              <PanelLeftClose className="h-4 w-4" />
+              <PanelLeftClose size={18} aria-hidden="true" />
             )}
-            {compact && <span>{lang === "zh" ? "展开" : "Expand"}</span>}
           </button>
+          {!compact && (
+            <span className="studio-sidebar-brand">
+              <span className="studio-brand-mark" aria-hidden="true">
+                <Clapperboard size={27} />
+              </span>
+              <span>Inspiration</span>
+            </span>
+          )}
         </div>
 
         <NavLink
@@ -360,6 +351,7 @@ export default function AppShell() {
             className={cn(iconBtn, "md:hidden")}
             onClick={() => setMobileOpen(true)}
             aria-label={lang === "zh" ? "打开导航" : "Open navigation"}
+            aria-controls="workspace-sidebar"
             aria-expanded={mobileOpen}
           >
             <PanelLeft className="h-5 w-5" />

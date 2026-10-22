@@ -631,7 +631,34 @@
   top: 28px;
   right: 30px;
   display: flex;
+  align-items: center;
   gap: 4px;
+}
+.login-home-link,
+.login-appearance .login-language-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  width: auto;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: hsl(var(--muted));
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.login-appearance .login-language-button {
+  gap: 6px;
+}
+.login-home-link:hover {
+  background: hsl(var(--elevated));
+  color: hsl(var(--fg));
+}
+.login-appearance a:focus-visible,
+.login-appearance button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 .login-form-wrap {
   width: 100%;

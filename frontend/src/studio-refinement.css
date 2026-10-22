@@ -2,9 +2,11 @@
 .studio-shell { padding: 8px 8px 8px 0; background: hsl(var(--surface)); }
 .studio-shell .studio-sidebar { margin: 0; border-radius: 0; }
 .studio-shell > div.flex { border-radius: 14px; overflow: hidden; background: hsl(var(--bg)); }
-.studio-sidebar > div:first-child { min-height: 72px; }
-.studio-sidebar > div:first-child > span:nth-child(2) { font-size: 22px; }
-.studio-sidebar > div:first-child small { display: none; }
+.studio-sidebar-header { display: flex; align-items: center; gap: 10px; height: 72px; flex-shrink: 0; padding: 0 16px 0 26px; }
+.studio-sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border-radius: 9px; color: hsl(var(--muted)); transition: background 160ms, color 160ms; }
+.studio-sidebar-toggle:hover { background: hsl(var(--elevated)); color: hsl(var(--fg)); }
+.studio-sidebar-brand { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
+.studio-sidebar-brand .studio-brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
 .studio-shell .studio-brand-mark, .studio-home .studio-brand-mark { background: transparent; color: hsl(var(--fg)); box-shadow: none; border: 0; }
 .studio-shell .studio-brand-mark svg, .studio-home .studio-brand-mark svg { width: 27px; height: 27px; }
 .studio-sidebar nav > div > div > a { font-size: 16px; font-weight: 400; border-radius: 9px; }
@@ -40,5 +42,5 @@
   .inspiration-carousel .studio-scene > span { font-size: 16px; bottom: 60px; left: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .shell-conversation-list > button, .scene-controls button, .studio-sidebar nav > div > div > button svg { transition: none; }
+  .shell-conversation-list > button, .scene-controls button, .studio-sidebar-toggle, .studio-sidebar nav > div > div > button svg { transition: none; }
 }
