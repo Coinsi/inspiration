@@ -22,7 +22,7 @@ GitHub 构建主 API、前端和 MinIO 三个镜像，将镜像与生产 Compose
 
 域名 A 记录指向服务器公网 IP；修复错误的 NS/解析区以及旧 AAAA 记录后再在面板申请 HTTPS 证书。上线前可以通过 IP 或本机 Host 覆盖验证代理，域名尚未正确解析时不能宣称 HTTPS 已完成。
 
-首次安装不创建 demo，也不自动创建正式用户；通过服务器中的应用代码创建个人账号后，可执行 `python -m app.modules.website.admin grant 用户名` 授予平台管理权限。公网注册接口在生产 Nginx 中暂时关闭。
+首次安装不创建 demo，也不自动创建正式用户。公网账号密码注册已开放，注册接口配置请求体大小限制与访问限流，应用层另有限流；新注册用户为普通账户。可执行 `python -m app.modules.website.admin grant 用户名` 为指定账户授予平台管理权限。邮箱验证和邮件找回密码尚未接通。
 
 每次升级先加载新镜像，等待基础服务健康，再停止应用服务并创建数据库备份，然后运行数据库迁移、启动新应用并等待就绪。升级期间有短暂停机，正在运行的任务应提前结束；120 秒优雅退出不能保证任意长任务完成。迁移或健康检查失败会标记 GitHub 部署失败，不自动恢复数据库，也不宣称已经回滚。检查 `/opt/inspiration/backups`、容器日志和数据库版本后再决定恢复方式。
 
@@ -52,7 +52,7 @@ GOOGLE_REGISTRATION_ENABLED=true
 
 Google Auth Platform 的 Web 客户端中，JavaScript 来源填写 `https://coinisi.com`，重定向 URI 填写上述完整回调地址。只申请 `openid email profile`。生产使用同一站点承载前端和 `/api/v1`，所有 OAuth Cookie 均使用 HttpOnly、SameSite=Lax 和 Secure；回调后的登录令牌通过同源 POST 换取，不写入 URL。代理应保留 Origin，并覆盖可信转发头。不要缓存 `/api/v1/auth/` 或 `/auth/google/complete`。面板 OpenResty 的回调访问日志也应关闭或去除查询参数，避免记录短期授权码。
 
-`GOOGLE_REGISTRATION_ENABLED=true` 允许已验证邮箱的 Google 用户首次登录时创建普通账户，不授予平台管理员或任何现有项目权限。设为 `false` 后已有绑定仍可登录，已登录账户仍可绑定。它不开放 Nginx 当前关闭的密码注册接口。已有邮箱不会自动合并：用户需先通过原登录方式进入账户安全设置，再主动绑定 Google。Google 创建的无密码账户使用 Google 登录，当前不提供设置本地密码或解绑入口。
+`GOOGLE_REGISTRATION_ENABLED=true` 允许已验证邮箱的 Google 用户首次登录时创建普通账户，不授予平台管理员或任何现有项目权限。设为 `false` 后已有绑定仍可登录，已登录账户仍可绑定。此开关独立于账号密码注册，不控制密码注册入口。已有邮箱不会自动合并：用户需先通过原登录方式进入账户安全设置，再主动绑定 Google。Google 创建的无密码账户使用 Google 登录，当前不提供设置本地密码或解绑入口。
 
 正式公开使用前，发布可访问的隐私政策等必要页面并配置 Google 品牌信息，按控制台提示完成发布/验证。客户端 JSON 只提供凭据和允许的地址，不能证明这些控制台设置或真实用户授权已完成。配置后发布新版本，再用浏览器完整验证取消授权、首次注册、再次登录、原账号绑定以及退出。
 
