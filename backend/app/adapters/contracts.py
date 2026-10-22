@@ -36,7 +36,7 @@ class ReferenceImage(BaseModel):
 def reference_error(refs: list[ReferenceImage], caps: Capabilities) -> str:
     images = [r for r in refs if r.kind == "image"]
     videos = [r for r in refs if r.kind == "video"]
-    if images and ("reference" not in caps.features or len(images) > caps.max_reference_images):
+    if images and len(images) > caps.max_reference_images:
         return (caps.reference_unavailable_reason
                 or f"当前模型最多支持 {caps.max_reference_images} 张参考图")
     if videos and (
@@ -48,6 +48,12 @@ def reference_error(refs: list[ReferenceImage], caps: Capabilities) -> str:
             return "参考视频只能使用普通参考用途，不能作为首帧或尾帧"
         if ref.role in ("first_frame", "last_frame") and ref.role not in caps.features:
             return "所选模型不支持此首尾帧输入"
+        if (
+            ref.kind == "image"
+            and ref.role not in ("first_frame", "last_frame")
+            and not caps.features.intersection({"reference", "img2img"})
+        ):
+            return caps.reference_unavailable_reason or "当前模型不支持参考图片"
     return ""
 
 

@@ -463,7 +463,7 @@ def test_character_generation_transmits_reference_and_retains_retry_provenance(s
         assert job["status"] == "succeeded", job
         assert job["input_snapshot"]["prompt"] == preview["prompt"]
         assert job["input_snapshot"]["references"] == [
-            {"blob_hash": source["output_blob_hash"], "role": "ref"}
+            {"blob_hash": source["output_blob_hash"], "role": "ref", "kind": "image"}
         ]
         assert b'name="image[]"' in requests[-1].data and reference in requests[-1].data
         assert preview["prompt"].encode() in requests[-1].data and requests[-1].full_url.endswith(
