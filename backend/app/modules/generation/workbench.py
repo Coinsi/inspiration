@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.contracts import ReferenceImage
+from app.adapters.contracts import ReferenceImage, reference_error
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.core.errors import AppError, CapabilityUnsupported, Conflict
@@ -61,19 +61,23 @@ def prepare(db, ctx, data):
     unique = set()
     for ref in data.references:
         if ref.generation_id in unique:
-            raise CapabilityUnsupported("同一图片不能重复引用")
+            raise CapabilityUnsupported("同一素材不能重复引用")
         unique.add(ref.generation_id)
-        g = jobs.source(db, ctx.project.id, ref.generation_id, True)
+        g = jobs.source(db, ctx.project.id, ref.generation_id)
         jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
+        if g.output_type not in ("image", "video"):
+            raise CapabilityUnsupported("请选择图片或视频素材")
+        if g.output_type == "video" and data.request_type.value != "video":
+            raise CapabilityUnsupported("参考视频只能用于生成视频")
         if ref.role != "reference" and (
             data.request_type.value != "video" or ref.role not in caps.features
         ):
             raise CapabilityUnsupported("所选模型不支持此首尾帧输入")
         if ref.role != "reference" and sum(r.role == ref.role for r in data.references) > 1:
             raise CapabilityUnsupported("首帧和尾帧各只能选一张")
-        refs.append(ReferenceImage(blob_hash=g.output_blob_hash, role=ref.role))
-    if refs and ("reference" not in caps.features or len(refs) > caps.max_reference_images):
-        raise CapabilityUnsupported("参考图片超出模型能力，请调整参考或更换模型")
+        refs.append(ReferenceImage(blob_hash=g.output_blob_hash, role=ref.role, kind=g.output_type))
+    if problem := reference_error(refs, caps):
+        raise CapabilityUnsupported(problem)
     gen = schemas.GenerateIn.model_validate(
         data.model_dump(exclude={"request_key", "references", "work_id"})
     )
@@ -200,16 +204,27 @@ def history(
     ]
 
 
+@router.get("/references/{generation_id}")
+def reference_detail(generation_id: uuid.UUID, ctx: ProjectContext = READ, db: Session = DB):
+    g = jobs.source(db, ctx.project.id, generation_id)
+    jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
+    if g.output_type not in ("image", "video"):
+        raise CapabilityUnsupported("请选择图片或视频素材")
+    return {"id": g.id, "blob_hash": g.output_blob_hash, "kind": g.output_type,
+            "thumbnail_hash": g.thumbnail_hash, "title": (g.prompt_snapshot or "项目素材")[:100]}
+
+
 @router.get("/references")
 def references(
     ctx: ProjectContext = READ,
     db: Session = DB,
     offset: int = Query(0, ge=0),
     query: str = Query("", max_length=100),
+    media_type: Literal["image", "video", "all"] = "image",
 ):
     stmt = select(Generation).where(
         Generation.project_id == ctx.project.id,
-        Generation.output_type == "image",
+        Generation.output_type.in_(("image", "video") if media_type == "all" else (media_type,)),
         Generation.output_blob_hash.is_not(None),
     )
     if query.strip():
@@ -229,7 +244,9 @@ def references(
             {
                 "id": g.id,
                 "blob_hash": g.output_blob_hash,
-                "title": (g.prompt_snapshot or "项目图片")[:100],
+                "kind": g.output_type,
+                "thumbnail_hash": g.thumbnail_hash,
+                "title": (g.prompt_snapshot or "项目素材")[:100],
             }
         )
     return {"items": result, "has_more": len(rows) == 24}

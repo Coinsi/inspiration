@@ -87,3 +87,4 @@ These scripts use TEST_ISOLATED_PREVIEW=1, APP_URL, ARTIFACT_DIR and PLAYWRIGHT_
 - `timeline-playback-live.mjs`：需要隔离预览变量及TIMELINE_FIXTURE（timeline-visuals-live生成的visuals-report.json）。验证专用QA项目名称后只新建时间线，真实排序/裁切/跨轨/取消/撤销/保存、连续合成预览/音量/字幕/转场、暗亮手机与真实MP4导出，不改源验收时间线、不调用云模型。输出report.json、截图和drag-preview-film.mp4。
 
 - `settings-workspace-live.mjs`：需要隔离预览变量，仓库根运行。新建QA项目，实测分区地址/刷新、封面上传、配额保存/失败重试/锁定、主题恢复、技能草稿跨入口和目录导入、明暗390px；只读界面以受控/me响应检查，不调用云模型。原skills-live与skill-draft-regression已适配独立/assets/import入口。
+`reference-media-regression.mjs`: run `npm run build` first, then run with `PLAYWRIGHT_MODULE` if Playwright is external. Renders production reference-picker components with intercepted APIs; verifies mixed image/video selection, unsupported-model feedback, preserved selections and 390px layout. Screenshots go to `test-results/reference-media`. No model calls or account writes.

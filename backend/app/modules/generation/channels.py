@@ -20,7 +20,7 @@ from app.modules.generation.model_catalog import Price
 PROTOCOLS = {
     "gpt_image": {"name": "OpenAI Images 兼容", "types": ["image"]},
     "openai_video": {"name": "OpenAI Videos 兼容", "types": ["video"]},
-    "video_v1": {"name": "Video v1 JSON（文生视频）", "types": ["video"]},
+    "video_v1": {"name": "Video v1 JSON（文字 / 参考图）", "types": ["video"]},
     "ark_image": {"name": "火山方舟图片", "types": ["image"]},
     "ark_video": {"name": "火山方舟视频", "types": ["video"]},
     "minimax_video": {"name": "MiniMax 海螺视频", "types": ["video"]},
@@ -85,6 +85,7 @@ class ModelIn(BaseModel):
     revision: int | None = None
     request_id: uuid.UUID | None = None
     max_reference_images: int = Field(default=0, ge=0, le=16)
+    max_reference_videos: int = Field(default=0, ge=0, le=10)
     mask_editing: bool = False
     max_video_seconds: float = Field(default=10, ge=1, le=120, allow_inf_nan=False)
     parameters: dict[str, list[str | int]] = Field(default_factory=dict)
@@ -92,6 +93,8 @@ class ModelIn(BaseModel):
 
     @model_validator(mode="after")
     def supported(self):
+        if self.max_reference_videos and (self.protocol != "video_v1" or self.modality != "video"):
+            raise ValueError("参考视频仅用于支持此能力的 Video v1 视频模型")
         if self.price.mode == "per_second" and self.modality != "video":
             raise ValueError("按秒计价仅用于视频")
         if self.modality == "text" and self.price.mode != "unconfigured":
@@ -104,8 +107,8 @@ class ModelIn(BaseModel):
             raise ValueError("蒙版编辑需要支持参考图的 Images 协议")
         if self.protocol == "openai_video" and self.max_reference_images > 1:
             raise ValueError("Videos 协议最多接收一张起始参考图")
-        if self.protocol == "video_v1" and self.max_reference_images:
-            raise ValueError("Video v1 当前接入仅支持文生视频，参考图上限请设为 0")
+        if self.protocol == "video_v1" and self.max_reference_images > 14:
+            raise ValueError("Video v1 参考图上限不能超过 14；请按实际渠道能力填写")
         if self.protocol == "video_v1" and not self.parameters.get("duration"):
             raise ValueError("Video v1 必须配置时长选项，避免使用上游默认时长")
         limits = {"ark_image": 14, "ark_video": 2, "minimax_video": 1}
@@ -179,6 +182,7 @@ def public_model(row):
         "is_default": bool(c.get("is_default")),
         "revision": c.get("revision", 1),
         "max_reference_images": c.get("max_reference_images", 0),
+        "max_reference_videos": c.get("max_reference_videos", 0),
         "mask_editing": c.get("mask_editing", False),
         "max_video_seconds": c.get("max_video_seconds", 10),
         "parameters": {k: v.get("enum", []) for k, v in c.get("param_schema", {}).items()},
@@ -318,6 +322,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         "is_default": data.is_default,
         "revision": row.config.get("revision", 0) + 1,
         "max_reference_images": data.max_reference_images,
+        "max_reference_videos": data.max_reference_videos,
         "mask_editing": data.mask_editing,
         "max_video_seconds": data.max_video_seconds,
         "stream": row.config.get("stream", False),

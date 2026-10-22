@@ -157,6 +157,10 @@
   object-fit: cover;
   border-radius: 10px;
 }
+.conversation-reference-strip .composer-reference-video {
+  height: 76px;
+  border-radius: 8px;
+}
 .conversation-reference-strip > div > button {
   position: absolute;
   right: 4px;

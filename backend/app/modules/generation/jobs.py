@@ -351,6 +351,10 @@ def retry(db, ctx, job_id):
     validate_target(db, ctx.project.id, job.target_type, job.target_id)
     reserve_check(db, ctx.project.id, float(job.estimated_cost or 0))
     snapshot = copy.deepcopy(job.input_snapshot)
+    from app.modules.media.generation_reference import public_base
+
+    # A user-triggered retry is a new submission; do not keep a retired domain.
+    snapshot["reference_origin"] = public_base() or snapshot.get("reference_origin", "")
     if snapshot.get("library_origin"):
         from app.modules.library.materialization import validate_snapshot
 
@@ -439,6 +443,9 @@ def execute(db, job_id):
             )
 
     files = ExitStack()
+    from app.modules.media.generation_reference import reference_origin
+
+    files.enter_context(reference_origin(snap.get("reference_origin", "")))
     cached_files = {}
 
     def disk_blob(key):

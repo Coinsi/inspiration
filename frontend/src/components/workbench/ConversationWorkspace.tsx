@@ -1,5 +1,6 @@
 import { ComposerPrimitive, ThreadPrimitive, MessagePrimitive } from "@assistant-ui/react";
 import { AssistantConversation } from "./AssistantConversation";
+import type { ComposerReference } from "./ComposerReferences";
 import { GenerativeMessage, type UIBlock } from "./GenerativeMessage";
 import { SelectField } from "@/components/ui/select-field";
 import {
@@ -471,15 +472,15 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       );
       const refs = await Promise.all(
         (original.media?.references || []).map(async (r) => {
-          const item = await api.get<GeneratedMaterial>(
-            `${root}/library/generated/${r.generation_id}`,
+          const item = await api.get<ComposerReference>(
+            `${root}/workbench/references/${r.generation_id}`,
           );
-          if (!item.reference_available)
-            throw new Error("原参考素材暂不可用，请先在素材库检查。");
           return {
             id: item.id,
             title: item.title,
             blob_hash: item.blob_hash,
+            kind: item.kind,
+            thumbnail_hash: item.thumbnail_hash,
             role: r.role,
           };
         }),
@@ -578,10 +579,12 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           id: item.id,
           title: item.title,
           blob_hash: item.blob_hash,
+          kind: item.output_type,
+          thumbnail_hash: item.poster_hash,
           role: "reference",
         },
       ]);
-      setMode("image");
+      setMode(item.output_type);
     } else {
       setDraft(item.prompt);
       setMode(item.output_type);
@@ -596,8 +599,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     media.setRefs([
       {
         id: output.id,
-        title: "对话生成的图片",
+        title: output.type === "video" ? "对话生成的视频" : "对话生成的图片",
         blob_hash: output.blob_hash,
+        kind: output.type,
+        thumbnail_hash: output.thumbnail_hash,
         role: "reference",
       },
     ]);

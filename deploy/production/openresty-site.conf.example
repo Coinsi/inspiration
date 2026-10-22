@@ -4,6 +4,9 @@
 server {
     listen 80;
     server_name coinisi.com;
+    # Reject unknown Host values before passing an origin to background jobs.
+    # For this single-domain site, changing server_name is sufficient when moving domains.
+    if ($host != $server_name) { return 444; }
     client_max_body_size 260m;
     client_body_timeout 120s;
 

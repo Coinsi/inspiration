@@ -35,6 +35,7 @@ type Model = {
   is_default: boolean;
   revision: number;
   max_reference_images: number;
+  max_reference_videos?: number;
   mask_editing: boolean;
   max_video_seconds: number;
   parameters: Record<string, (string | number)[]>;
@@ -677,6 +678,7 @@ function ModelEditor({
     [enabled, setEnabled] = useState(model?.enabled ?? true),
     [isDefault, setDefault] = useState(model?.is_default ?? false),
     [refs, setRefs] = useState(model?.max_reference_images ?? 0),
+    [videoRefs, setVideoRefs] = useState(model?.max_reference_videos ?? 0),
     [mask, setMask] = useState(model?.mask_editing ?? false),
     [seconds, setSeconds] = useState(model?.max_video_seconds ?? 12),
     [dirty, setDirty] = useState(false);
@@ -724,6 +726,7 @@ function ModelEditor({
         revision: model?.revision,
         request_id: requestId,
         max_reference_images: modality === "text" ? 0 : refs,
+        max_reference_videos: modality === "video" && protocol === "video_v1" ? videoRefs : 0,
         mask_editing: protocol === "gpt_image" && mask,
         max_video_seconds: seconds,
         parameters: params,
@@ -862,8 +865,10 @@ function ModelEditor({
           )}
           {protocol === "video_v1" && (
             <p className="model-notice">
-              使用 video.v1 JSON 格式创建视频，当前支持文生视频。请按服务商文档填写时长选项；
-              提示词中的秒数不能代替时长设置。参考素材的公网地址接入暂未开放。
+              使用 video.v1 JSON 格式创建视频。通过公网 HTTPS 网站提交时，
+              系统会自动生成临时素材链接，无需单独填写域名。
+              请按渠道能力设置图片和视频参考上限，可混合引用；不支持首尾帧角色。
+              请按服务商文档填写时长选项，提示词中的秒数不能代替时长设置。
             </p>
           )}
           {modality && protocol && modality !== "text" && (
@@ -884,7 +889,7 @@ function ModelEditor({
                       (
                         {
                           openai_video: 1,
-                          video_v1: 0,
+                          video_v1: 14,
                           minimax_video: 1,
                           ark_video: 2,
                           ark_image: 14,
@@ -899,6 +904,12 @@ function ModelEditor({
                   />
                   <small>0 表示不使用参考图；只开启服务实际支持的能力。</small>
                 </label>
+                {protocol === "video_v1" && modality === "video" && (
+                  <label>最多参考视频数
+                    <Input type="number" min={0} max={10} value={videoRefs} onChange={e => setVideoRefs(Number(e.target.value))} />
+                    <small>0 表示不接收视频；仅对渠道明确支持视频参考的模型启用，可与参考图片混用。</small>
+                  </label>
+                )}
                 {protocol === "gpt_image" && refs > 0 && (
                   <label className="model-check">
                     <input

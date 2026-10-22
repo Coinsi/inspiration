@@ -38,8 +38,10 @@ import { MaterialVideoCover } from "@/components/MaterialVideoCover";
 import { JobStatus, ACTIVE_JOBS, JOB_LABEL } from "@/components/JobStatus";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerParameters } from "./ComposerParameters";
+import { referenceProblem } from "./referenceProblem";
 import {
   ComposerReferences,
+  ReferencePreview,
   type ComposerReference,
 } from "./ComposerReferences";
 import "./composer.css";
@@ -53,6 +55,8 @@ const Agent = lazy(() =>
 );
 type Mode = "image" | "video" | "text";
 type Caps = {
+  max_reference_videos?: number;
+  reference_unavailable_reason?: string | null;
   modalities: string[];
   features: string[];
   max_reference_images: number;
@@ -140,7 +144,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           );
         else if (refs.length >= 8 && !refs.some((r) => r.id === item.id))
           setImportMessage(
-            "最多添加 8 张参考图，请先移除一张后再从素材库选择。",
+            "最多添加 8 项参考素材，请先移除一项后再从素材库选择。",
           );
         else {
           setRefs((current) =>
@@ -152,13 +156,15 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
                     id: item.id,
                     title: item.title,
                     blob_hash: item.blob_hash,
+                    kind: item.output_type,
+                    thumbnail_hash: item.poster_hash,
                     role: "reference",
                   },
                 ],
           );
-          setMode("image");
+          setMode(item.output_type);
           setImportMessage(
-            "已添加素材库图片作为参考，可以继续描述你想创作的画面。",
+            "已添加素材库内容作为参考，可以继续描述你想创作的画面。",
           );
         }
       } else {
@@ -244,19 +250,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           ...r,
           role: mode === "image" ? ("reference" as const) : r.role,
         }));
-  const refProblem =
-    mode !== "text" && refs.length > 0 && caps.data
-      ? !caps.data.features.includes("reference") ||
-        refs.length > caps.data.max_reference_images
-        ? "参考图片超出当前模型能力，请移除参考或更换模型。"
-        : activeRefs.some(
-              (r) =>
-                r.role !== "reference" &&
-                (mode !== "video" || !caps.data.features.includes(r.role)),
-            )
-          ? "当前模型不支持已选参考的首尾帧类型，请调整后再发送。"
-          : ""
-      : "";
+  const refProblem = referenceProblem(caps.data, activeRefs);
   const payload = {
     work_id: searchParams.get("work") || null,
     provider,
@@ -497,10 +491,8 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           <div className="composer-references">
             {refs.map((r) => (
               <div key={r.id} className="composer-reference">
-                <MediaImage
-                  src={blobUrl(projectId, r.blob_hash)}
-                  alt={r.title}
-                />
+                <ReferencePreview projectId={projectId} item={r} />
+                {r.kind === "video" && <span>参考视频</span>}
                 <button
                   type="button"
                   aria-label={`移除参考 ${r.title}`}
@@ -511,7 +503,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
                 >
                   <X size={12} />
                 </button>
-                {mode === "video" && (
+                {mode === "video" && r.kind !== "video" && (
                   <SelectField
                     label={`参考角色 ${r.title}`}
                     className="composer-reference-role"
@@ -922,6 +914,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
       >
         <ComposerReferences
           projectId={projectId}
+          includeVideos={mode === "video" && !!caps.data?.features.includes("video_reference")}
           selected={refs}
           pick={(item) => {
             setRefs((list) =>

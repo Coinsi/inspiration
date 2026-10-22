@@ -9,32 +9,42 @@ export type ComposerReference = {
   blob_hash: string;
   title: string;
   role: "reference" | "first_frame" | "last_frame";
+  kind?: "image" | "video";
+  thumbnail_hash?: string | null;
 };
+
+export function ReferencePreview({ projectId, item }: { projectId: string; item: ComposerReference }) {
+  if (item.kind === "video" && !item.thumbnail_hash)
+    return <div className="composer-reference-video"><video src={blobUrl(projectId, item.blob_hash)} muted preload="metadata" aria-label={`参考视频 ${item.title}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>;
+  return <MediaImage src={blobUrl(projectId, item.thumbnail_hash || item.blob_hash)} alt={item.title} />;
+}
 export function ComposerReferences({
   projectId,
   selected,
   pick,
+  includeVideos = false,
 }: {
   projectId: string;
   selected: ComposerReference[];
   pick: (item: ComposerReference) => void;
+  includeVideos?: boolean;
 }) {
   const [query, setQuery] = useState(""),
     [offset, setOffset] = useState(0);
   const images = useQuery({
-    queryKey: ["workbench-references", projectId, query, offset],
+    queryKey: ["workbench-references", projectId, query, offset, includeVideos],
     queryFn: () =>
       api.get<{ items: Omit<ComposerReference, "role">[]; has_more: boolean }>(
-        `/projects/${projectId}/workbench/references?offset=${offset}&query=${encodeURIComponent(query)}`,
+        `/projects/${projectId}/workbench/references?offset=${offset}&query=${encodeURIComponent(query)}&media_type=${includeVideos ? "all" : "image"}`,
       ),
   });
   return (
     <div className="composer-reference-picker">
-      <p>从项目已有的生成结果或上传图片中选择。参考会随本次创作保存。</p>
+      <p>从项目已有的生成结果或上传素材中选择，最多 8 项。{includeVideos ? "可混合选择图片和视频。" : "当前模型仅开放图片选择。"}参考会随本次创作保存。</p>
       <SearchField
         className="w-full"
-        label="搜索参考图片"
-        placeholder="按提示词查找图片"
+        label="搜索参考素材"
+        placeholder="按提示词查找素材"
         value={query}
         onValueChange={(value) => {
           setQuery(value);
@@ -47,7 +57,7 @@ export function ComposerReferences({
           <Button onClick={() => void images.refetch()}>重新读取</Button>
         </p>
       ) : images.isPending ? (
-        <p role="status">正在读取图片…</p>
+        <p role="status">正在读取素材…</p>
       ) : (
         <div className="composer-reference-grid">
           {images.data.items.map((item) => (
@@ -56,20 +66,18 @@ export function ComposerReferences({
               key={item.id}
               aria-label={`引用 ${item.title}`}
               aria-pressed={selected.some((r) => r.id === item.id)}
+              disabled={selected.length >= 8 && !selected.some((r) => r.id === item.id)}
               onClick={() => pick({ ...item, role: "reference" })}
             >
-              <MediaImage
-                src={blobUrl(projectId, item.blob_hash)}
-                alt={item.title}
-              />
-              <span>{item.title}</span>
+              <ReferencePreview projectId={projectId} item={{ ...item, role: "reference" }} />
+              <span>{item.kind === "video" ? "视频 · " : "图片 · "}{item.title}</span>
             </button>
           ))}
         </div>
       )}
       {images.data?.items.length === 0 && (
         <p>
-          暂无匹配图片。可先在素材或镜头中上传，也可以用工作台的生成结果作为下一次参考。
+          暂无匹配素材。可先在素材或镜头中上传，也可以用工作台的生成结果作为下一次参考。
         </p>
       )}
       <div className="flex gap-2 mt-4">

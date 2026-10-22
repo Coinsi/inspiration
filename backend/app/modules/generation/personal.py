@@ -335,6 +335,9 @@ class PersonalProvider:
         caps.max_reference_images = min(
             caps.max_reference_images, self.config.get("max_reference_images", 0)
         )
+        caps.max_reference_videos = min(
+            caps.max_reference_videos, self.config.get("max_reference_videos", 0)
+        )
         if not caps.max_reference_images:
             caps.features -= {"reference", "img2img", "inpaint", "first_frame", "last_frame"}
         return caps

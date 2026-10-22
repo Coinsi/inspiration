@@ -31,7 +31,7 @@ def entry(db, g, job, blob):
     from app.core.errors import AppError
     from app.modules.generation.jobs import validate_target
 
-    reference_available = g.output_type == "image"
+    reference_available = g.output_type in ("image", "video")
     if reference_available:
         try:
             validate_target(db, g.project_id, g.target_type, g.target_id)

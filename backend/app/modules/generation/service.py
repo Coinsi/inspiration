@@ -255,6 +255,9 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=N
             caps.max_reference_images = min(
                 caps.max_reference_images, config.get("max_reference_images", 0)
             )
+            caps.max_reference_videos = min(
+                caps.max_reference_videos, config.get("max_reference_videos", 0)
+            )
             if config.get("param_schema") is not None:
                 caps.param_schema = config["param_schema"]
             if caps.max_video_seconds is not None:
@@ -335,21 +338,29 @@ def _collect_references(
 
 
 def _materialize_references(db: Session, refs: list[ReferenceImage]) -> list[ReferenceImage]:
-    """把参考图物化为可直接发送的 base64 data URI(本地 fs / MinIO 通用)。
-
-    收口在此:开发(fs)与外部云供应商都能用;未来如需对 MinIO 改走预签名 URL,只改这里。
-    """
+    """物化图片、校验视频类型；视频正文只经签名地址流式读取，不加载到内存。"""
     from app.models.storage import Blob
 
     out: list[ReferenceImage] = []
     for r in refs:
         blob = db.get(Blob, r.blob_hash)
         if blob is None:
-            raise NotFound("参考图源文件不存在")
+            raise NotFound("参考素材源文件不存在")
+        if r.kind == "video":
+            if blob.mime not in {"video/mp4", "video/webm", "video/quicktime"}:
+                raise CapabilityUnsupported("参考视频必须为 MP4、WebM 或 MOV")
+            # Videos are streamed through scoped URLs, never loaded into base64/RAM.
+            out.append(r.model_copy(update={"mime": blob.mime, "data_url": None}))
+            continue
+        if not blob.mime.startswith("image/"):
+            raise CapabilityUnsupported("参考图片文件类型不匹配")
         b64 = base64.b64encode(cas.read_bytes(blob)).decode()
         out.append(
             ReferenceImage(
-                blob_hash=r.blob_hash, role=r.role, data_url=f"data:{blob.mime};base64,{b64}"
+                blob_hash=r.blob_hash,
+                role=r.role,
+                mime=blob.mime,
+                data_url=f"data:{blob.mime};base64,{b64}",
             )
         )
     return out
@@ -481,18 +492,19 @@ def submit(
         if caps.max_reference_images:
             refs = refs[: caps.max_reference_images]
     if extra_references:
-        if "reference" not in caps.features:
-            raise CapabilityUnsupported("供应商不支持画布参考图片")
         refs.extend(extra_references)
     refs.extend(_explicit_references(db, ctx.project.id, gen_in, caps))
-    if caps.max_reference_images and len(refs) > caps.max_reference_images:
-        raise CapabilityUnsupported("参考图数量超过供应商限制")
+    from app.adapters.contracts import reference_error
+
+    if problem := reference_error(refs, caps):
+        raise CapabilityUnsupported(problem)
     _validate_controls(gen_in, caps)
     req = _build_request(prompt, gen_in, refs)
     req.mask = mask
     est = provider.estimate_cost(req)
 
     from app.modules.generation.jobs import reserve_check
+    from app.modules.media.generation_reference import public_base
 
     reserve_check(db, ctx.project.id, est.points)
 
@@ -508,6 +520,7 @@ def submit(
         created_by=ctx.user.id,
         input_snapshot={
             **model_snapshot(db, ctx.project.id, gen_in.provider),
+            "reference_origin": public_base(),
             **(provider.snapshot() if hasattr(provider, "snapshot") else {}),
             **({"canvas_origin": execution_origin} if execution_origin else {}),
             "prompt": prompt,
@@ -517,7 +530,7 @@ def submit(
             "params": gen_in.params,
             "provider_params": gen_in.provider_params,
             "count": gen_in.count,
-            "references": [{"blob_hash": r.blob_hash, "role": r.role} for r in refs],
+            "references": [{"blob_hash": r.blob_hash, "role": r.role, "kind": r.kind} for r in refs],
             "source_generation_id": str(gen_in.source_generation_id)
             if gen_in.source_generation_id
             else None,

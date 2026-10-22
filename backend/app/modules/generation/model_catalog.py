@@ -342,11 +342,10 @@ def mismatch(req, caps):
     if req.mask and "inpaint" not in caps.features:
         return "不支持蒙版重绘"
     if req.references:
-        if "reference" not in caps.features or len(req.references) > caps.max_reference_images:
-            return "参考图片数量超出能力范围"
-        for ref in req.references:
-            if ref.role in ("first_frame", "last_frame") and ref.role not in caps.features:
-                return "不支持首帧或尾帧输入"
+        from app.adapters.contracts import reference_error
+
+        if problem := reference_error(req.references, caps):
+            return problem
     for key, value in req.provider_params.items():
         if value not in caps.param_schema.get(key, {}).get("enum", []):
             return f"不支持参数 {key}={value}"
@@ -427,12 +426,17 @@ def aggregate(db, row):
         if not item["capabilities"]:
             continue
         c = Capabilities(**item["capabilities"])
+        if c.reference_unavailable_reason:
+            caps.reference_unavailable_reason = c.reference_unavailable_reason
         caps.features |= c.features
         caps.max_reference_images = max(caps.max_reference_images, c.max_reference_images)
+        caps.max_reference_videos = max(caps.max_reference_videos, c.max_reference_videos)
         caps.max_video_seconds = max(caps.max_video_seconds or 0, c.max_video_seconds or 0)
         for key, spec in c.param_schema.items():
             current = caps.param_schema.setdefault(key, {"enum": []})["enum"]
             current.extend(v for v in spec.get("enum", []) if v not in current)
+    if "reference" in caps.features or "video_reference" in caps.features:
+        caps.reference_unavailable_reason = None
     return caps
 
 

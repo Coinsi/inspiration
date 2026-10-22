@@ -25,6 +25,8 @@ from app.modules.generation.workbench import router as workbench_router
 from app.modules.identity.router import router as identity_router
 from app.modules.library.router import router as library_router
 from app.modules.media.router import router as media_router
+from app.modules.media.generation_reference import router as generation_reference_router
+from app.modules.media.generation_reference import ReferenceOriginMiddleware
 from app.modules.narrative.router import router as narrative_router
 from app.modules.prompt.router import router as prompt_router
 from app.modules.review.router import router as review_router
@@ -112,6 +114,7 @@ app = FastAPI(
 )
 
 # CORS(前端联调)
+app.add_middleware(ReferenceOriginMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.is_dev else [],
@@ -149,6 +152,7 @@ app.include_router(workbench_router, prefix="/api/v1")
 app.include_router(channel_router, prefix="/api/v1")
 app.include_router(creative_model_router, prefix="/api/v1")
 app.include_router(media_router, prefix="/api/v1")
+app.include_router(generation_reference_router, prefix="/api/v1")
 app.include_router(library_router, prefix="/api/v1")
 app.include_router(review_router, prefix="/api/v1")
 app.include_router(timeline_router, prefix="/api/v1")

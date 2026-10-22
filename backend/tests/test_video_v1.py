@@ -87,7 +87,7 @@ def test_invalid_or_implicit_duration_rejected_before_network(values):
 def test_reference_not_falsely_advertised_or_submitted():
     p = provider()
     assert not p.capabilities().max_reference_images
-    with pytest.raises(CapabilityUnsupported, match="公网地址"):
+    with pytest.raises(CapabilityUnsupported, match="尚未启用参考图"):
         p.submit(
             GenerationRequest(
                 request_type="video",
@@ -148,10 +148,75 @@ def test_unknown_state_is_not_reported_as_terminal_failure(monkeypatch):
         provider().poll(JobHandle(external_job_id="task-1"))
 
 
-def test_model_config_requires_duration_and_no_unimplemented_references():
+def test_model_config_requires_duration_and_bounded_references():
     args = dict(name="video", model="video", protocol="video_v1", modality="video")
     with pytest.raises(ValueError, match="时长选项"):
         ModelIn(**args)
-    with pytest.raises(ValueError, match="文生视频"):
-        ModelIn(**args, parameters={"duration": [4]}, max_reference_images=1)
+    with pytest.raises(ValueError, match="14"):
+        ModelIn(**args, parameters={"duration": [4]}, max_reference_images=15)
+    assert (
+        ModelIn(**args, parameters={"duration": [4]}, max_reference_images=1).max_reference_images
+        == 1
+    )
     assert ModelIn(**args, parameters={"duration": [4]}).protocol == "video_v1"
+
+
+@pytest.fixture
+def public_origin(monkeypatch):
+    from app.core.config import settings
+    from app.modules.media.generation_reference import reference_origin
+
+    monkeypatch.setattr(settings, "secret_key", "test-signing-key-" * 4)
+    with reference_origin("https://studio.example.com"):
+        yield
+
+
+def test_reference_wire_uses_scoped_url_and_no_base64(monkeypatch, public_origin):
+    p = provider()
+    p.config["max_reference_images"] = 2
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        assert body["operation"] == "image_to_video"
+        assert body["media_inputs"][0]["role"] == "reference"
+        assert body["media_inputs"][0]["url"].startswith(
+            "https://studio.example.com/api/v1/generation-references/" + "a" * 64 + "?"
+        )
+        assert "base64" not in request.content.decode()
+        return httpx.Response(200, json={"id": "image-task"})
+
+    transport(monkeypatch, handler)
+    req = GenerationRequest(
+        request_type="video",
+        prompt="cat",
+        provider_params={"duration": 4},
+        references=[ReferenceImage(blob_hash="a" * 64, data_url="data:image/png;base64,aGVsbG8=")],
+    )
+    assert p.submit(req).external_job_id == "image-task"
+    req.references[0].role = "last_frame"
+    with pytest.raises(CapabilityUnsupported, match="首.*尾帧"):
+        p.submit(req)
+    req.references[0].role = "reference"
+    req.references *= 3
+    with pytest.raises(CapabilityUnsupported, match="最多支持 2"):
+        p.submit(req)
+    assert len(calls) == 1
+
+
+def test_references_blocked_before_submission_without_public_origin(monkeypatch):
+
+    p = provider()
+    p.config["max_reference_images"] = 1
+    assert p.capabilities().max_reference_images == 0
+    assert "HTTPS" in p.capabilities().reference_unavailable_reason
+    with pytest.raises(CapabilityUnsupported, match="公网 HTTPS"):
+        p.submit(
+            GenerationRequest(
+                request_type="video",
+                prompt="cat",
+                references=[ReferenceImage(blob_hash="a" * 64)],
+                provider_params={"duration": 4},
+            )
+        )

@@ -27,6 +27,43 @@ def body(**changes):
     }
 
 
+def test_origin_survives_queue_and_new_domain_is_used_on_retry(studio, monkeypatch):
+    from app.modules.generation import jobs
+    from app.modules.media.generation_reference import public_base, reference_origin
+
+    client, sessions, ids = studio
+    root = f"/api/v1/projects/{ids['project']}"
+    original_dispatch = jobs.dispatch
+    monkeypatch.setattr(jobs, "dispatch", lambda db, job: job)
+    response = client.post("https://old.example.com" + root + "/workbench/generate", json=body())
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["input_snapshot"]["reference_origin"] == "https://old.example.com"
+    observed = []
+    original_submit = MockProvider.submit
+
+    def submit(provider, req):
+        observed.append(public_base())
+        return original_submit(provider, req)
+
+    monkeypatch.setattr(MockProvider, "submit", submit)
+    # No HTTP request is running now. Even another task's context must be overridden.
+    with reference_origin("https://unrelated.example.com"), sessions() as db:
+        job = db.get(GenerationJob, uuid.UUID(saved["id"]))
+        original_dispatch(db, job)
+        assert public_base() == "https://unrelated.example.com"
+        assert job.status == "succeeded"
+        job.status = "failed"
+        db.commit()
+    assert observed == ["https://old.example.com"]
+    response = client.post("https://new.example.com" + root + f"/jobs/{saved['id']}/retry")
+    assert response.status_code == 200, response.text
+    assert response.json()["input_snapshot"]["reference_origin"] == "https://new.example.com"
+    with sessions() as db:
+        old = db.get(GenerationJob, uuid.UUID(saved["id"]))
+        assert old.input_snapshot["reference_origin"] == "https://old.example.com"
+
+
 def test_media_results_persistence_idempotency_and_task_integration(studio):
     client, sessions, ids = studio
     root = f"/api/v1/projects/{ids['project']}"

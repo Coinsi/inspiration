@@ -18,15 +18,37 @@ class Capabilities(BaseModel):
     modalities: set[Literal["image", "video"]] = Field(default_factory=set)
     features: set[str] = Field(default_factory=set)  # img2img/inpaint/controlnet/reference/lora
     max_reference_images: int = 0
+    max_reference_videos: int = 0
+    reference_unavailable_reason: str | None = None
     max_video_seconds: float | None = None
     param_schema: dict = Field(default_factory=dict)
 
 
 class ReferenceImage(BaseModel):
     blob_hash: str
+    kind: Literal["image", "video"] = "image"
+    mime: str | None = None
     role: str = "ref"
-    # 由服务层在提交前物化(blob → base64 data URI),供应商据此发送;不入库快照(避免膨胀)
+    # 图片在提交前物化为 data URI；视频只校验 MIME，供应商使用签名链接流式读取。
     data_url: str | None = None
+
+
+def reference_error(refs: list[ReferenceImage], caps: Capabilities) -> str:
+    images = [r for r in refs if r.kind == "image"]
+    videos = [r for r in refs if r.kind == "video"]
+    if images and ("reference" not in caps.features or len(images) > caps.max_reference_images):
+        return (caps.reference_unavailable_reason
+                or f"当前模型最多支持 {caps.max_reference_images} 张参考图")
+    if videos and (
+        "video_reference" not in caps.features or len(videos) > caps.max_reference_videos
+    ):
+        return caps.reference_unavailable_reason or "当前模型不支持该数量的参考视频"
+    for ref in refs:
+        if ref.kind == "video" and ref.role not in ("reference", "ref"):
+            return "参考视频只能使用普通参考用途，不能作为首帧或尾帧"
+        if ref.role in ("first_frame", "last_frame") and ref.role not in caps.features:
+            return "所选模型不支持此首尾帧输入"
+    return ""
 
 
 class GenerationRequest(BaseModel):

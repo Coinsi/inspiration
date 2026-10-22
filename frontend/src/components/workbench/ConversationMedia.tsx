@@ -20,8 +20,10 @@ import { Lightbox } from "@/components/ImageViewer";
 import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
 import { ComposerParameters } from "./ComposerParameters";
+import { referenceProblem } from "./referenceProblem";
 import {
   ComposerReferences,
+  ReferencePreview,
   type ComposerReference,
 } from "./ComposerReferences";
 
@@ -36,6 +38,8 @@ type Caps = {
   modalities: string[];
   features: string[];
   max_reference_images: number;
+  max_reference_videos?: number;
+  reference_unavailable_reason?: string | null;
   param_schema: Record<string, { enum?: (string | number)[] }>;
 };
 
@@ -97,16 +101,7 @@ export function useConversationMedia(
   }));
   const problem = unavailable
     ? "原来选择的模型已不可用，请重新选择模型后发送。"
-    : refs.length &&
-        caps.data &&
-        (!caps.data.features.includes("reference") ||
-          refs.length > caps.data.max_reference_images ||
-          references.some(
-            (r) =>
-              r.role !== "reference" && !caps.data!.features.includes(r.role),
-          ))
-      ? "当前模型不支持已选参考，请更换模型或调整参考。"
-      : "";
+    : referenceProblem(caps.data, mode === "text" ? [] : refs.map(r => ({ ...r, role: mode === "image" ? "reference" : r.role })));
   return {
     models,
     provider,
@@ -123,6 +118,7 @@ export function useConversationMedia(
     refs,
     setRefs,
     schema,
+    videoReferencesAvailable: mode === "video" && !!caps.data?.features.includes("video_reference"),
     controls,
     choose: (value: string) => setChoices((v) => ({ ...v, [mode]: value })),
     parameter: (name: string, value: string | number) =>
@@ -174,23 +170,21 @@ export function ConversationMediaControls({
       >
         <ImagePlus size={17} />
         <span>
-          参考图片{media.refs.length ? ` · ${media.refs.length}` : ""}
+          参考素材{media.refs.length ? ` · ${media.refs.length}` : ""}
         </span>
       </button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="选择参考图片"
+        title="选择参考素材"
         width={760}
       >
         {media.refs.length > 0 && (
           <div className="conversation-reference-strip">
             {media.refs.map((r) => (
               <div key={r.id}>
-                <MediaImage
-                  src={blobUrl(projectId, r.blob_hash)}
-                  alt={r.title}
-                />
+                <ReferencePreview projectId={projectId} item={r} />
+                {r.kind === "video" && <span>参考视频</span>}
                 <button
                   aria-label={`移除参考 ${r.title}`}
                   onClick={() =>
@@ -199,7 +193,7 @@ export function ConversationMediaControls({
                 >
                   <X size={14} />
                 </button>
-                {mode === "video" && (
+                {mode === "video" && r.kind !== "video" && (
                   <SelectField
                     label="参考用途"
                     value={r.role}
@@ -225,6 +219,7 @@ export function ConversationMediaControls({
         )}
         <ComposerReferences
           projectId={projectId}
+          includeVideos={media.videoReferencesAvailable}
           selected={media.refs}
           pick={(item) =>
             media.setRefs((v) =>
@@ -357,7 +352,7 @@ function ConversationMediaCard({
         />
       )}
       <div className="conversation-media-actions">
-        {isImage && (
+        {isImage ? (
           <div className="conversation-media-next">
             <button disabled={disabled} onClick={() => reuse(output, "image")}>
               <WandSparkles size={14} />
@@ -368,7 +363,7 @@ function ConversationMediaCard({
               生成视频
             </button>
           </div>
-        )}
+        ) : <button disabled={disabled} onClick={() => reuse(output, "video")}><Film size={14} />用作视频参考</button>}
         <div className="conversation-media-links">
           <Link
             to={`/projects/${projectId}/materials?generation=${output.id}${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`}
