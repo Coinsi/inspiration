@@ -88,7 +88,7 @@ alembic/              # 数据库迁移
 cp .env.example .env          # 按需改键值(本地 host 用 localhost)
 pip install -e ".[dev]"
 alembic upgrade head          # 建/迁移全表
-python -m app.seed            # 种子数据(demo / demo1234)
+python -m app.seed            # 种子数据(demo@example.com / demo1234)
 uvicorn app.main:app --reload --port 8000
 # 文档:http://127.0.0.1:8000/docs   (注意用 127.0.0.1,勿用 localhost 以免走 IPv6)
 ```

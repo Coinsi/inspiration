@@ -67,7 +67,7 @@ npm run lint
 
 > **访问用 `127.0.0.1` 而非 `localhost`**:dev server 绑定 IPv4,`localhost` 可能解析到 IPv6 ::1 连不上。
 > 守护运行见 `run-daemon.ps1`(vite 退出自动重启,由计划任务托管脱离会话)。
-> 默认账号 **demo / demo1234**。
+> 默认登录邮箱 **demo@example.com**，密码 **demo1234**。
 
 ## 五、约定与要点
 

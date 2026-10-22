@@ -9,8 +9,21 @@ from app.models.enums import Role
 
 
 class LoginIn(BaseModel):
-    username: str
+    email: EmailStr | None = None
+    # Retain the old API payload for existing clients and administrative scripts.
+    username: str | None = None
     password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def one_identifier(self):
+        if (self.email is None) == (self.username is None):
+            raise ValueError("请填写邮箱")
+        return self
 
 
 class TokenOut(BaseModel):
@@ -31,10 +44,15 @@ class UserOut(BaseModel):
 
 
 class RegisterIn(BaseModel):
-    username: str = Field(min_length=3, max_length=64)
+    username: str | None = Field(default=None, min_length=3, max_length=64)
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
-    display_name: str = Field(min_length=1, max_length=128)
+    display_name: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
 
     @field_validator("username", "display_name", mode="before")
     @classmethod
@@ -46,7 +64,7 @@ class RegisterIn(BaseModel):
     def valid_username(cls, value):
         import re
 
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        if value is not None and not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
             raise ValueError("用户名仅支持英文字母、数字、下划线、短横线和点")
         return value
 

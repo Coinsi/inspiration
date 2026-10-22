@@ -2,9 +2,11 @@
 
 # ruff: noqa: F811
 import io
+import re
 
 import pytest
 from PIL import Image
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import Unauthorized
@@ -51,6 +53,162 @@ def test_registration_profile_and_duplicate_email(studio):
     updated = client.put("/api/v1/me/profile", json={"display_name": "小林", "bio": "写故事"})
     assert updated.status_code == 200
     assert client.get("/api/v1/me").json()["user"]["bio"] == "写故事"
+
+
+def test_minimal_registration_and_email_password_login(studio):
+    client, sessions, _ = studio
+    registered = client.post(
+        "/api/v1/auth/register",
+        json={"email": "  New.Writer@Example.COM  ", "password": "safe-pass123"},
+    )
+    assert registered.status_code == 200, registered.text
+    user = registered.json()
+    assert user["email"] == "new.writer@example.com"
+    assert user["display_name"] == "新用户"
+    assert re.fullmatch(r"u_[0-9a-f]{32}", user["username"])
+    assert not user["is_platform_admin"]
+    assert "password_hash" not in user
+    with sessions() as db:
+        stored = db.scalar(select(User).where(User.email == user["email"]))
+        assert stored.password_hash and stored.password_hash != "safe-pass123"
+    result = client.post(
+        "/api/v1/auth/login",
+        json={"email": "  NEW.WRITER@EXAMPLE.com  ", "password": "safe-pass123"},
+    )
+    assert result.status_code == 200, result.text
+    assert decode_access_token(result.json()["access_token"])["sub"] == user["id"]
+    client.headers["Authorization"] = "Bearer " + result.json()["access_token"]
+    assert client.get("/api/v1/me").json()["memberships"] == []
+    assert client.get("/api/v1/me").json()["user"]["username"] == user["username"]
+
+
+def test_existing_username_account_can_login_by_email_without_changing_profile(studio):
+    client, sessions, ids = studio
+    with sessions() as db:
+        user = db.get(User, ids["user"])
+        user.email = " Legacy.Writer@Example.COM "
+        user.password_hash = hash_password("safe-pass123")
+        db.commit()
+    for identifier in ({"email": "legacy.writer@example.com"}, {"username": "media_test"}):
+        result = client.post(
+            "/api/v1/auth/login", json={**identifier, "password": "safe-pass123"}
+        )
+        assert result.status_code == 200, result.text
+        assert decode_access_token(result.json()["access_token"])["sub"] == str(ids["user"])
+    with sessions() as db:
+        user = db.get(User, ids["user"])
+        assert user.username == "media_test"
+        assert user.display_name == "Media Test"
+        assert user.email == " Legacy.Writer@Example.COM "
+
+
+@pytest.mark.parametrize("existing_email", ["writer@example.com", " Writer@Example.COM "])
+def test_minimal_registration_rejects_existing_email_and_never_links_google(studio, existing_email):
+    client, sessions, _ = studio
+    with sessions() as db:
+        existing = User(
+            username="google_writer",
+            email=existing_email,
+            display_name="Google Writer",
+            password_hash=None,
+        )
+        db.add(existing)
+        db.flush()
+        existing_id = existing.id
+        db.add(
+            UserIdentity(
+                user_id=existing_id,
+                provider="google",
+                issuer="https://accounts.google.com",
+                subject="google-writer-subject",
+            )
+        )
+        db.commit()
+    result = client.post(
+        "/api/v1/auth/register",
+        json={"email": "WRITER@example.com", "password": "safe-pass123"},
+    )
+    assert result.status_code == 409, result.text
+    with sessions() as db:
+        assert db.get(User, existing_id).password_hash is None
+        assert len(list(db.scalars(select(User).where(User.username == "google_writer")))) == 1
+        identity = db.scalar(select(UserIdentity).where(UserIdentity.user_id == existing_id))
+        assert identity.subject == "google-writer-subject"
+
+
+def test_email_login_failures_are_uniform_for_wrong_missing_inactive_and_google_only(studio):
+    client, sessions, ids = studio
+    with sessions() as db:
+        db.get(User, ids["user"]).password_hash = hash_password("safe-pass123")
+        db.add_all(
+            [
+                User(
+                    username="disabled_writer",
+                    email="disabled@example.com",
+                    display_name="Disabled Writer",
+                    password_hash=hash_password("safe-pass123"),
+                    is_active=False,
+                ),
+                User(
+                    username="google_only_writer",
+                    email="google@example.com",
+                    display_name="Google Writer",
+                    password_hash=None,
+                ),
+            ]
+        )
+        db.commit()
+    failures = []
+    for email, password in (
+        ("media@example.com", "wrong-password"),
+        ("missing@example.com", "safe-pass123"),
+        ("disabled@example.com", "safe-pass123"),
+        ("google@example.com", "safe-pass123"),
+    ):
+        result = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+        assert result.status_code == 401, result.text
+        assert "access_token" not in result.json()
+        failures.append(result.json())
+    assert all(body == failures[0] for body in failures)
+
+
+def test_email_login_rejects_ambiguous_legacy_emails_even_when_password_matches(studio):
+    client, sessions, _ = studio
+    with sessions() as db:
+        password_hash = hash_password("safe-pass123")
+        for username, email in (
+            ("first_writer", "Writer@example.com"),
+            ("second_writer", "writer@example.com"),
+        ):
+            db.add(
+                User(
+                    username=username,
+                    email=email,
+                    display_name=username,
+                    password_hash=password_hash,
+                )
+            )
+        db.commit()
+    result = client.post(
+        "/api/v1/auth/login", json={"email": "writer@example.com", "password": "safe-pass123"}
+    )
+    assert result.status_code == 401, result.text
+    # Both existing accounts retain their explicit, unambiguous legacy login path.
+    for username in ("first_writer", "second_writer"):
+        result = client.post(
+            "/api/v1/auth/login", json={"username": username, "password": "safe-pass123"}
+        )
+        assert result.status_code == 200, result.text
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    [{}, {"email": "not-an-email"}, {"email": "media@example.com", "username": "media_test"}],
+)
+def test_login_requires_one_valid_identifier(studio, identifier):
+    client, _, _ = studio
+    result = client.post("/api/v1/auth/login", json={**identifier, "password": "safe-pass123"})
+    assert result.status_code == 422, result.text
 
 
 def test_avatar_validation_and_removal(studio):

@@ -40,7 +40,7 @@ docker compose up --build -d
 | API 文档 | <http://127.0.0.1:8000/docs> |
 | MinIO 控制台 | <http://127.0.0.1:9001> |
 
-开发演示账号为 `demo / demo1234`，MinIO 示例凭据为 `minioadmin / minioadmin`。已有同名账号不会重置密码。生产环境不创建演示账号；开发默认凭据不能用于公网部署。
+开发演示账号使用邮箱 `demo@example.com` 和密码 `demo1234` 登录，MinIO 示例凭据为 `minioadmin / minioadmin`。已有同名账号不会重置密码。生产环境不创建演示账号；开发默认凭据不能用于公网部署。
 
 ```bash
 docker compose ps

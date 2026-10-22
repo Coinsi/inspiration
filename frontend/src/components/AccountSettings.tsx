@@ -328,8 +328,8 @@ function SettingsContent({
                 </div>
                 <p className="account-hint">
                   {zh
-                    ? "用户名用于登录和加入项目。邮箱验证与变更暂未开放。"
-                    : "Use your username to sign in and join projects. Email verification and changes are not yet available."}
+                    ? "邮箱用于密码登录，用户名用于加入项目。邮箱验证与变更暂未开放。"
+                    : "Use your email for password sign-in and your username to join projects. Email verification and changes are not yet available."}
                 </p>
                 <div className="account-footer">
                   <Button

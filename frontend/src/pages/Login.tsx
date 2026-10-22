@@ -6,9 +6,9 @@ import {
   Languages,
   Loader2,
   LockKeyhole,
+  Mail,
   Moon,
   Sun,
-  UserRound,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -30,13 +30,10 @@ export default function Login() {
   const returnPath = safeAuthNext(requestedPath);
   const enteringAdmin = returnPath.startsWith("/admin/");
   const [email, setEmail] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [confirmation, setConfirmation] = useState("");
   const { t, lang, setLang } = useI18n(),
     zh = lang === "zh";
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,11 +62,7 @@ export default function Login() {
   }
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || !username.trim() || !password) return;
-    if (registering && password !== confirmation) {
-      setError(zh ? "两次输入的密码不一致" : "Passwords do not match");
-      return;
-    }
+    if (busy || !email.trim() || !password) return;
     if (registering && new TextEncoder().encode(password).length > 72) {
       setError(zh ? "密码不能超过72字节" : "Password must not exceed 72 bytes");
       return;
@@ -79,12 +72,10 @@ export default function Login() {
     try {
       if (registering)
         await api.post("/auth/register", {
-          username: username.trim(),
           email: email.trim(),
-          display_name: displayName.trim(),
           password,
         });
-      await login(username.trim(), password);
+      await login(email.trim(), password);
       navigate(returnPath, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("login.failed"));
@@ -202,7 +193,7 @@ export default function Login() {
                 {registering ? (zh ? "使用 Google 注册" : "Sign up with Google") : (zh ? "使用 Google 登录" : "Sign in with Google")}
               </GoogleAuthButton>
               <div className="login-google-divider">
-                {zh ? "或使用账号密码" : "or use your username and password"}
+                {zh ? "或使用邮箱和密码" : "or use your email and password"}
               </div>
             </div>
           )}
@@ -216,61 +207,24 @@ export default function Login() {
           )}
           <form onSubmit={onSubmit} className="mt-9 space-y-5">
             <div>
-              <label htmlFor="login-username" className="login-label">
-                {t("login.username")}
+              <label htmlFor="login-email" className="login-label">
+                {t("login.email")}
               </label>
               <div className="login-field">
-                <UserRound size={17} />
+                <Mail size={17} />
                 <input
-                  id="login-username"
-                  autoComplete="username"
-                  minLength={registering ? 3 : undefined}
-                  maxLength={64}
-                  pattern={registering ? "[A-Za-z0-9_.\\-]+" : undefined}
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
+                  maxLength={254}
                   required
                   disabled={busy}
-                  placeholder={t("login.username")}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t("login.email")}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
             </div>
-            {registering && (
-              <>
-                <div>
-                  <label htmlFor="register-name" className="login-label">
-                    {zh ? "昵称" : "Display name"}
-                  </label>
-                  <div className="login-field">
-                    <input
-                      id="register-name"
-                      required
-                      maxLength={128}
-                      autoComplete="nickname"
-                      value={displayName}
-                      disabled={busy}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="register-email" className="login-label">
-                    {zh ? "邮箱" : "Email"}
-                  </label>
-                  <div className="login-field">
-                    <input
-                      id="register-email"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      value={email}
-                      disabled={busy}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
             <div>
               <label htmlFor="login-password" className="login-label">
                 {t("login.password")}
@@ -309,34 +263,16 @@ export default function Login() {
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-            </div>
-            {registering && (
-              <div>
-                <label htmlFor="register-confirm" className="login-label">
-                  {zh ? "确认密码" : "Confirm password"}
-                </label>
-                <div className="login-field">
-                  <input
-                    id="register-confirm"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    required
-                    value={confirmation}
-                    disabled={busy}
-                    onChange={(e) => setConfirmation(e.target.value)}
-                  />
-                </div>
+              {registering && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {zh
-                    ? "密码至少8位；用户名使用英文字母、数字、下划线、点或短横线。"
-                    : "At least 8 characters. Use letters, numbers, underscores, dots or hyphens for your username."}
+                  {zh ? "密码至少8位。" : "At least 8 characters."}
                 </p>
-              </div>
-            )}
+              )}
+            </div>
             <Button
               type="submit"
               className="login-submit w-full"
-              disabled={busy || !username.trim() || !password}
+              disabled={busy || !email.trim() || !password}
             >
               {passwordBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {passwordBusy
@@ -369,7 +305,6 @@ export default function Login() {
               onClick={() => {
                 setError(null);
                 setPassword("");
-                setConfirmation("");
               }}
             >
               {registering

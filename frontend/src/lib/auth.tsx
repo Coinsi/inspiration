@@ -14,7 +14,7 @@ import { exchangeGoogleSession, type GoogleAuthResult } from "./google-auth";
 interface AuthState {
   me: Me | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   completeGoogleLogin: () => Promise<Pick<GoogleAuthResult, "next" | "linked">>;
   logout: () => Promise<void>;
   logoutError: string;
@@ -78,11 +78,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return googleCompletion.current;
   }, [acceptSession]);
 
-  async function login(username: string, password: string) {
+  async function login(email: string, password: string) {
     const { access_token } = await api.post<{ access_token: string }>(
       "/auth/login",
       {
-        username,
+        email: email.trim(),
         password,
       },
     );

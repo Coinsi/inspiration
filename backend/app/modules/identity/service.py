@@ -17,38 +17,51 @@ from app.modules.identity import schemas
 
 
 def register_user(db: Session, data: schemas.RegisterIn) -> User:
+    email = str(data.email).strip().lower()
+    username = data.username or "u_" + uuid.uuid4().hex
     exists = db.scalar(
         select(User).where(
-            or_(User.username == data.username, func.lower(User.email) == str(data.email).lower())
+            or_(User.username == username, func.lower(func.trim(User.email)) == email)
         )
     )
     if exists:
-        raise Conflict("用户名或邮箱已被使用")
+        raise Conflict("邮箱或用户名已被使用" if data.username else "邮箱已被使用")
     user = User(
-        username=data.username,
-        email=str(data.email).lower(),
+        username=username,
+        email=email,
         password_hash=hash_password(data.password),
-        display_name=data.display_name,
+        display_name=data.display_name or "新用户",
     )
     try:
         with db.begin_nested():
             db.add(user)
             db.flush()
     except IntegrityError as exc:
-        raise Conflict("用户名或邮箱已被使用") from exc
+        raise Conflict("邮箱或用户名已被使用" if data.username else "邮箱已被使用") from exc
     return user
 
 
 def login(db: Session, data: schemas.LoginIn) -> str:
-    user = db.scalar(select(User).where(User.username == data.username))
+    if data.email is not None:
+        # Legacy data can contain emails that differ only by case or whitespace.
+        # Never choose an arbitrary account or use its password to disambiguate.
+        matches = list(
+            db.scalars(
+                select(User)
+                .where(func.lower(func.trim(User.email)) == str(data.email).lower())
+                .limit(2)
+            )
+        )
+        user = matches[0] if len(matches) == 1 else None
+    else:
+        user = db.scalar(select(User).where(User.username == data.username))
     if (
         user is None
+        or not user.is_active
         or not user.password_hash
         or not verify_password(data.password, user.password_hash)
     ):
-        raise Unauthorized("用户名或密码错误")
-    if not user.is_active:
-        raise Unauthorized("用户已禁用")
+        raise Unauthorized("邮箱或密码错误" if data.email is not None else "用户名或密码错误")
     return create_access_token(str(user.id), {"ver": user.auth_version})
 
 
