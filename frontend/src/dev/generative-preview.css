@@ -1,0 +1,25 @@
+.gui-preview { background: hsl(var(--bg)); color: hsl(var(--fg)); min-height: 100vh; padding: 0 28px 60px; font-family: "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif; }
+.gui-preview-shell { max-width: 860px; margin: auto; }
+.gui-preview-header { display: flex; align-items: center; justify-content: space-between; padding: 26px 0; border-bottom: 1px solid hsl(var(--border) / .65); }
+.gui-preview-brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+.gui-preview-sub { margin-left: 10px; color: hsl(var(--muted)); font-weight: 400; font-size: 13px; }
+.gui-theme { padding: 9px; border-radius: 9px; }
+.gui-theme:hover { background: hsl(var(--elevated)); }
+.gui-preview-nav { display: flex; gap: 8px; margin: 24px 0 40px; flex-wrap: wrap; }
+.gui-preview-nav button, .gui-preview-nav select { padding: 9px 14px; border: 1px solid transparent; border-radius: 9px; font-size: 13px; color: hsl(var(--muted)); background: transparent; }
+.gui-preview-nav button[aria-pressed="true"] { color: hsl(var(--fg)); background: hsl(var(--card)); border-color: hsl(var(--border)); box-shadow: 0 2px 4px #00000005; }
+.gui-preview-nav select { margin-left: auto; max-width: 180px; background: hsl(var(--surface)); }
+.gui-user-message { margin: 0 0 36px auto; width: fit-content; max-width: 85%; background: hsl(var(--elevated)); padding: 14px 19px; border-radius: 16px 16px 4px 16px; font-size: 14px; line-height: 1.8; }
+.gui-assistant-label { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 500; margin-bottom: 16px; }
+.gui-assistant-intro { font-size: 14px; line-height: 1.9; color: hsl(var(--muted)); }
+.gui-reply { margin-top: 32px; padding: 18px 20px 14px; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 18px; box-shadow: 0 5px 20px #00000006; }
+.gui-reply label { display: block; font-size: 13px; }
+.gui-reply textarea { display: block; width: 100%; min-height: 82px; max-height: 260px; resize: vertical; background: transparent; font-size: 14px; line-height: 1.8; padding: 10px 0; border: 0; }
+.gui-reply textarea:focus { outline: none; }
+.gui-reply:focus-within { border-color: hsl(var(--fg) / .4); }
+.gui-reply-footer { display: flex; align-items: center; justify-content: space-between; color: hsl(var(--muted)); font-size: 12px; }
+.gui-reply-footer svg { box-sizing: content-box; padding: 7px; border-radius: 50%; background: hsl(var(--elevated)); }
+.gui-catalog-item { padding: 16px 0 26px; border-bottom: 1px solid hsl(var(--border)); }
+.gui-catalog-item h2 { font-size: 13px; color: hsl(var(--muted)); }
+.gui-preview button:focus-visible, .gui-preview select:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
+@media(max-width: 600px) { .gui-preview { padding: 0 16px 32px; } .gui-preview-sub { display: none; } .gui-preview-nav { gap: 4px; margin-bottom: 28px; } .gui-preview-nav button, .gui-preview-nav select { padding: 8px 10px; } .gui-preview-nav select { margin-left: 0; } .gui-user-message { max-width: 95%; } }

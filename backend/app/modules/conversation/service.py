@@ -1,5 +1,6 @@
 """Ownership, ordering and history are business rules, independent of execution."""
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -124,16 +125,20 @@ def history_snapshot(messages):
     history, budget = [], 24000
     for m in reversed(messages):
         content = m.content or m.error or ""
-        if not content:
+        ui = (m.context or {}).get("ui_blocks", [])
+        if not content and not ui:
             continue
-        if len(content) > budget:
+        ui_text = json.dumps(ui, ensure_ascii=False) if ui else ""
+        if len(content) + len(ui_text) > budget:
             break
         item = {"role": m.role, "content": content, "status": m.status}
+        if ui:
+            item["ui_blocks"] = ui
         if (m.context or {}).get("outputs"):
             item["media_outputs"] = m.context["outputs"]
             item["media_note"] = "这些是生成素材引用，未附画面或音轨内容，不能声称已看过。"
         history.append(item)
-        budget -= len(content)
+        budget -= len(content) + len(ui_text)
     return {"messages": list(reversed(history)), "history_truncated": len(history) < len(messages)}
 
 

@@ -1,17 +1,21 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { api, clearToken, getToken, setToken, type Me } from "./api";
 import { useQueryClient } from "@tanstack/react-query";
+import { exchangeGoogleSession, type GoogleAuthResult } from "./google-auth";
 
 interface AuthState {
   me: Me | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
+  completeGoogleLogin: () => Promise<Pick<GoogleAuthResult, "next" | "linked">>;
   logout: () => Promise<void>;
   logoutError: string;
   refresh: () => Promise<void>;
@@ -24,22 +28,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [logoutError, setLogoutError] = useState("");
+  const googleCompletion = useRef<Promise<Pick<GoogleAuthResult, "next" | "linked">> | null>(null);
 
-  async function refresh() {
-    if (!getToken()) {
+  const refresh = useCallback(async () => {
+    const requestedToken = getToken();
+    if (!requestedToken) {
       setMe(null);
       setLoading(false);
       return;
     }
     try {
-      setMe(await api.get<Me>("/me"));
+      const result = await api.get<Me>("/me");
+      if (getToken() === requestedToken) setMe(result);
     } catch {
-      clearToken();
-      setMe(null);
+      if (!getToken() || getToken() === requestedToken) {
+        clearToken();
+        setMe(null);
+      }
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  const acceptSession = useCallback(async (accessToken: string) => {
+    setToken(accessToken);
+    setMe(null);
+    queryClient.clear();
+    try {
+      const result = await api.get<Me>("/me");
+      if (getToken() !== accessToken) throw new Error("Session changed while signing in");
+      setMe(result);
+      setLogoutError("");
+    } catch (error) {
+      if (getToken() === accessToken) {
+        clearToken();
+        setMe(null);
+      }
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [queryClient]);
+
+  const completeGoogleLogin = useCallback(() => {
+    googleCompletion.current ??= exchangeGoogleSession().then(async (result) => {
+      await acceptSession(result.access_token);
+      return { next: result.next, linked: result.linked };
+    });
+    return googleCompletion.current;
+  }, [acceptSession]);
 
   async function login(username: string, password: string) {
     const { access_token } = await api.post<{ access_token: string }>(
@@ -49,9 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       },
     );
-    setToken(access_token);
-    queryClient.clear();
-    await refresh();
+    await acceptSession(access_token);
   }
 
   async function logout() {
@@ -72,12 +107,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]);
 
   return (
     <AuthContext.Provider
-      value={{ me, loading, login, logout, logoutError, refresh }}
+      value={{ me, loading, login, completeGoogleLogin, logout, logoutError, refresh }}
     >
       {children}
     </AuthContext.Provider>

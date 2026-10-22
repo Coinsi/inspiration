@@ -1,6 +1,6 @@
 """Inspiration 一键启动。双击运行，或执行 python start.py。
 
-只使用 Python 标准库；沿用 backend/.env，不关闭已运行的服务、不清理数据卷。
+只使用 Python 标准库；沿用 backend/.env，默认复用服务，显式重启/停止不清理数据卷。
 前后端在后台运行，关闭本窗口不会停止服务。详细日志在 .runtime/ 中。
 """
 
@@ -130,6 +130,27 @@ def port_open(host: str, port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+def select_web_port() -> int:
+    """Fall back only for OS-denied binds; never hide an unrelated live server."""
+    for port in (5173, 15173, 25173, 35173):
+        if port_open("127.0.0.1", port):
+            return port  # existing() must still verify this is our frontend.
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", port))
+            return port
+        except OSError as exc:
+            if isinstance(exc, PermissionError) or getattr(exc, "winerror", None) == 10013:
+                say(f"[提示] 端口 {port} 被系统限制，正在选择其他前端端口。")
+                continue
+            raise StartupError(f"无法使用前端端口 {port}：{exc}") from exc
+    raise StartupError("前端候选端口均被系统限制，请检查 Windows 端口保留设置。")
+
+
+def web_port() -> int:
+    return urlsplit(WEB_URL).port or 5173
 
 
 def http_text(url: str) -> str:
@@ -402,9 +423,9 @@ import jwt, bcrypt, multipart, email_validator, app
             if result.returncode == 0:
                 return
         # 不在运行中的 Vite 下替换依赖，也不关闭可能属于其他项目的服务。
-        if port_open("127.0.0.1", 5173):
+        if port_open("127.0.0.1", web_port()):
             raise StartupError(
-                "前端依赖需要同步。请先关闭端口 5173 的前端服务，再重新启动；后端和数据无需关闭。"
+                f"前端依赖需要同步。请先关闭端口 {web_port()} 的前端服务，再重新启动；后端和数据无需关闭。"
             )
         say("[准备] 正在同步前端依赖，可能需要几分钟……")
         self.command(
@@ -577,7 +598,7 @@ import jwt, bcrypt, multipart, email_validator, app
                         "raise SystemExit(0 if result else 1)"
                     ),
                 ],
-                timeout=10,
+                timeout=30,
                 check=False,
             )
             return result.returncode == 0
@@ -1058,7 +1079,7 @@ import jwt, bcrypt, multipart, email_validator, app
         config = self.prepare()
         api_exists = self.existing(8000, "后端", lambda: api_ready(config["app_name"]))
         self.reused_backend = api_exists
-        web_exists = self.existing(5173, "前端", web_ready)
+        web_exists = self.existing(web_port(), "前端", web_ready)
         self.dependencies(config)
         self.optional_services(config)
         self.processing_services(config)
@@ -1110,7 +1131,7 @@ import jwt, bcrypt, multipart, email_validator, app
                     "--host",
                     "127.0.0.1",
                     "--port",
-                    "5173",
+                    str(web_port()),
                     "--strictPort",
                 ],
                 self.frontend,
@@ -1161,15 +1182,30 @@ import jwt, bcrypt, multipart, email_validator, app
 
 
 def main(argv=None) -> int:
+    global WEB_URL
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="一键启动 Inspiration（已有服务会复用）")
+    parser.add_argument("--action", choices=("start", "restart", "stop", "status", "menu"),
+                        default="start", help="启动、重启、停止、状态或交互菜单")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     parser.add_argument(
         "--no-pause", action="store_true", help="完成后不等待按键，供终端/自动化使用"
     )
     args = parser.parse_args(argv)
+    if args.action == "menu":
+        say("Inspiration 服务管理\n1. 启动 / 打开项目\n2. 重启项目（更新代码或依赖后使用）\n3. 停止项目服务\n4. 查看运行状态\n0. 退出\n重启或停止前，请等待正在执行的任务结束。")
+        try:
+            choice = input("请选择 [1]：").strip() or "1"
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if choice == "0":
+            return 0
+        args.action = {"1": "start", "2": "restart", "3": "stop", "4": "status"}.get(choice)
+        if args.action is None:
+            say("无效选项，请重新运行。")
+            return 1
     launcher = Launcher()
     code = 0
     try:
@@ -1178,20 +1214,26 @@ def main(argv=None) -> int:
             raise StartupError("需要 Python 3.11 或更高版本。")
         launcher.runtime.mkdir(exist_ok=True)
         with startup_lock(launcher.runtime / "start.lock"):
-            launcher.start()
-        launcher.summary()
-        say(f"网页：{WEB_URL}\n接口文档：{API_URL}/docs")
-        say(f"日志：{launcher.runtime}\n关闭此窗口不会停止服务，再次双击可复用已运行的服务。")
-        if not args.no_browser:
+            if args.action in ("restart", "stop", "status"):
+                from launcher_services import manage
+                manage(launcher.root, "status" if args.action == "status" else "stop", say)
+            if args.action in ("start", "restart"):
+                WEB_URL = f"http://127.0.0.1:{select_web_port()}"
+                launcher.start()
+        if args.action in ("start", "restart"):
+            launcher.summary()
+            say(f"网页：{WEB_URL}\n接口文档：{API_URL}/docs")
+            say(f"日志：{launcher.runtime}\n关闭此窗口不会停止服务；更新后请选择“重启项目”。")
+        if args.action in ("start", "restart") and not args.no_browser:
             try:
                 webbrowser.open(WEB_URL)
             except webbrowser.Error:
                 say("未能自动打开浏览器，请手动访问上方网页地址。")
-    except (StartupError, OSError, ValueError, KeyboardInterrupt) as error:
+    except (StartupError, OSError, ValueError, RuntimeError, subprocess.TimeoutExpired, KeyboardInterrupt) as error:
         launcher.cleanup_failed_start()
         code = 1
-        say(f"\n启动未完成：{error or '已取消启动'}\n日志目录：{launcher.runtime}")
-        say("本次新启动的前后端已停止；原有服务及数据库、存储容器均保留。")
+        say(f"\n操作未完成：{error or '已取消操作'}\n日志目录：{launcher.runtime}")
+        say("本次新启动的进程已清理；数据库、存储容器和数据均保留。")
     if not args.no_pause and sys.stdin is not None and sys.stdin.isatty():
         try:
             input("\n按回车关闭此窗口……")

@@ -233,15 +233,10 @@ function Collection({ projectId }: { projectId: string }) {
   }
   return (
     <div className="studio-page material-workspace unified-materials">
-      <MaterialTabs projectId={projectId} />
       <header className="materials-heading">
         <div>
           <h1>{deleted ? "素材回收站" : "素材库"}</h1>
-          <p>
-            {deleted
-              ? "上传素材、生成结果和角色设定，在这里统一找回。"
-              : "上传与生成的图片、视频和音频，都在这里。"}
-          </p>
+          {deleted && <p>上传素材、生成结果和角色设定，在这里统一找回。</p>}
         </div>
         <div className="materials-heading-actions">
           <Link to={returnTo}>
@@ -260,6 +255,8 @@ function Collection({ projectId }: { projectId: string }) {
           )}
         </div>
       </header>
+      <div className="materials-navigation">
+      <MaterialTabs projectId={projectId} compact />
       {!deleted && (
         <div className="materials-views" role="tablist" aria-label="素材视图">
           {[
@@ -285,6 +282,7 @@ function Collection({ projectId }: { projectId: string }) {
           </details>
         </div>
       )}
+      </div>
       {tab === "search" ? (
         <LibrarySearch
           projectId={projectId}

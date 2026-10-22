@@ -11,6 +11,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
@@ -18,19 +19,15 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { LoginBackground } from "@/components/LoginBackground";
+import { GoogleAuthButton } from "@/components/GoogleAuthButton";
+import { googleAuthError, safeAuthNext, startGoogleAuth, type AuthProviders } from "@/lib/google-auth";
 
 export default function Login() {
   const { login } = useAuth();
   const location = useLocation();
   const registering = location.pathname === "/register";
   const requestedPath = new URLSearchParams(location.search).get("next") || "";
-  // Only return to known protected routes on this site.
-  const returnPath =
-    /^\/(?:projects(?:\/|[?#]|$)|admin\/(?:website(?:[?#]|$)|blog(?:\/|[?#]|$)))/.test(
-      requestedPath,
-    ) && !/[\\\u0000-\u001f]/.test(requestedPath)
-      ? requestedPath
-      : "/projects";
+  const returnPath = safeAuthNext(requestedPath);
   const enteringAdmin = returnPath.startsWith("/admin/");
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -43,7 +40,29 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [passwordBusy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const busy = passwordBusy || googleBusy;
+  const providers = useQuery({
+    queryKey: ["auth-providers"],
+    queryFn: () => api.get<AuthProviders>("/auth/providers"),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const google = providers.data?.providers.find((provider) => provider.id === "google");
+  const showGoogle = google && (!registering || google.registration_enabled);
+
+  async function signInWithGoogle() {
+    if (busy) return;
+    setGoogleBusy(true);
+    setError(null);
+    try {
+      await startGoogleAuth(returnPath);
+    } catch (reason) {
+      setError(googleAuthError(reason, zh));
+      setGoogleBusy(false);
+    }
+  }
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy || !username.trim() || !password) return;
@@ -172,6 +191,29 @@ export default function Login() {
                 ? "你的故事、素材与灵感，都在这里。"
                 : "Your stories, references and ideas are waiting."}
           </p>
+          {error && (
+            <p role="alert" className="mt-5 rounded-lg border border-danger/20 bg-danger/10 p-3 text-sm text-danger">
+              {error}
+            </p>
+          )}
+          {showGoogle && (
+            <div className="login-google">
+              <GoogleAuthButton loading={googleBusy} disabled={busy} onClick={() => void signInWithGoogle()}>
+                {registering ? (zh ? "使用 Google 注册" : "Sign up with Google") : (zh ? "使用 Google 登录" : "Sign in with Google")}
+              </GoogleAuthButton>
+              <div className="login-google-divider">
+                {zh ? "或使用账号密码" : "or use your username and password"}
+              </div>
+            </div>
+          )}
+          {providers.isError && (
+            <p className="mt-4 text-xs text-muted-foreground" role="status">
+              {zh ? "暂时无法加载其他登录方式。" : "Other sign-in methods could not be loaded. "}
+              <button type="button" className="ml-1 underline" disabled={busy || providers.isFetching} onClick={() => void providers.refetch()}>
+                {zh ? "重试" : "Retry"}
+              </button>
+            </p>
+          )}
           <form onSubmit={onSubmit} className="mt-9 space-y-5">
             <div>
               <label htmlFor="login-username" className="login-label">
@@ -291,21 +333,13 @@ export default function Login() {
                 </p>
               </div>
             )}
-            {error && (
-              <p
-                role="alert"
-                className="rounded-lg border border-danger/20 bg-danger/10 p-3 text-sm text-danger"
-              >
-                {error}
-              </p>
-            )}
             <Button
               type="submit"
               className="login-submit w-full"
               disabled={busy || !username.trim() || !password}
             >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {busy
+              {passwordBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {passwordBusy
                 ? t("login.submitting")
                 : registering
                   ? zh
@@ -318,7 +352,7 @@ export default function Login() {
                     : zh
                       ? "进入工作台"
                       : "Enter your studio"}
-              {!busy && <ArrowRight size={17} />}
+              {!passwordBusy && <ArrowRight size={17} />}
             </Button>
           </form>
           <p className="mt-6 text-sm text-muted-foreground">

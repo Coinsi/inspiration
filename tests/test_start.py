@@ -19,6 +19,22 @@ class StartupTests(unittest.TestCase):
         self.launcher = start.Launcher(self.root)
         self.launcher.runtime.mkdir()
 
+    def test_reserved_frontend_port_uses_fallback(self):
+        with patch.object(start, "port_open", return_value=False), patch.object(start.socket, "socket") as socket:
+            socket.return_value.__enter__.return_value.bind.side_effect = [PermissionError(13, "denied"), None]
+            self.assertEqual(start.select_web_port(), 15173)
+
+    def test_live_port_requires_existing_service_verification(self):
+        with patch.object(start, "port_open", return_value=True), patch.object(start.socket, "socket") as socket:
+            self.assertEqual(start.select_web_port(), 5173)
+            socket.assert_not_called()
+
+    def test_other_bind_errors_are_not_hidden(self):
+        with patch.object(start, "port_open", return_value=False), patch.object(start.socket, "socket") as socket:
+            socket.return_value.__enter__.return_value.bind.side_effect = OSError(98, "in use")
+            with self.assertRaises(start.StartupError):
+                start.select_web_port()
+
     def test_api_health_requires_our_app(self):
         for value, expected in [
             ({"status": "ok", "app": "Inspiration"}, True),

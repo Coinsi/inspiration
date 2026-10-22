@@ -153,20 +153,19 @@
 .story-bible {
   max-width: 1600px;
   margin: auto;
-  padding: 30px 36px 50px;
+  padding: 28px 36px 50px;
 }
 .story-bible-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin: 26px 0 22px;
-  padding: 18px 0;
-  border-top: 1px solid hsl(var(--border));
+  margin: 20px 0 28px;
+  padding: 0 0 20px;
   border-bottom: 1px solid hsl(var(--border));
 }
-.story-bible-tools > .studio-select-trigger,
-.story-bible-tools > input,
+.story-source-filters > .studio-select-trigger,
+.story-source-filters > input,
 .story-extract-controls input,
 .story-extract-controls .studio-select-trigger,
 .story-setting-form .studio-select-trigger {
@@ -177,10 +176,16 @@
   font-size: 12px;
   max-width: 100%;
 }
-.story-bible-tools > input {
+.story-source-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.story-mobile-filters { display: none; }
+.story-source-filters > input {
   width: 200px;
 }
-.story-bible-tools > .studio-select-trigger {
+.story-source-filters > .studio-select-trigger {
   max-width: 280px;
 }
 .story-text-link {
@@ -195,8 +200,8 @@
 }
 .story-bible-layout {
   display: grid;
-  grid-template-columns: 175px minmax(0, 1fr);
-  gap: 26px;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 28px;
 }
 .story-categories {
   display: flex;
@@ -208,27 +213,45 @@
 }
 .story-categories > p {
   padding: 0 12px 14px;
+  font-size: 12px;
+  color: hsl(var(--muted));
 }
 .story-categories button {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  border-radius: 8px;
-  padding: 11px 12px;
-  font-size: 13px;
+  border-radius: 11px;
+  min-height: 48px;
+  padding: 10px 12px;
+  font-size: 14px;
   text-align: left;
   color: hsl(var(--muted));
 }
 .story-categories button[aria-current] {
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--fg));
+  background: hsl(var(--elevated));
 }
 .story-categories button:hover {
   background: hsl(var(--elevated));
 }
-.story-categories button span:last-child {
-  font-size: 11px;
+.story-categories button > svg {
+  flex-shrink: 0;
+}
+.story-category-name {
+  flex: 1;
+}
+.story-category-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 26px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  text-align: center;
+  background: hsl(var(--card));
+}
+.story-categories button[aria-current] .story-category-count {
+  background: hsl(var(--fg));
+  color: hsl(var(--bg));
 }
 .story-setting-list {
   min-width: 0;
@@ -281,7 +304,7 @@
   overflow-wrap: anywhere;
 }
 .story-setting-content {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.9;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -297,7 +320,7 @@
 .story-read-toggle {
   align-self: flex-start;
   margin-top: 12px;
-  font-size: 11px;
+  font-size: 12px;
   color: hsl(var(--primary));
   padding: 4px 0;
 }
@@ -499,7 +522,24 @@
     flex-basis: 100%;
   }
   .story-bible {
-    padding: 24px 16px;
+    padding: 18px 16px;
+  }
+  .story-bible .story-header { gap: 14px; }
+  .story-bible-tools { margin: 16px 0 18px; padding-bottom: 16px; gap: 10px; }
+  .story-mobile-filters {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 13px;
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+  }
+  .story-source-filters { display: none; width: 100%; }
+  .story-bible-tools.filters-open .story-source-filters {
+    display: flex;
+    flex-wrap: wrap;
   }
   .story-bible-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -521,7 +561,7 @@
   .story-setting-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .story-bible-tools > .studio-select-trigger {
+  .story-source-filters > .studio-select-trigger {
     max-width: 100%;
   }
 }
@@ -539,7 +579,7 @@
   .story-header h1 {
     font-size: 24px;
   }
-  .story-bible-tools > :is(.studio-select-trigger, input) {
+  .story-source-filters > :is(.studio-select-trigger, input) {
     width: 100%;
   }
   .story-reading-page h2 {

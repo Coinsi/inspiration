@@ -53,7 +53,8 @@ async function request<T>(
     } catch {
       /* ignore */
     }
-    if (res.status === 401) clearToken();
+    // An older request must not erase a session that just replaced its token.
+    if (res.status === 401 && getToken() === token) clearToken();
     throw new ApiError(code, message);
   }
   if (res.status === 204) return undefined as T;

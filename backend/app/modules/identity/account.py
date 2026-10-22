@@ -3,18 +3,20 @@
 import base64
 import io
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from PIL import Image, ImageOps
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth_controls import limit_auth
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.errors import CapabilityUnsupported
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.identity import User, UserIdentity
 from app.modules.identity import schemas
+from app.modules.identity.google import google_enabled
 
 router = APIRouter(tags=["account"])
 DB = Depends(get_db, scope="function")
@@ -31,9 +33,20 @@ def locked_user(db, user):
 
 
 @router.get("/auth/providers")
-def providers():
-    # Only enabled, server-configured adapters will be listed here.
-    return {"registration_enabled": True, "providers": []}
+def providers(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    enabled = (
+        [
+            {
+                "id": "google",
+                "name": "Google",
+                "registration_enabled": settings.google_registration_enabled,
+            }
+        ]
+        if google_enabled()
+        else []
+    )
+    return {"registration_enabled": True, "providers": enabled}
 
 
 @router.put("/me/profile", response_model=schemas.UserOut)

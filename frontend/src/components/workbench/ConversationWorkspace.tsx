@@ -1,3 +1,6 @@
+import { ComposerPrimitive, ThreadPrimitive, MessagePrimitive } from "@assistant-ui/react";
+import { AssistantConversation } from "./AssistantConversation";
+import { GenerativeMessage, type UIBlock } from "./GenerativeMessage";
 import { SelectField } from "@/components/ui/select-field";
 import {
   ConversationMediaControls,
@@ -16,7 +19,10 @@ import {
   useMemo,
   useRef,
   useState,
+  useContext,
 } from "react";
+import { createPortal } from "react-dom";
+import { ConversationNavigationHost } from "@/lib/conversation-navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -25,6 +31,10 @@ import {
   FolderOpen,
   Loader2,
   PanelLeft,
+  Clapperboard,
+  Type,
+  Image,
+  Video,
   Paperclip,
   Sparkles,
   ChevronDown,
@@ -56,6 +66,7 @@ import { ConversationTaskState } from "./ConversationTaskState";
 import { ConversationListItem } from "./ConversationListItem";
 import "./composer.css";
 import "./conversations.css";
+import "./conversation-layout.css";
 
 const TaskInspector = lazy(() =>
   import("@/pages/Agent").then((m) => ({ default: m.AgentWorkspace })),
@@ -72,6 +83,7 @@ type Message = {
   execution_kind?: string;
   created_at: string;
   context: {
+    ui_blocks?: UIBlock[];
     mode?: string;
     scope?: Target[];
     skills?: SkillUse[];
@@ -115,6 +127,7 @@ const statuses: Record<string, string> = {
 };
 
 export function ConversationWorkspace({ projectId }: { projectId: string }) {
+  const navigationHost = useContext(ConversationNavigationHost);
   const { me } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -155,7 +168,6 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   const [skillOpen, setSkillOpen] = useState(false);
   const [workOpen, setWorkOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pending, setPending] = usePersistentState<{
     fingerprint: string;
     key: string;
@@ -196,17 +208,16 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     return `${location.pathname}?${next}`;
   };
   const [atBottom, setAtBottom] = useState(true);
-  useEffect(() => {
-    if (!input.current) return;
-    input.current.style.height = "auto";
-    input.current.style.height = `${Math.min(132, Math.max(52, input.current.scrollHeight))}px`;
-  }, [draft, selected]);
   const list = useQuery({
     queryKey: ["conversations", projectId, archived, query, offset],
     queryFn: () =>
       api.get<Conversation[]>(
         `${base}?archived=${archived}&offset=${offset}&q=${encodeURIComponent(query)}`,
       ),
+  });
+  const recent = useQuery({
+    queryKey: ["conversations", projectId, false, "", 0],
+    queryFn: () => api.get<Conversation[]>(`${base}?archived=false&offset=0&q=`),
   });
   const detail = useQuery({
     queryKey: ["conversation", projectId, selected],
@@ -330,6 +341,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     ]);
   };
   const openDraft = () => {
+    setSidebarOpen(false);
     setArchived(false);
     setQuery("");
     setOffset(0);
@@ -355,9 +367,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     },
   });
   const send = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (text: string) => {
       const body = {
-        content: draft.trim(),
+        content: text.trim(),
         model_provider: mode === "text" ? selectedProvider : null,
         mode: "standard",
         scope: mode === "text" ? targets : [],
@@ -593,14 +605,43 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     input.current?.focus();
   };
 
+  const messageById = new Map(messages.map(message => [message.id, message]));
+
   return (
+    <AssistantConversation
+      key={scopeKey}
+      messages={messages}
+      draft={draft}
+      disabled={busy || !!detail.data?.archived}
+      sendDisabled={!ready}
+      running={busy || blocked}
+      loading={!!selected && detail.isPending}
+      onSend={send.mutateAsync}
+    >
+    <ThreadPrimitive.Root asChild>
     <section
-      className={`conversation-workspace ${!messages.length ? "is-empty" : ""} ${sidebarOpen ? "is-sidebar-open" : ""} ${sidebarCollapsed ? "is-sidebar-collapsed" : ""}`}
+      className={`conversation-workspace integrated-history ${!messages.length ? "is-empty" : ""}`}
       aria-label="创作对话"
     >
-      <aside
+      {navigationHost && createPortal(
+        <div className="shell-conversation-list">
+          <button onClick={openDraft} disabled={busy || (!!selected && !detail.isSuccess)} aria-current={!selected ? "page" : undefined}>
+            <Plus size={15} />新建对话
+          </button>
+          {recent.isPending && <p role="status">正在读取对话…</p>}
+          {recent.isError && <button onClick={() => recent.refetch()}>对话加载失败，重试</button>}
+          {recent.data?.slice(0, 3).map(c => (
+            <button key={c.id} title={c.title} aria-current={selected === c.id ? "page" : undefined} disabled={busy} onClick={() => select(c.id)}>
+              <span>{c.title}</span>
+            </button>
+          ))}
+          <button onClick={() => setSidebarOpen(true)}>全部对话</button>
+        </div>, navigationHost
+      )}
+      <Modal open={sidebarOpen} onClose={() => setSidebarOpen(false)} title="全部对话" width={640}>
+      <div
         id="conversation-sidebar"
-        className="conversation-sidebar"
+        className="conversation-history-panel"
         aria-label="我的对话"
       >
         <Button
@@ -684,25 +725,17 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         >
           浏览素材库 ↗
         </Link>
-      </aside>
+      </div>
+      </Modal>
       <div className="conversation-main">
         <header className="conversation-heading">
           <div className="conversation-heading-title">
             <button
-              className="conversation-sidebar-toggle conversation-sidebar-desktop"
-              aria-label="展开或收起对话列表"
-              aria-controls="conversation-sidebar"
-              aria-expanded={!sidebarCollapsed}
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            >
-              <PanelLeft size={18} />
-            </button>
-            <button
-              className="conversation-sidebar-toggle conversation-sidebar-mobile"
-              aria-label="展开或收起对话列表"
+              className="conversation-sidebar-toggle"
+              aria-label="全部对话"
               aria-controls="conversation-sidebar"
               aria-expanded={sidebarOpen}
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={() => setSidebarOpen(true)}
             >
               <PanelLeft size={18} />
             </button>
@@ -805,41 +838,14 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           {!messages.length &&
             (!selected || (detail.isSuccess && !detail.isPending)) && (
               <div className="conversation-empty">
-                <span className="conversation-empty-eyebrow">LET’S CREATE</span>
-                <h3>这次，想创作什么？</h3>
-                <p>聊想法、生成图片、制作视频，都在这段对话里继续。</p>
-                <div className="conversation-starters">
-                  {[
-                    [
-                      "梳理一个想法",
-                      "我有一个创作想法，请先和我讨论故事方向。",
-                    ],
-                    [
-                      "打磨故事与人物",
-                      "我想打磨故事和人物，请先帮我梳理值得改进的地方。",
-                    ],
-                    [
-                      "构思镜头画面",
-                      "我想构思一组镜头，请先和我讨论画面、情绪与节奏。",
-                    ],
-                  ].map(([label, text]) => (
-                    <button
-                      key={label}
-                      disabled={busy || !!detail.data?.archived}
-                      onClick={() => {
-                        setDraft(text);
-                        setMode("text");
-                        input.current?.focus();
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                <h3><Clapperboard aria-hidden="true" />今天，想创作些什么？</h3>
+
               </div>
             )}
-          {messages.map((m) => (
-            <article
+          <ThreadPrimitive.Messages>{({ message }) => {
+            const m = messageById.get(message.id);
+            if (!m) return null;
+            return <MessagePrimitive.Root asChild><article
               key={m.id}
               id={`conversation-message-${m.id}`}
               data-message={m.id}
@@ -855,6 +861,14 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 {m.role === "user" ? "你" : "创作助理"}
                 {m.context.mode === "test" && <span>离线机制测试</span>}
               </div>
+              {m.context.ui_blocks?.map(block => <GenerativeMessage
+                key={block.id} block={block} disabled={busy || blocked || !!detail.data?.archived}
+                onReply={text => {
+                  const next = draft.trim() ? `${draft}\n\n${text}` : text;
+                  if (next.length > 8000) throw new Error("输入框内容较长，请整理后再加入这份选择。");
+                  setMode("text"); setDraft(next); input.current?.focus();
+                }}
+              />)}
               {m.content &&
                 !(
                   m.execution_kind === "generation" &&
@@ -969,8 +983,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                   )}
                 </>
               )}
-            </article>
-          ))}
+            </article></MessagePrimitive.Root>;
+          }}</ThreadPrimitive.Messages>
           <div ref={bottom} />
         </div>
         {error && (
@@ -978,7 +992,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             {error.message}
           </p>
         )}
-        <div className="conversation-compose">
+        <ComposerPrimitive.Root asChild><div className="conversation-compose">
           {((mode === "text" && targets.length > 0) || skills.length > 0) && (
             <div className="conversation-attachments" aria-label="本轮已选内容">
               {(mode === "text" ? targets : []).map((t) => {
@@ -1057,9 +1071,12 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ))}
             </div>
           )}
-          <textarea
+          <ComposerPrimitive.Input
             ref={input}
-            rows={2}
+            minRows={2}
+            maxRows={6}
+            cancelOnEscape={false}
+            autoFocus={false}
             aria-label="对话消息"
             placeholder={
               detail.data?.archived
@@ -1076,16 +1093,6 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             onChange={(e) => setDraft(e.target.value)}
             maxLength={mode === "text" ? 8000 : 6000}
             disabled={!!detail.data?.archived || busy}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                if (ready) send.mutate();
-              }
-            }}
           />
           <div className="conversation-compose-tools">
             <SelectField
@@ -1095,9 +1102,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               disabled={busy}
               onChange={(value) => setMode(value as CreationMode)}
               options={[
-                { value: "text", label: "讨论" },
-                { value: "image", label: "生成图片" },
-                { value: "video", label: "生成视频" },
+                { value: "text", label: "文字", icon: <Type size={17} aria-hidden="true" /> },
+                { value: "image", label: "图片", icon: <Image size={17} aria-hidden="true" /> },
+                { value: "video", label: "视频", icon: <Video size={17} aria-hidden="true" /> },
               ]}
             />
             <ComposerModelPicker
@@ -1141,10 +1148,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               <Sparkles size={17} />
               <span>技能</span>
             </button>
-            <button
+            <ComposerPrimitive.Send
               className="conversation-send"
               type="button"
-              onClick={() => send.mutate()}
               aria-label="发送消息"
               disabled={!ready}
             >
@@ -1153,7 +1159,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ) : (
                 <ArrowUp size={19} />
               )}
-            </button>
+            </ComposerPrimitive.Send>
           </div>
           {send.isPending && (
             <p className="conversation-note" role="status">
@@ -1189,7 +1195,37 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ：处理完当前任务后可继续发送，也可以新开一段对话。
             </p>
           )}
-        </div>
+        </div></ComposerPrimitive.Root>
+        {!messages.length && (!selected || detail.isSuccess) && (
+                <div className="conversation-starters">
+                  {[
+                    [
+                      "梳理一个想法",
+                      "我有一个创作想法，请先和我讨论故事方向。",
+                    ],
+                    [
+                      "打磨故事与人物",
+                      "我想打磨故事和人物，请先帮我梳理值得改进的地方。",
+                    ],
+                    [
+                      "构思镜头画面",
+                      "我想构思一组镜头，请先和我讨论画面、情绪与节奏。",
+                    ],
+                  ].map(([label, text]) => (
+                    <button
+                      key={label}
+                      disabled={busy || !!detail.data?.archived}
+                      onClick={() => {
+                        setDraft(text);
+                        setMode("text");
+                        input.current?.focus();
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+        )}
       </div>
       {contextOpen && (
         <ConversationObjectDialog
@@ -1230,5 +1266,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         </Suspense>
       </Modal>
     </section>
+    </ThreadPrimitive.Root>
+    </AssistantConversation>
   );
 }

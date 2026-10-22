@@ -2,6 +2,7 @@ import { StudioSelect } from "@/components/ui/studio-select";
 import { PersonalModelServices } from "./PersonalModelServices";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import {
   Camera,
   KeyRound,
@@ -20,6 +21,8 @@ import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
+import { GoogleAuthButton } from "@/components/GoogleAuthButton";
+import { googleAuthError, startGoogleAuth, type AuthProviders } from "@/lib/google-auth";
 import "./account-settings.css";
 
 export function AccountSettings(props: {
@@ -50,6 +53,7 @@ function SettingsContent({
     { theme, toggle } = useTheme();
   const zh = lang === "zh",
     confirm = useConfirm();
+  const location = useLocation();
   const [name, setName] = useState(me?.user.display_name || "");
   const [bio, setBio] = useState(me?.user.bio || "");
   const [current, setCurrent] = useState(""),
@@ -58,6 +62,14 @@ function SettingsContent({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const providers = useQuery({
+    queryKey: ["auth-providers"],
+    queryFn: () => api.get<AuthProviders>("/auth/providers"),
+    staleTime: 60_000,
+    retry: 1,
+    enabled: panel === "security",
+  });
   const security = useQuery({
     queryKey: ["account-security", me?.user.id],
     queryFn: () =>
@@ -73,6 +85,25 @@ function SettingsContent({
     !!current ||
     !!password ||
     !!repeat;
+  async function connectGoogle() {
+    if (busy) return;
+    if (dirty && !(await confirm({
+      title: zh ? "离开并绑定 Google？" : "Leave to connect Google?",
+      message: zh ? "未保存的个人设置将丢失。" : "Your unsaved account changes will be lost.",
+      confirmText: zh ? "继续绑定" : "Continue",
+    }))) return;
+    setBusy(true);
+    setGoogleBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await startGoogleAuth(location.pathname + location.search + location.hash, "link");
+    } catch (reason) {
+      setError(googleAuthError(reason, zh));
+      setBusy(false);
+      setGoogleBusy(false);
+    }
+  }
   async function close() {
     if (busy) return;
     if (
@@ -336,6 +367,17 @@ function SettingsContent({
                 <p role="alert">{security.error.message}</p>
               ) : (
                 <>
+                  {security.data?.has_password === false && (
+                    <p className="account-message">
+                      {security.data.identities.some((identity) => identity.provider === "google")
+                        ? zh
+                          ? "此账户使用 Google 登录，没有设置登录密码。请继续使用 Google 登录。"
+                          : "This account uses Google and has no password. Continue signing in with Google."
+                        : zh
+                          ? "此账户使用第三方登录，没有设置登录密码。请继续使用已绑定的登录方式。"
+                          : "This account has no password. Continue using the connected sign-in method below."}
+                    </p>
+                  )}
                   {security.data?.has_password && (
                     <form
                       className="account-form"
@@ -424,14 +466,32 @@ function SettingsContent({
                     {security.data?.identities.length ? (
                       security.data.identities.map((i) => (
                         <p key={i.id}>
-                          {i.provider} · {zh ? "已绑定" : "Connected"}
+                          {i.provider === "google" ? "Google" : i.provider} · {zh ? "已绑定" : "Connected"}
                         </p>
                       ))
                     ) : (
                       <p className="account-description">
                         {zh
-                          ? "暂未开通第三方登录，当前使用用户名和密码登录。"
-                          : "Third-party sign-in is not enabled. Use your username and password."}
+                          ? "尚未绑定第三方账号。"
+                          : "No connected accounts yet."}
+                      </p>
+                    )}
+                    {providers.data?.providers.some((provider) => provider.id === "google") && !security.data?.identities.some((identity) => identity.provider === "google") && (
+                      <div className="mt-4">
+                        <GoogleAuthButton loading={googleBusy} disabled={busy} onClick={() => void connectGoogle()}>
+                          {zh ? "绑定 Google" : "Connect Google"}
+                        </GoogleAuthButton>
+                        <p className="account-hint">
+                          {zh ? "绑定后，可以使用 Google 登录此账户。" : "After connecting, you can use Google to sign in to this account."}
+                        </p>
+                      </div>
+                    )}
+                    {providers.isError && (
+                      <p className="account-hint">
+                        {zh ? "暂时无法加载可绑定的账号。" : "Available sign-in methods could not be loaded. "}
+                        <button type="button" className="ml-1 underline" disabled={busy || providers.isFetching} onClick={() => void providers.refetch()}>
+                          {zh ? "重试" : "Retry"}
+                        </button>
                       </p>
                     )}
                   </div>

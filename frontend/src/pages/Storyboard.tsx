@@ -9,7 +9,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpRight,
   Clapperboard,
+  ChevronDown,
+  Film,
+  LayoutGrid,
+  SlidersHorizontal,
   GripVertical,
   Loader2,
   Plus,
@@ -17,7 +22,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +41,7 @@ import { useI18n, type Lang } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { useElapsedSeconds } from "@/lib/useElapsedSeconds";
 import { cn } from "@/lib/utils";
+import "./storyboard-workspace.css";
 
 type Opt = { v: string; zh: string; en: string };
 const O = (v: string, zh: string, en: string): Opt => ({ v, zh, en });
@@ -164,6 +170,9 @@ function StoryboardContent() {
   const [preview, setPreview] = useState<Shot | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const directoryId = useId();
+  const directoryToggle = useRef<HTMLButtonElement>(null);
 
   const novelsQuery = useQuery({
     queryKey: ["novels", projectId],
@@ -360,628 +369,457 @@ function StoryboardContent() {
   };
 
   return (
-    <div className="flex min-h-full flex-col p-4 md:p-7 lg:p-8">
-      <div className="page-heading mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Clapperboard className="h-5 w-5 text-primary" />
-          <div>
-            <h1 className="text-xl font-semibold leading-tight">
-              {tr("sb.title")}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {lang === "zh"
-                ? "先看画面与节奏，再细化镜头、对白和声音。"
-                : "Review the visual sequence, then refine shots, dialogue and sound."}
-            </p>
-          </div>
+    <div className="storyboard-workspace">
+      <header className="storyboard-page-header">
+        <div className="storyboard-page-title">
+          <Clapperboard size={21} strokeWidth={1.6} />
+          <h1>{lang === "zh" ? "分镜" : "Storyboard"}</h1>
         </div>
-        <Link
-          className="studio-link shrink-0 text-xs"
-          to={`${base}/shots?view=status`}
-        >
-          {lang === "zh" ? "查看制作进度 →" : "Production progress →"}
+        <Link className="storyboard-text-link" to={`${base}/shots?view=status`}>
+          {lang === "zh" ? "制作进度" : "Production progress"} <span aria-hidden>↗</span>
         </Link>
-      </div>
+      </header>
 
       {(novelsQuery.isError || novelQuery.isError) && (
-        <p role="alert" className="mb-3 text-xs text-danger">
-          {lang === "zh"
-            ? "章节筛选加载失败，已退回可用范围。"
-            : "Chapter filters unavailable; showing the available scope."}{" "}
-          <button
-            className="underline"
-            onClick={() => {
-              void novelsQuery.refetch();
-              if (novelId) void novelQuery.refetch();
-            }}
-          >
-            {lang === "zh" ? "重试" : "Retry"}
-          </button>
+        <p role="alert" className="mb-3 text-sm text-danger">
+          {lang === "zh" ? "章节筛选加载失败，已退回可用范围。" : "Chapter filters unavailable; showing the available scope."}{" "}
+          <button className="underline" onClick={() => {
+            void novelsQuery.refetch();
+            if (novelId) void novelQuery.refetch();
+          }}>{lang === "zh" ? "重试" : "Retry"}</button>
         </p>
       )}
 
-      {/* 筛选 */}
-      <div className="mb-5 flex shrink-0 flex-wrap items-center gap-2 border-b pb-4">
-        <SelectField
-          label={lang === "zh" ? "选择剧本" : "Choose script"}
-          value={scriptFilter}
-          disabled={!context.data}
-          options={[
-            {
-              value: "",
-              label:
-                lang === "zh" ? "全部剧本与故事" : "All scripts and stories",
-            },
-            ...(context.data?.scripts || []).map((s) => ({
-              value: s.id,
-              label: s.title,
-            })),
-            {
-              value: "other",
-              label: lang === "zh" ? "其他来源的场景" : "Other scene sources",
-            },
-          ]}
-          onChange={(value) => {
-            setScriptFilter(value);
-            setNovelId("");
-            setChapterId("");
-            setSceneSearch("");
-          }}
-        />
-        <SelectField
-          label={tr("shots.allNovels")}
-          value={novelId}
-          onChange={(value) => {
-            setNovelId(value);
-            setChapterId("");
-          }}
-          options={[
-            { value: "", label: tr("shots.allNovels") },
-            ...(novels || []).map((n) => ({
-              value: n.id,
-              label: n.title || "未命名故事",
-            })),
-          ]}
-        />
-        {novelId && (
-          <SelectField
-            label={tr("shots.allChapters")}
-            value={chapterId}
-            onChange={setChapterId}
-            options={[
-              { value: "", label: tr("shots.allChapters") },
-              ...chapters.map((c) => ({
-                value: c.id,
-                label:
-                  c.title ||
-                  tr("nar.chapterN").replace("{n}", String(c.ordinal)),
-              })),
-            ]}
-          />
-        )}
-        {(novelId || chapterId) && (
+      <div className="storyboard-layout">
+        <aside className="storyboard-scenes" aria-label={tr("sb.scenes")}>
           <button
-            onClick={() => {
-              setNovelId("");
-              setChapterId("");
-            }}
-            className="text-xs text-muted-foreground hover:text-primary"
+            ref={directoryToggle}
+            className="storyboard-directory-toggle"
+            aria-expanded={directoryOpen}
+            aria-controls={directoryId}
+            onClick={() => setDirectoryOpen((value) => !value)}
           >
-            {tr("shots.clearFilter")}
+            <Film size={17} strokeWidth={1.5} />
+            <span>{lang === "zh" ? "场景目录" : "Scenes"}</span>
+            <span className="storyboard-directory-current">
+              {scene?.title || tr("sb.selectScene")}
+            </span>
+            <ChevronDown size={16} className="storyboard-disclosure-icon" />
           </button>
-        )}
-      </div>
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 items-start gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        {/* 左:场景列表 */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-surface lg:sticky lg:top-4">
-          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border px-3 text-sm font-medium">
-            <Clapperboard className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{tr("sb.scenes")}</span>
-            <span className="text-xs text-faint">
-              {scenesLoading || scenesError || scopePending
-                ? "—"
-                : (scenes?.length ?? 0)}
+          <div id={directoryId} className="storyboard-directory-content" data-open={directoryOpen}>
+          <div className="storyboard-directory-heading">
+            <h2>{tr("sb.scenes")}</h2>
+            <span className="storyboard-count">
+              {scenesLoading || scenesError || scopePending ? "—" : (scenes?.length ?? 0)}
             </span>
           </div>
-          <div className="p-2">
+          <div className="storyboard-filters">
+            <SelectField
+              className="w-full"
+              label={lang === "zh" ? "选择剧本" : "Choose script"}
+              value={scriptFilter}
+              disabled={!context.data}
+              options={[
+                { value: "", label: lang === "zh" ? "全部剧本与小说" : "All scripts and novels" },
+                ...(context.data?.scripts || []).map((s) => ({ value: s.id, label: s.title })),
+                { value: "other", label: lang === "zh" ? "其他来源的场景" : "Other scene sources" },
+              ]}
+              onChange={(value) => {
+                setScriptFilter(value);
+                setNovelId("");
+                setChapterId("");
+                setSceneSearch("");
+              }}
+            />
+            <details className="storyboard-source-filters">
+              <summary>
+                <SlidersHorizontal size={14} />
+                {lang === "zh" ? "来源筛选" : "Source filters"}
+                {(novelId || chapterId) && <span className="storyboard-filter-active">{lang === "zh" ? "已筛选" : "Active"}</span>}
+                <ChevronDown size={14} className="storyboard-disclosure-icon" />
+              </summary>
+              <div className="storyboard-source-fields">
+                <SelectField
+                  className="w-full"
+                  label={tr("shots.allNovels")}
+                  value={novelId}
+                  onChange={(value) => { setNovelId(value); setChapterId(""); }}
+                  options={[
+                    { value: "", label: tr("shots.allNovels") },
+                    ...(novels || []).map((n) => ({ value: n.id, label: n.title || (lang === "zh" ? "未命名小说" : "Untitled novel") })),
+                  ]}
+                />
+                {novelId && (
+                  <SelectField
+                    className="w-full"
+                    label={tr("shots.allChapters")}
+                    value={chapterId}
+                    onChange={setChapterId}
+                    options={[
+                      { value: "", label: tr("shots.allChapters") },
+                      ...chapters.map((c) => ({ value: c.id, label: c.title || tr("nar.chapterN").replace("{n}", String(c.ordinal)) })),
+                    ]}
+                  />
+                )}
+                {(novelId || chapterId) && (
+                  <button className="storyboard-text-link" onClick={() => { setNovelId(""); setChapterId(""); }}>
+                    {tr("shots.clearFilter")}
+                  </button>
+                )}
+              </div>
+            </details>
             <SearchField
               className="w-full"
               label={lang === "zh" ? "查找场景" : "Find scenes"}
-              placeholder={lang === "zh" ? "查找场景…" : "Find scenes…"}
+              placeholder={lang === "zh" ? "查找场景" : "Find scenes"}
               value={sceneSearch}
-              onValueChange={(value) => setSceneSearch(value)}
+              onValueChange={setSceneSearch}
             />
           </div>
-          <div className="max-h-52 lg:max-h-[65vh] min-h-0 flex-1 space-y-1 overflow-auto p-2">
+          <div className="storyboard-scene-list">
             {scenesLoading || scopePending ? (
-              <p className="p-4 text-xs text-muted-foreground">
-                {tr("common.loading")}
-              </p>
+              <p className="storyboard-directory-empty">{tr("common.loading")}</p>
             ) : scenesError ? (
-              <p role="alert" className="p-4 text-xs text-danger">
+              <p role="alert" className="storyboard-directory-empty text-danger">
                 {tr("common.loadFailed")}
-                <button
-                  className="ml-2 underline"
-                  onClick={() => void retryScenes()}
-                >
+                <button className="ml-2 underline" onClick={() => void retryScenes()}>
                   {lang === "zh" ? "重试" : "Retry"}
                 </button>
               </p>
             ) : scenes && scenes.length > 0 ? (
-              scenes
-                .filter((sc) =>
-                  `${sc.title} ${sc.code}`
-                    .toLowerCase()
-                    .includes(sceneSearch.trim().toLowerCase()),
-                )
-                .map((sc) => (
-                  <button
-                    key={sc.id}
-                    onClick={() => setSceneId(sc.id)}
-                    aria-pressed={sceneId === sc.id}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
-                      sceneId === sc.id
-                        ? "bg-primary/15 text-primary"
-                        : "hover:bg-elevated text-foreground/90",
-                    )}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">
-                        {sc.title ||
-                          (lang === "zh" ? "未命名场景" : "Untitled scene")}
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-faint">
-                        <span className="truncate">
-                          {context.data?.scenes[sc.id]?.script.title ||
-                            sc.novel_title ||
-                            (lang === "zh" ? "其他来源" : "Other source")}
-                        </span>
-                        {!context.data?.scenes[sc.id] &&
-                          sc.chapter_ordinal != null && (
-                            <span className="shrink-0 whitespace-nowrap">
-                              ·{" "}
-                              {tr("nar.chapterN").replace(
-                                "{n}",
-                                String(sc.chapter_ordinal),
-                              )}
-                            </span>
-                          )}
-                      </div>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 font-code text-xs text-muted-foreground">
-                      {sc.shot_count}
+              scenes.filter((sc) => `${sc.title} ${sc.code}`.toLowerCase().includes(sceneSearch.trim().toLowerCase())).map((sc) => (
+                <button
+                  key={sc.id}
+                  onClick={() => {
+                    setSceneId(sc.id);
+                    if (window.matchMedia("(max-width: 900px)").matches) {
+                      setDirectoryOpen(false);
+                      directoryToggle.current?.focus();
+                    }
+                  }}
+                  aria-pressed={sceneId === sc.id}
+                  className="storyboard-scene-item"
+                  title={sc.title || undefined}
+                >
+                  <Film size={16} strokeWidth={1.5} className="storyboard-scene-icon" />
+                  <span className="storyboard-scene-copy">
+                    <span className="storyboard-scene-title">
+                      {sc.title || (lang === "zh" ? "未命名场景" : "Untitled scene")}
                     </span>
-                  </button>
-                ))
+                    <span className="storyboard-scene-origin">
+                      {context.data?.scenes[sc.id]?.script.title || sc.novel_title || (lang === "zh" ? "其他来源" : "Other source")}
+                      {!context.data?.scenes[sc.id] && sc.chapter_ordinal != null && (
+                        <> · {tr("nar.chapterN").replace("{n}", String(sc.chapter_ordinal))}</>
+                      )}
+                    </span>
+                  </span>
+                  <span className="storyboard-scene-count">{sc.shot_count}</span>
+                </button>
+              ))
             ) : (
-              <div className="py-10 text-center text-xs text-muted-foreground">
-                {tr("sb.noScenes")}
-              </div>
+              <p className="storyboard-directory-empty">{tr("sb.noScenes")}</p>
             )}
+            {!scenesLoading && !scenesError && scenes?.length && !scenes.some((sc) =>
+              `${sc.title} ${sc.code}`.toLowerCase().includes(sceneSearch.trim().toLowerCase())
+            ) ? (
+              <div className="storyboard-directory-empty">
+                <p>{lang === "zh" ? "没有匹配场景" : "No matching scenes"}</p>
+                <button className="storyboard-text-link mt-2" onClick={() => setSceneSearch("")}>
+                  {lang === "zh" ? "清除搜索" : "Clear search"}
+                </button>
+              </div>
+            ) : null}
           </div>
-          {!scenesLoading &&
-          !scenesError &&
-          scenes?.length &&
-          !scenes.some((sc) =>
-            `${sc.title} ${sc.code}`
-              .toLowerCase()
-              .includes(sceneSearch.trim().toLowerCase()),
-          ) ? (
-            <p className="p-3 text-xs text-muted-foreground">
-              {lang === "zh" ? "没有匹配场景" : "No matching scenes"}
-            </p>
-          ) : null}
-        </div>
+          </div>
+        </aside>
 
-        {/* 右:分镜序列 */}
-        <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-          <div className="flex min-h-14 flex-wrap shrink-0 items-center gap-2 border-b border-border p-3 text-sm font-medium">
-            <span className="flex-1 truncate">
-              {scene
-                ? scene.title ||
-                  (lang === "zh" ? "未命名场景" : "Untitled scene")
-                : tr("sb.selectScene")}
-            </span>
-            <span
-              role="status"
-              aria-live="polite"
-              className="text-xs text-muted-foreground"
-            >
+        <section className="storyboard-sequence" aria-label={lang === "zh" ? "分镜序列" : "Shot sequence"}>
+          <div className="storyboard-sequence-header">
+            <div className="storyboard-scene-heading">
+              <h2>{scene ? scene.title || (lang === "zh" ? "未命名场景" : "Untitled scene") : tr("sb.selectScene")}</h2>
+              {scene && shots && !shotsError && (
+                <p>
+                  {lang === "zh"
+                    ? `${shots.length} 个镜头 · ${shots.filter((s) => s.selected_generation_id).length} 个已选定画面 · ${shots.filter((s) => ["approved", "in_cut"].includes(s.production_status)).length} 个已通过审阅`
+                    : `${shots.length} shots · ${shots.filter((s) => s.selected_generation_id).length} selected outputs · ${shots.filter((s) => ["approved", "in_cut"].includes(s.production_status)).length} approved`}
+                </p>
+              )}
+            </div>
+            <span role="status" aria-live="polite" className="storyboard-save-status">
               {patchShot.isPending || reorder.isPending
-                ? lang === "zh"
-                  ? "保存中…"
-                  : "Saving…"
+                ? lang === "zh" ? "保存中…" : "Saving…"
                 : patchShot.isSuccess || reorder.isSuccess
-                  ? lang === "zh"
-                    ? "已保存"
-                    : "Saved"
+                  ? lang === "zh" ? "已保存" : "Saved"
                   : ""}
             </span>
-            <div className="flex rounded-md border p-0.5">
+          </div>
+
+          <div className="storyboard-sequence-toolbar">
+            <div className="storyboard-view-switch" role="group" aria-label={lang === "zh" ? "分镜视图" : "Storyboard view"}>
               {(["gallery", "editor"] as const).map((v) => (
-                <button
-                  key={v}
-                  aria-pressed={view === v}
-                  className={`rounded px-2 py-1 text-xs ${view === v ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
-                  onClick={() => setView(v)}
-                >
-                  {v === "gallery"
-                    ? lang === "zh"
-                      ? "画面浏览"
-                      : "Gallery"
-                    : lang === "zh"
-                      ? "分镜编辑"
-                      : "Edit shots"}
+                <button key={v} aria-pressed={view === v} onClick={() => setView(v)}>
+                  {v === "gallery" ? <LayoutGrid size={15} /> : <Pencil size={15} />}
+                  {v === "gallery" ? lang === "zh" ? "浏览" : "Browse" : lang === "zh" ? "编辑" : "Edit"}
                 </button>
               ))}
             </div>
             {scene && (
-              <>
-                <Button
-                  size="sm"
-                  disabled={breaking || shotsLoading || shotsError}
-                  onClick={runBreakdown}
-                >
-                  {breaking ? (
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-1 h-4 w-4" />
-                  )}
-                  {breaking
-                    ? `${tr("sb.breakingDown")} ${breakingSec}s`
-                    : tr("sb.aiBreakdown")}
+              <div className="storyboard-scene-actions">
+                <Button size="sm" variant="ghost" disabled={breaking || shotsLoading || shotsError} onClick={runBreakdown}>
+                  {breaking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  {breaking ? `${tr("sb.breakingDown")} ${breakingSec}s` : tr("sb.aiBreakdown")}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={createShot.isPending}
-                  onClick={() => createShot.mutate()}
-                >
-                  <Plus className="h-4 w-4 mr-1" /> {tr("sb.addShot")}
+                <Button size="sm" variant="outline" disabled={createShot.isPending} onClick={() => createShot.mutate()}>
+                  {createShot.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  {tr("sb.addShot")}
                 </Button>
-              </>
+              </div>
             )}
           </div>
-          <div className="min-h-40 flex-1 p-3 md:p-4">
-            {scene && shots && !shotsError && (
-              <p className="mb-3 text-xs text-muted-foreground">
-                {lang === "zh"
-                  ? `本场景 ${shots.length} 个镜头 · ${shots.filter((s) => s.selected_generation_id).length} 个已选定画面 · ${shots.filter((s) => ["approved", "in_cut"].includes(s.production_status)).length} 个已审阅通过`
-                  : `${shots.length} shots · ${shots.filter((s) => s.selected_generation_id).length} selected outputs · ${shots.filter((s) => ["approved", "in_cut"].includes(s.production_status)).length} approved`}
-              </p>
-            )}
-            {breaking && (
-              <div className="mb-3 flex items-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm text-primary">
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                <span>
-                  {tr("sb.breakingDownBanner").replace(
-                    "{n}",
-                    String(breakingSec),
-                  )}
-                </span>
-              </div>
-            )}
-            {shotsError ? (
-              <p role="alert" className="studio-empty">
-                {tr("common.loadFailed")}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void retryShots()}
-                >
-                  {lang === "zh" ? "重试" : "Retry"}
-                </Button>
-              </p>
-            ) : shotsLoading || scopePending || scenesLoading ? (
-              <p className="studio-empty">{tr("common.loading")}</p>
-            ) : !scene ? (
-              <div className="studio-empty">{tr("sb.selectScene")}</div>
-            ) : !shots || shots.length === 0 ? (
-              <div className="studio-empty">
-                {tr("sb.noShots")}
-                <div className="flex gap-2">
-                  <Button size="sm" disabled={breaking} onClick={runBreakdown}>
-                    {breaking ? (
-                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="mr-1 h-4 w-4" />
-                    )}
-                    {breaking
-                      ? `${tr("sb.breakingDown")} ${breakingSec}s`
-                      : tr("sb.aiBreakdown")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={createShot.isPending}
-                    onClick={() => createShot.mutate()}
-                  >
-                    <Plus className="h-4 w-4 mr-1" /> {tr("sb.addShot")}
-                  </Button>
-                </div>
-              </div>
-            ) : view === "gallery" ? (
-              <div className="grid grid-cols-1 gap-4 min-[600px]:grid-cols-2 2xl:grid-cols-3">
-                {shots.map((s, i) => (
-                  <article
-                    key={s.id}
-                    className="min-w-0 overflow-hidden rounded-lg border bg-surface"
-                  >
-                    <div className="relative aspect-video overflow-hidden">
-                      <ShotMedia projectId={projectId!} shot={s} />
-                    </div>
-                    <div className="space-y-3 p-3">
-                      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                        <span className="font-code">
-                          {lang === "zh"
-                            ? `第 ${i + 1} 个镜头`
-                            : `Shot ${i + 1}`}
-                        </span>
-                        <span>
-                          {sbVal(s, "duration_sec")
-                            ? `${sbVal(s, "duration_sec")}s`
-                            : lang === "zh"
-                              ? "时长未定"
-                              : "No duration"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">
-                          {s.title ||
-                            (lang === "zh" ? "未命名镜头" : "Untitled shot")}
-                        </h3>
-                        <button
-                          className="studio-icon-button"
-                          aria-label={`${lang === "zh" ? "重命名镜头" : "Rename shot"} ${s.title || ""}`}
-                          onClick={() => setRenaming(s)}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </div>
-                      <p className="line-clamp-2 min-h-10 break-words text-xs leading-5 text-muted-foreground">
-                        {s.description ||
-                          (lang === "zh"
-                            ? "尚未填写画面描述"
-                            : "No visual description yet")}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {SELECTS.slice(0, 3).map((f) => {
-                          const o = f.options.find(
-                            (o) => o.v === sbVal(s, f.key),
-                          );
-                          return o ? (
-                            <span
-                              key={f.key}
-                              className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground"
-                            >
-                              {label(o, lang)}
-                            </span>
-                          ) : null;
-                        })}
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs">
-                        <button
-                          className="studio-link"
-                          onClick={() => setPreview(s)}
-                        >
-                          {lang === "zh" ? "快速预览" : "Quick preview"}
-                        </button>
-                        <Link
-                          className="studio-link"
-                          to={`${base}/shots?shot=${s.id}&from=storyboard&tab=gen`}
-                        >
-                          {lang === "zh"
-                            ? "生成与引用"
-                            : "Generate & references"}{" "}
-                          →
-                        </Link>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {shots.map((s, i) => (
-                  <div
-                    key={s.id}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      if (overId !== s.id) setOverId(s.id);
-                    }}
-                    onDrop={() => onDrop(s.id)}
-                    className={cn(
-                      "rounded-lg border bg-surface p-3 md:p-4 transition-colors",
-                      dragId === s.id ? "opacity-40" : "",
-                      overId === s.id && dragId && dragId !== s.id
-                        ? "border-primary ring-1 ring-primary"
-                        : "border-border",
-                    )}
-                  >
-                    <div className="flex flex-col items-stretch gap-4 xl:flex-row xl:items-start">
-                      <div className="w-full shrink-0 space-y-2 xl:w-48">
-                        <div className="aspect-video overflow-hidden rounded-md border">
-                          <ShotMedia projectId={projectId!} shot={s} />
-                        </div>
-                        <div className="flex items-center gap-1 text-muted-foreground">
-                          <span
-                            draggable
-                            onDragStart={() => setDragId(s.id)}
-                            onDragEnd={() => {
-                              setDragId(null);
-                              setOverId(null);
-                            }}
-                            title={
-                              lang === "zh"
-                                ? "拖动排序，或使用右侧按钮"
-                                : "Drag to reorder, or use the arrow buttons"
-                            }
-                          >
-                            <GripVertical className="h-4 w-4 cursor-grab" />
-                          </span>
-                          <span className="flex-1 font-code text-xs">
-                            {lang === "zh"
-                              ? `第 ${i + 1} 个镜头`
-                              : `Shot ${i + 1}`}
-                          </span>
-                          <button
-                            disabled={i === 0 || reorder.isPending}
-                            onClick={() => moveShot(i, -1)}
-                            title={lang === "zh" ? "上移镜头" : "Move shot up"}
-                            className="grid h-8 w-8 place-items-center rounded-md hover:bg-elevated disabled:opacity-30"
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            disabled={
-                              i === shots.length - 1 || reorder.isPending
-                            }
-                            onClick={() => moveShot(i, 1)}
-                            title={
-                              lang === "zh" ? "下移镜头" : "Move shot down"
-                            }
-                            className="grid h-8 w-8 place-items-center rounded-md hover:bg-elevated disabled:opacity-30"
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                        <Link
-                          to={`${base}/shots?shot=${s.id}&from=storyboard&tab=gen`}
-                          className="block text-xs text-muted-foreground hover:text-primary"
-                        >
-                          {lang === "zh"
-                            ? "生成、资产引用与审核"
-                            : "Generation, references & review"}{" "}
-                          →
-                        </Link>
-                      </div>
 
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Input
-                            aria-label={tr("sb.shotTitle")}
-                            maxLength={255}
-                            defaultValue={s.title ?? ""}
-                            onBlur={(e) => {
-                              if (
-                                e.target.value.trim() &&
-                                e.target.value.trim() !== (s.title ?? "")
-                              )
-                                patchShot.mutate({
-                                  id: s.id,
-                                  body: { title: e.target.value.trim() },
-                                });
-                            }}
-                            placeholder={tr("sb.shotTitle")}
-                            className="h-8 flex-1"
-                          />
+          {breaking && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span>{tr("sb.breakingDownBanner").replace("{n}", String(breakingSec))}</span>
+            </div>
+          )}
+          {shotsError ? (
+            <div role="alert" className="studio-empty">
+              {tr("common.loadFailed")}
+              <Button variant="outline" size="sm" onClick={() => void retryShots()}>{lang === "zh" ? "重试" : "Retry"}</Button>
+            </div>
+          ) : shotsLoading || scopePending || scenesLoading ? (
+            <p className="studio-empty">{tr("common.loading")}</p>
+          ) : !scene ? (
+            <div className="studio-empty">{tr("sb.selectScene")}</div>
+          ) : !shots || shots.length === 0 ? (
+            <div className="studio-empty">
+              <Clapperboard size={30} strokeWidth={1.3} />
+              {tr("sb.noShots")}
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button size="sm" disabled={breaking} onClick={runBreakdown}>
+                  {breaking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  {breaking ? `${tr("sb.breakingDown")} ${breakingSec}s` : tr("sb.aiBreakdown")}
+                </Button>
+                <Button size="sm" variant="outline" disabled={createShot.isPending} onClick={() => createShot.mutate()}>
+                  <Plus size={16} /> {tr("sb.addShot")}
+                </Button>
+              </div>
+            </div>
+          ) : view === "gallery" ? (
+            <div className="storyboard-gallery">
+              {shots.map((s, i) => (
+                <article key={s.id} className="storyboard-gallery-shot">
+                  <div className="storyboard-gallery-media">
+                    <StoryboardFrame projectId={projectId!} shot={s} />
+                    <span className="storyboard-frame-number">{String(i + 1).padStart(2, "0")}</span>
+                  </div>
+                  <div className="storyboard-gallery-title">
+                    <h3>{s.title || (lang === "zh" ? "未命名镜头" : "Untitled shot")}</h3>
+                    <button className="storyboard-icon-button" aria-label={`${lang === "zh" ? "重命名镜头" : "Rename shot"} ${s.title || ""}`} onClick={() => setRenaming(s)}>
+                      <Pencil size={14} />
+                    </button>
+                  </div>
+                  <p className="storyboard-gallery-description">
+                    {s.description || (lang === "zh" ? "尚未填写画面描述" : "No visual description yet")}
+                  </p>
+                  <div className="storyboard-shot-specs">
+                    <span>{sbVal(s, "duration_sec") ? `${sbVal(s, "duration_sec")}s` : lang === "zh" ? "时长未定" : "No duration"}</span>
+                    {SELECTS.slice(0, 3).map((f) => {
+                      const o = f.options.find((o) => o.v === sbVal(s, f.key));
+                      return o ? <span key={f.key}>{label(o, lang)}</span> : null;
+                    })}
+                  </div>
+                  <div className="storyboard-gallery-actions">
+                    <button className="storyboard-text-link" onClick={() => setPreview(s)}>
+                      {s.selected_generation_id
+                        ? lang === "zh" ? "快速预览" : "Quick preview"
+                        : lang === "zh" ? "镜头详情" : "Shot details"}
+                    </button>
+                    <Link className="storyboard-text-link" to={`${base}/shots?shot=${s.id}&from=storyboard&tab=gen`}>
+                      {s.selected_generation_id
+                        ? lang === "zh" ? "生成与引用" : "Generate & references"
+                        : lang === "zh" ? "引用与审阅" : "References & review"} <span aria-hidden>↗</span>
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="storyboard-editor-list">
+              {shots.map((s, i) => (
+                <article
+                  key={s.id}
+                  onDragOver={(e) => { e.preventDefault(); if (overId !== s.id) setOverId(s.id); }}
+                  onDrop={() => onDrop(s.id)}
+                  className={cn(
+                    "storyboard-shot-editor",
+                    dragId === s.id && "is-dragging",
+                    overId === s.id && dragId && dragId !== s.id && "is-drop-target",
+                  )}
+                >
+                  <div className="storyboard-shot-header">
+                    <span
+                      draggable={!reorder.isPending}
+                      onDragStart={() => setDragId(s.id)}
+                      onDragEnd={() => { setDragId(null); setOverId(null); }}
+                      className="storyboard-drag-handle"
+                      title={lang === "zh" ? "拖动排序，或使用右侧按钮" : "Drag to reorder, or use the arrow buttons"}
+                    ><GripVertical size={16} /></span>
+                    <span className="storyboard-shot-number" aria-label={lang === "zh" ? `第 ${i + 1} 个镜头` : `Shot ${i + 1}`}>{String(i + 1).padStart(2, "0")}</span>
+                    <Input
+                      aria-label={tr("sb.shotTitle")}
+                      maxLength={255}
+                      defaultValue={s.title ?? ""}
+                      onBlur={(e) => {
+                        if (e.target.value.trim() && e.target.value.trim() !== (s.title ?? ""))
+                          patchShot.mutate({ id: s.id, body: { title: e.target.value.trim() } });
+                      }}
+                      placeholder={tr("sb.shotTitle")}
+                      className="storyboard-title-input"
+                    />
+                    <div className="storyboard-shot-order">
+                      <button
+                        disabled={i === 0 || reorder.isPending}
+                        onClick={() => moveShot(i, -1)}
+                        aria-label={lang === "zh" ? "上移镜头" : "Move shot up"}
+                        title={lang === "zh" ? "上移镜头" : "Move shot up"}
+                        className="storyboard-icon-button"
+                      ><ArrowUp size={15} /></button>
+                      <button
+                        disabled={i === shots.length - 1 || reorder.isPending}
+                        onClick={() => moveShot(i, 1)}
+                        aria-label={lang === "zh" ? "下移镜头" : "Move shot down"}
+                        title={lang === "zh" ? "下移镜头" : "Move shot down"}
+                        className="storyboard-icon-button"
+                      ><ArrowDown size={15} /></button>
+                      <button
+                        disabled={deleteShot.isPending}
+                        onClick={async () => {
+                          if (await confirm({
+                            title: tr("sb.deleteShot"), message: tr("sb.deleteShotConfirm"),
+                            confirmText: tr("common.delete"), danger: true,
+                          })) deleteShot.mutate(s.id);
+                        }}
+                        aria-label={tr("sb.deleteShot")}
+                        title={tr("sb.deleteShot")}
+                        className="storyboard-icon-button storyboard-delete"
+                      ><Trash2 size={15} /></button>
+                    </div>
+                  </div>
+                  <div className="storyboard-shot-body">
+                    <div className="storyboard-shot-visual">
+                      <div className="storyboard-editor-media"><StoryboardFrame projectId={projectId!} shot={s} /></div>
+                      <div className="storyboard-media-footer">
+                        <label className="storyboard-duration">
+                          <span>{lang === "zh" ? "时长" : "Duration"}</span>
                           <input
                             aria-label={tr("sb.duration")}
-                            type="number"
-                            min={0}
-                            step={0.5}
+                            type="number" min={0} step={0.5}
                             defaultValue={sbVal(s, "duration_sec")}
                             onBlur={(e) => {
                               if (e.target.value !== sbVal(s, "duration_sec"))
-                                setSb(
-                                  s,
-                                  "duration_sec",
-                                  e.target.value ? Number(e.target.value) : 0,
-                                );
+                                setSb(s, "duration_sec", e.target.value ? Number(e.target.value) : 0);
                             }}
-                            placeholder={tr("sb.duration")}
-                            className="h-8 w-20 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                            placeholder="—"
                           />
-                          <span className="text-xs text-faint">
-                            {tr("sb.sec")}
-                          </span>
-                          <button
-                            onClick={async () => {
-                              if (
-                                await confirm({
-                                  title: tr("sb.deleteShot"),
-                                  message: tr("sb.deleteShotConfirm"),
-                                  confirmText: tr("common.delete"),
-                                  danger: true,
-                                })
-                              )
-                                deleteShot.mutate(s.id);
-                            }}
-                            title={tr("sb.deleteShot")}
-                            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-faint transition hover:bg-danger/15 hover:text-danger"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
+                          <span>{tr("sb.sec")}</span>
+                        </label>
+                        <button className="storyboard-text-link" onClick={() => setPreview(s)}>
+                          {s.selected_generation_id
+                            ? lang === "zh" ? "预览" : "Preview"
+                            : lang === "zh" ? "详情" : "Details"}
+                        </button>
+                      </div>
+                      <Link className="storyboard-text-link storyboard-generation-link" to={`${base}/shots?shot=${s.id}&from=storyboard&tab=gen`}>
+                        {s.selected_generation_id
+                          ? lang === "zh" ? "生成画面 · 引用与审阅" : "Generate · references & review"
+                          : lang === "zh" ? "引用与审阅" : "References & review"} <span aria-hidden>↗</span>
+                      </Link>
+                    </div>
+                    <label className="storyboard-description-field">
+                      <span className="storyboard-field-label">{tr("sb.visual")}</span>
+                      <Textarea
+                        defaultValue={s.description}
+                        onBlur={(e) => {
+                          if (e.target.value !== s.description)
+                            patchShot.mutate({ id: s.id, body: { description: e.target.value } });
+                        }}
+                        aria-label={tr("sb.visual")}
+                        placeholder={lang === "zh" ? "描述这个镜头里发生的事…" : "Describe what happens in this shot…"}
+                        rows={5}
+                        className="storyboard-description-input"
+                      />
+                    </label>
+                  </div>
 
-                        {/* 分镜规格下拉 */}
-                        <div className="flex flex-wrap gap-1.5">
-                          {SELECTS.map((f) => (
+                  <details className="storyboard-shot-details">
+                    <summary>
+                      <SlidersHorizontal size={15} />
+                      <span>{lang === "zh" ? "镜头参数与声音" : "Camera & sound"}</span>
+                      <span className="storyboard-parameter-summary">
+                        {SELECTS.slice(0, 3).map((f) => {
+                          const option = f.options.find((o) => o.v === sbVal(s, f.key));
+                          return option ? label(option, lang) : null;
+                        }).filter(Boolean).join(" · ")}
+                      </span>
+                      <ChevronDown size={15} className="storyboard-disclosure-icon" />
+                    </summary>
+                    <div className="storyboard-details-content">
+                      <div className="storyboard-spec-fields">
+                        {SELECTS.map((f) => (
+                          <label key={f.key} className="storyboard-labelled-field">
+                            <span className="storyboard-field-label">{label(f, lang)}</span>
                             <SelectField
-                              key={f.key}
+                              className="w-full"
                               label={label(f, lang)}
                               value={String(sbVal(s, f.key))}
                               onChange={(value) => setSb(s, f.key, value)}
                               options={[
-                                { value: "", label: label(f, lang) },
-                                ...f.options.map((o) => ({
-                                  value: o.v,
-                                  label: label(o, lang),
-                                })),
+                                { value: "", label: lang === "zh" ? "未设置" : "Not set" },
+                                ...f.options.map((o) => ({ value: o.v, label: label(o, lang) })),
                               ]}
                             />
-                          ))}
-                        </div>
-
-                        {/* 文本字段 */}
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <Textarea
-                            defaultValue={s.description}
-                            onBlur={(e) => {
-                              if (e.target.value !== s.description)
-                                patchShot.mutate({
-                                  id: s.id,
-                                  body: { description: e.target.value },
-                                });
-                            }}
-                            aria-label={tr("sb.visual")}
-                            placeholder={tr("sb.visual")}
-                            rows={2}
-                            className="text-xs"
-                          />
+                          </label>
+                        ))}
+                      </div>
+                      <div className="storyboard-sound-fields">
+                        <label className="storyboard-labelled-field storyboard-dialogue-field">
+                          <span className="storyboard-field-label">{tr("sb.dialogue")}</span>
                           <Textarea
                             defaultValue={sbVal(s, "dialogue")}
                             onBlur={(e) => setSb(s, "dialogue", e.target.value)}
                             aria-label={tr("sb.dialogue")}
-                            placeholder={tr("sb.dialogue")}
-                            rows={2}
-                            className="text-xs"
+                            placeholder={lang === "zh" ? "人物对白或旁白…" : "Dialogue or voiceover…"}
+                            rows={3}
                           />
+                        </label>
+                        <label className="storyboard-labelled-field">
+                          <span className="storyboard-field-label">{tr("sb.audio")}</span>
                           <Input
                             defaultValue={sbVal(s, "audio")}
                             onBlur={(e) => setSb(s, "audio", e.target.value)}
                             aria-label={tr("sb.audio")}
-                            placeholder={tr("sb.audio")}
-                            className="h-8 text-xs"
+                            placeholder={lang === "zh" ? "音乐、环境声或音效" : "Music, ambience or effects"}
                           />
+                        </label>
+                        <label className="storyboard-labelled-field">
+                          <span className="storyboard-field-label">{tr("sb.notes")}</span>
                           <Input
                             defaultValue={sbVal(s, "notes")}
                             onBlur={(e) => setSb(s, "notes", e.target.value)}
                             aria-label={tr("sb.notes")}
-                            placeholder={tr("sb.notes")}
-                            className="h-8 text-xs"
+                            placeholder={lang === "zh" ? "拍摄提示或补充说明" : "Direction or additional notes"}
                           />
-                        </div>
+                        </label>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+                  </details>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
       {renaming && (
         <ShotNameDialog
@@ -999,10 +837,12 @@ function StoryboardContent() {
           onClose={() => setPreview(null)}
           width={960}
         >
-          <div className="grid gap-5 md:grid-cols-[1.3fr_1fr]">
-            <div className="aspect-video overflow-hidden rounded-lg border">
-              <ShotMedia projectId={projectId!} shot={preview} />
-            </div>
+          <div className={cn("grid gap-5", preview.selected_generation_id && "md:grid-cols-[1.3fr_1fr]")}>
+            {preview.selected_generation_id && (
+              <div className="aspect-video overflow-hidden rounded-lg border">
+                <ShotMedia projectId={projectId!} shot={preview} />
+              </div>
+            )}
             <div className="min-w-0 space-y-3">
               <p className="text-xs text-muted-foreground">
                 {scene?.title} · {tr(`status.${preview.production_status}`)}
@@ -1036,5 +876,24 @@ function StoryboardContent() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function StoryboardFrame({ projectId, shot }: { projectId: string; shot: Shot }) {
+  const { lang } = useI18n();
+  if (shot.selected_generation_id) return <ShotMedia projectId={projectId} shot={shot} />;
+  return (
+    <Link
+      to={`/projects/${projectId}/shots?shot=${shot.id}&from=storyboard&tab=gen`}
+      className="storyboard-empty-frame"
+      aria-label={`${lang === "zh" ? "生成或选择画面" : "Generate or select a frame"} · ${shot.title || shot.code}`}
+    >
+      <Film size={23} strokeWidth={1.4} aria-hidden="true" />
+      <span>{lang === "zh" ? "尚未选定画面" : "No selected output"}</span>
+      <strong>
+        {lang === "zh" ? "生成 / 选择画面" : "Generate / select a frame"}
+        <ArrowUpRight size={15} aria-hidden="true" />
+      </strong>
+    </Link>
   );
 }

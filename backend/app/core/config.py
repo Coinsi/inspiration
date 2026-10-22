@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 720
     jwt_algorithm: str = "HS256"
 
+    # Google OIDC: only a complete, valid configuration exposes the provider.
+    google_client_id: str = ""
+    google_client_secret: str = Field(default="", repr=False)
+    google_redirect_uri: str = ""
+    google_frontend_url: str = ""
+    google_registration_enabled: bool = False
+
     # 数据库
     database_url: str = "postgresql+psycopg://inspiration:inspiration@localhost:5432/inspiration"
 

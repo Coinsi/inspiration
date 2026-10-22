@@ -8,6 +8,7 @@ from app.models.agent import AgentRun
 from app.models.conversation import ConversationMessage
 from app.modules.agent import schemas as agent_schemas
 from app.modules.agent import service as agent
+from app.modules.tools.generative_ui import presented_blocks
 
 STATES = {
     "queued": "queued",
@@ -76,6 +77,7 @@ def publish(db, run):
     message.status = STATES.get(run.status, "failed")
     message.content = run.result or ""
     message.error = run.error
+    message.context = {**(message.context or {}), "ui_blocks": presented_blocks(run.steps or [])}
     message.progress = [
         {
             "id": s["id"],

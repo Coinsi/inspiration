@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   Clapperboard,
   Download,
+  Ellipsis,
   FileText,
   Maximize2,
   Minimize2,
@@ -98,6 +99,10 @@ function ScriptEditorWorkspace() {
   const [outlineOpen, setOutlineOpen] = usePersistentState<boolean>(
     "se.outlineOpen",
     true,
+  );
+  const [readingFont, setReadingFont] = usePersistentState<"serif" | "sans">(
+    "se.readingFont",
+    "serif",
   );
 
   const [renameOpen, setRenameOpen] = useState(false);
@@ -328,13 +333,36 @@ function ScriptEditorWorkspace() {
     );
   const jumpTo = (key: number) => {
     const row = document.getElementById(`blk-${key}`);
-    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    row?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+      block: "center",
+    });
     row?.querySelector("textarea")?.focus({ preventScroll: true });
   };
   const activeScene = blocks
     .slice(0, blocks.findIndex((b) => b.key === focusedKey) + 1)
     .filter((b) => b.block_type === "scene_heading")
     .slice(-1)[0]?.key;
+  useEffect(() => {
+    const dismissBlockMenus = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element) || target.closest("[data-select-popup]"))
+        return;
+      document
+        .querySelectorAll<HTMLDetailsElement>(".writing-block-menu[open]")
+        .forEach((menu) => {
+          if (!menu.contains(target)) menu.open = false;
+        });
+    };
+    document.addEventListener("pointerdown", dismissBlockMenus);
+    document.addEventListener("focusin", dismissBlockMenus);
+    return () => {
+      document.removeEventListener("pointerdown", dismissBlockMenus);
+      document.removeEventListener("focusin", dismissBlockMenus);
+    };
+  }, []);
   useEffect(() => {
     if (!focusMode) return;
     const close = (e: KeyboardEvent) => {
@@ -344,7 +372,7 @@ function ScriptEditorWorkspace() {
       ) {
         const targets = Array.from(
           document.querySelectorAll<HTMLElement>(
-            ".is-writing-focus button:not(:disabled), .is-writing-focus input:not(:disabled), .is-writing-focus textarea:not(:disabled), .is-writing-focus select:not(:disabled), .is-writing-focus a[href]",
+            ".is-writing-focus button:not(:disabled), .is-writing-focus input:not(:disabled), .is-writing-focus textarea:not(:disabled), .is-writing-focus select:not(:disabled), .is-writing-focus a[href], .is-writing-focus summary",
           ),
         ).filter((el) => el.getClientRects().length > 0);
         const first = targets[0],
@@ -388,7 +416,10 @@ function ScriptEditorWorkspace() {
     return <p className="p-6 text-muted-foreground">{tr("common.loading")}</p>;
 
   return (
-    <div className={cn("writing-workspace", focusMode && "is-writing-focus")}>
+    <div
+      className={cn("writing-workspace", focusMode && "is-writing-focus")}
+      data-reading-font={readingFont}
+    >
       {renameOpen && (
         <ScriptNameDialog
           projectId={projectId!}
@@ -398,19 +429,17 @@ function ScriptEditorWorkspace() {
       )}
       {/* 头部 */}
       <div className="writing-editor-header">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="writing-document-identity">
           <button
             aria-label="返回剧本库"
             onClick={() => navigate(`${base}/scripts`)}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            className="writing-icon-button"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <FileText className="h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-0">
-            <span className="writing-eyebrow">SCREENPLAY / 剧本创作</span>
             <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-xl font-semibold leading-tight">
+              <h1 title={script.title}>
                 {script.title}
               </h1>
               <button
@@ -423,45 +452,35 @@ function ScriptEditorWorkspace() {
                 <Pencil size={14} />
               </button>
             </div>
-            <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              <span>
-                {save.isPending ? "保存中…" : dirty ? "未保存" : "已保存到项目"}
-              </span>
-              <span>
-                · {stats.scenes.length} {tr("scripts.sceneUnit")}
-              </span>
-              <span>
-                · {stats.characters} {tr("se.statChars")}
-              </span>
-              <span>
-                · {stats.dialogues} {tr("se.statDialogues")}
-              </span>
-              <span>
-                · {stats.words} {tr("se.statWords")}
-              </span>
-              {dirty && <Badge variant="primary">{tr("se.dirty")}</Badge>}
+            <p className="writing-save-state" aria-live="polite">
+              {save.isPending ? "保存中…" : dirty ? "草稿待保存" : "已保存到项目"}
             </p>
           </div>
         </div>
-        <div className="flex max-w-full flex-wrap items-center gap-2">
+        <div className="writing-header-actions">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
+            className="writing-view-button"
+            title={focusMode ? "退出专注" : "专注写作"}
+            aria-label={focusMode ? "退出专注" : "专注写作"}
             aria-pressed={focusMode}
             onClick={() => setFocusMode(!focusMode)}
           >
             {focusMode ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            {focusMode ? "退出专注" : "专注写作"}
+            <span>{focusMode ? "退出专注" : "专注写作"}</span>
           </Button>
           <Button
             size="sm"
-            variant={outlineOpen ? "default" : "outline"}
-            title={tr("se.outline")}
+            variant="ghost"
+            className="writing-view-button"
+            title="场景大纲"
+            aria-label="场景大纲"
             aria-pressed={outlineOpen}
             onClick={() => setOutlineOpen(!outlineOpen)}
           >
             <List className="h-4 w-4" />
-            场景大纲
+            <span>场景大纲</span>
           </Button>
           <details
             className="writing-production-tools"
@@ -476,7 +495,9 @@ function ScriptEditorWorkspace() {
                 e.currentTarget.open = false;
             }}
           >
-            <summary>制作工具</summary>
+            <summary>
+              <Clapperboard size={15} />制作工具
+            </summary>
             <div>
               <p className="text-xs text-muted-foreground">
                 写好并保存正文后，再拆分场景、整理角色或导出。
@@ -542,17 +563,18 @@ function ScriptEditorWorkspace() {
             )}
             {tr("common.save")}
           </Button>
-          {!assistOpen && (
-            <Button
-              size="sm"
-              variant="outline"
-              title={tr("assist.expand")}
-              onClick={() => setAssistOpen(true)}
-            >
-              <Sparkles className="h-4 w-4 text-primary" />
-              创作助手
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="writing-view-button"
+            title="创作助手"
+            aria-label="创作助手"
+            aria-pressed={assistOpen}
+            onClick={() => setAssistOpen(!assistOpen)}
+          >
+            <MessageCircle className="h-4 w-4" />
+            <span>创作助手</span>
+          </Button>
         </div>
       </div>
 
@@ -624,11 +646,6 @@ function ScriptEditorWorkspace() {
           {draftError}
         </p>
       )}
-      {dirty && (
-        <p className="text-xs text-muted-foreground">
-          保存正文后可拆分场次、提取资产和导出。未保存草稿会保留在当前浏览器。
-        </p>
-      )}
       <div
         className={cn(
           "writing-editor-layout",
@@ -637,36 +654,13 @@ function ScriptEditorWorkspace() {
       >
         {/* 左:分块编辑器 */}
         <div className={cn("writing-editor-panel")}>
-          {/* 块类型快捷工具栏 */}
-          <div className="writing-block-toolbar">
-            {(
-              [
-                { bt: "scene_heading", icon: Clapperboard },
-                { bt: "action", icon: Activity },
-                { bt: "character", icon: UserRound },
-                { bt: "dialogue", icon: MessageCircle },
-                { bt: "parenthetical", icon: Parentheses },
-                { bt: "transition", icon: ArrowLeftRight },
-              ] as const
-            ).map((t) => (
-              <button
-                key={t.bt}
-                onClick={() => insertFromToolbar(t.bt)}
-                title={`${tr("se.insertBlock")}:${tr(`se.bt.${t.bt}`)}`}
-                className="flex flex-col items-center gap-0.5 rounded-md px-3 py-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-              >
-                <t.icon className="h-4 w-4" />
-                <span className="text-[10px]">{tr(`se.bt.${t.bt}`)}</span>
-              </button>
-            ))}
-          </div>
-
           <div className="writing-editor-body">
             {/* 大纲:场景头列表,点击跳转 */}
             {outlineOpen && !focusMode && (
               <nav aria-label="剧本场景大纲" className="writing-outline">
-                <div className="px-2 pb-1.5 text-[11px] uppercase tracking-wider text-faint">
-                  {tr("se.outline")}
+                <div className="writing-outline-heading">
+                  <span>场景大纲</span>
+                  <span>{stats.scenes.length}</span>
                 </div>
                 <SearchField
                   className="mb-2.5 w-full"
@@ -694,12 +688,13 @@ function ScriptEditorWorkspace() {
                         aria-current={
                           activeScene === s.key ? "location" : undefined
                         }
-                        className="flex w-full items-baseline gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-foreground/85 transition-colors hover:bg-muted"
+                        className="writing-outline-item"
+                        title={s.text}
                       >
-                        <span className="font-code text-faint">{i + 1}</span>
-                        <span className="min-w-0 flex-1 truncate">
-                          {s.text}
+                        <span className="writing-scene-index">
+                          {String(i + 1).padStart(2, "0")}
                         </span>
+                        <span className="writing-scene-name">{s.text}</span>
                       </button>
                     ))
                 )}
@@ -716,45 +711,93 @@ function ScriptEditorWorkspace() {
               </nav>
             )}
 
-            <div className="writing-paper-scroll">
-              {blocks.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-                  <FileText className="h-8 w-8 opacity-40" />
-                  <p className="text-sm">{tr("se.empty")}</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => insertAfter(null, "scene_heading")}
-                  >
-                    <Plus className="mr-1 h-4 w-4" /> {tr("se.addBlock")}
-                  </Button>
-                </div>
-              ) : (
-                <div className="writing-paper">
-                  <div className="writing-paper-title">
-                    <span>剧本正文</span>
-                    <h2>{script.title}</h2>
-                  </div>
-                  {blocks.map((b) => (
-                    <BlockRow
-                      key={b.key}
-                      block={b}
-                      onChange={(patch) => update(b.key, patch)}
-                      onRemove={() => removeBlock(b.key)}
-                      onInsertAfter={() => insertAfter(b.key)}
-                      onFocus={() => setFocusedKey(b.key)}
-                    />
+            <div className="writing-reading-area">
+              <div className="writing-reading-toolbar">
+                <div
+                  className="writing-block-toolbar"
+                  role="group"
+                  aria-label="插入剧本段落"
+                >
+                  {(
+                    [
+                      { bt: "scene_heading", icon: Clapperboard, label: "场景" },
+                      { bt: "action", icon: Activity, label: "动作" },
+                      { bt: "character", icon: UserRound, label: "角色" },
+                      { bt: "dialogue", icon: MessageCircle, label: "对白" },
+                      { bt: "parenthetical", icon: Parentheses, label: "括号" },
+                      { bt: "transition", icon: ArrowLeftRight, label: "转场" },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.bt}
+                      onClick={() => insertFromToolbar(item.bt)}
+                      title={`${tr("se.insertBlock")}: ${tr(`se.bt.${item.bt}`)}`}
+                      aria-label={`${tr("se.insertBlock")}: ${tr(`se.bt.${item.bt}`)}`}
+                    >
+                      <item.icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
                   ))}
-                  <button
-                    onClick={() =>
-                      insertAfter(blocks[blocks.length - 1]?.key ?? null)
-                    }
-                    className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-border py-2 text-xs text-faint transition hover:border-primary/50 hover:text-primary"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> {tr("se.addBlock")}
-                  </button>
                 </div>
-              )}
+                <StudioSelect
+                  aria-label="正文字体"
+                  value={readingFont}
+                  onValueChange={(value) =>
+                    setReadingFont(value as "serif" | "sans")
+                  }
+                  className="writing-font-select"
+                >
+                  <option value="serif">宋体</option>
+                  <option value="sans">黑体</option>
+                </StudioSelect>
+              </div>
+              <div className="writing-paper-scroll">
+                {blocks.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
+                    <FileText className="h-8 w-8 opacity-40" />
+                    <p className="text-sm">{tr("se.empty")}</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => insertAfter(null, "scene_heading")}
+                    >
+                      <Plus className="mr-1 h-4 w-4" /> {tr("se.addBlock")}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="writing-paper">
+                    {blocks.map((b) => (
+                      <BlockRow
+                        key={b.key}
+                        block={b}
+                        onChange={(patch) => update(b.key, patch)}
+                        onRemove={() => removeBlock(b.key)}
+                        onInsertAfter={() => insertAfter(b.key)}
+                        onFocus={() => setFocusedKey(b.key)}
+                      />
+                    ))}
+                    <button
+                      onClick={() =>
+                        insertAfter(blocks[blocks.length - 1]?.key ?? null)
+                      }
+                      className="writing-add-block"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> {tr("se.addBlock")}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <footer className="writing-document-status">
+                <span>{stats.scenes.length} 场景</span>
+                <span>{stats.characters} 角色</span>
+                <span>{stats.dialogues} 对白</span>
+                <span className="writing-word-count">
+                  {stats.words.toLocaleString()} 字
+                </span>
+                <span className="writing-save-hint" title="Ctrl / ⌘ + S 保存正文">
+                  {dirty ? "草稿保留在当前浏览器" : "Ctrl / ⌘ + S 保存"}
+                </span>
+              </footer>
             </div>
           </div>
         </div>
@@ -763,8 +806,8 @@ function ScriptEditorWorkspace() {
         {assistOpen && (
           <aside className="writing-assistant" hidden={focusMode}>
             {/* 剧本数据(落库口径,对齐 Laper 右栏) */}
-            <div className="shrink-0 rounded-lg border border-border bg-card p-3">
-              <div className="mb-2 text-[11px] uppercase tracking-wider text-faint">
+            <div className="writing-production-stats">
+              <div className="writing-stats-heading">
                 {tr("se.dbStats")}
               </div>
               {statsError ? (
@@ -924,16 +967,6 @@ function StatRow({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-// 块类型 → 专业剧本排版样式
-const BLOCK_STYLE: Record<string, string> = {
-  scene_heading: "font-semibold uppercase tracking-wide",
-  action: "",
-  character: "ml-[28%] w-[72%] font-medium uppercase",
-  dialogue: "ml-[14%] mr-[14%] w-[72%]",
-  parenthetical: "ml-[22%] w-[78%] italic text-muted-foreground",
-  transition: "text-right uppercase text-muted-foreground",
-};
-
 function BlockRow({
   block,
   onChange,
@@ -952,47 +985,62 @@ function BlockRow({
     <div
       id={`blk-${block.key}`}
       onFocusCapture={onFocus}
-      className="writing-block group/blk relative rounded-md transition hover:bg-elevated/50"
+      className="writing-block"
       data-block-type={block.block_type}
     >
-      {/* 悬浮工具条 */}
-      <div className="writing-block-actions">
-        <StudioSelect
-          value={block.block_type}
-          onValueChange={(selectedValue) =>
-            onChange({ block_type: selectedValue })
+      <details
+        className="writing-block-menu"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            event.currentTarget.open = false;
+            event.currentTarget.querySelector("summary")?.focus();
           }
-          className="h-6 rounded border border-border bg-bg px-1 text-[10px] text-muted-foreground"
-          title={tr("se.blockType")}
-        >
-          {SCRIPT_BLOCK_TYPES.map((bt) => (
-            <option key={bt} value={bt}>
-              {tr(`se.bt.${bt}`)}
-            </option>
-          ))}
-        </StudioSelect>
-        <button
-          onClick={onInsertAfter}
-          title={tr("se.addBlock")}
-          className="grid h-6 w-6 place-items-center rounded text-faint hover:bg-primary/15 hover:text-primary"
-        >
-          <Plus className="h-3 w-3" />
-        </button>
-        <button
-          onClick={onRemove}
-          title={tr("common.delete")}
-          className="grid h-6 w-6 place-items-center rounded text-faint hover:bg-danger/15 hover:text-danger"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      </div>
+        }}
+      >
+        <summary aria-label="段落操作" title="段落操作">
+          <Ellipsis size={17} />
+        </summary>
+        <div className="writing-block-actions">
+          <StudioSelect
+            value={block.block_type}
+            onValueChange={(selectedValue) =>
+              onChange({ block_type: selectedValue })
+            }
+            className="writing-block-type"
+            title={tr("se.blockType")}
+            aria-label={tr("se.blockType")}
+          >
+            {SCRIPT_BLOCK_TYPES.map((bt) => (
+              <option key={bt} value={bt}>
+                {tr(`se.bt.${bt}`)}
+              </option>
+            ))}
+          </StudioSelect>
+          <button
+            onClick={(event) => {
+              const menu = event.currentTarget.closest("details");
+              if (menu) menu.open = false;
+              onInsertAfter();
+            }}
+            title={tr("se.addBlock")}
+            className="writing-block-action"
+          >
+            <Plus size={15} />在下方添加段落
+          </button>
+          <button
+            onClick={onRemove}
+            title={tr("common.delete")}
+            className="writing-block-action is-destructive"
+          >
+            <Trash2 size={15} />删除段落
+          </button>
+        </div>
+      </details>
       <AutoTextarea
         value={block.text}
         onChange={(v) => onChange({ text: v })}
-        className={cn(
-          "w-full resize-none bg-transparent px-2 py-1 text-sm leading-7 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 rounded",
-          BLOCK_STYLE[block.block_type] ?? "",
-        )}
+        className="writing-block-input"
         placeholder={tr(`se.bt.${block.block_type}`)}
       />
     </div>
@@ -1010,6 +1058,20 @@ function AutoTextarea({
   className?: string;
   placeholder?: string;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    let lastWidth = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === lastWidth) return;
+      lastWidth = textarea.clientWidth;
+      textarea.style.height = "auto";
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, []);
   return (
     <textarea
       value={value}
@@ -1018,6 +1080,7 @@ function AutoTextarea({
       onChange={(e) => onChange(e.target.value)}
       rows={1}
       ref={(el) => {
+        textareaRef.current = el;
         if (el) {
           el.style.height = "auto";
           el.style.height = `${el.scrollHeight}px`;

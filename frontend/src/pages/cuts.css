@@ -28,7 +28,7 @@
 }
 .cuts-page-header p {
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   margin-top: 6px;
 }
 .cuts-page button {
@@ -157,11 +157,11 @@
   padding: 10px 18px;
   font-size: 12px;
   border-bottom: 2px solid transparent;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-editor-tabs button[aria-selected="true"] {
   border-color: hsl(var(--primary));
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
 }
 .timeline-editor-panel {
   min-width: 0;
@@ -192,7 +192,7 @@
 }
 .timeline-overview header span {
   font-size: 10px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-overview header button {
   border: 1px solid hsl(var(--border));
@@ -230,7 +230,7 @@
   position: absolute;
   font-size: 9px;
   padding-top: 7px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   border-left: 1px solid hsl(var(--border));
   padding-left: 4px;
 }
@@ -245,8 +245,8 @@
   align-items: center;
   gap: 7px;
   padding: 8px 12px;
-  font-size: 10px !important;
-  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  color: hsl(var(--muted));
   background: hsl(var(--card));
   position: sticky;
   left: 0;
@@ -288,7 +288,7 @@
   top: 3px;
   background: color-mix(in srgb, hsl(var(--card)) 80%, #6fa9b1);
   border: 1px solid #73b1ba70;
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -356,12 +356,12 @@
   align-items: center;
   height: 100%;
   padding-inline: 10px;
-  color: hsl(var(--muted-foreground));
-  font-size: 10px !important;
+  color: hsl(var(--muted));
+  font-size: 10px;
 }
 .timeline-overview > p {
   padding: 6px 14px 10px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 10px;
 }
 .cuts-delivery-management {
@@ -374,7 +374,7 @@
   font-size: 13px;
 }
 .cuts-delivery-management > summary > span {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 11px;
   margin-left: 12px;
 }
@@ -429,7 +429,7 @@
     gap: 12px;
   }
   .timeline-export-panel > * {
-    margin-top: 0 !important;
+    margin-top: 0;
   }
   .timeline-export-panel > p,
   .timeline-export-panel > button,
@@ -509,12 +509,12 @@
 }
 .timeline-visual-editor header span {
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-visual-editor header p {
   margin: 8px 0 16px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-visual-add {
   display: flex;
@@ -562,7 +562,7 @@
 }
 .timeline-visual-list > button > span {
   font-size: 18px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-visual-list > button > div {
   min-width: 0;
@@ -575,14 +575,14 @@
   text-overflow: ellipsis;
 }
 .timeline-visual-list small {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 10px;
 }
 .timeline-visual-list > p {
   padding: 20px 4px;
   font-size: 12px;
   line-height: 1.8;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-visual-fields {
   display: grid;
@@ -594,7 +594,7 @@
   flex-direction: column;
   gap: 6px;
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-visual-lane {
   height: 32px;
@@ -760,7 +760,7 @@
   line-height: 1.8;
   max-width: 460px;
   margin: 12px auto 20px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 
 /* Editing comes first; export and engineering controls open on demand. */
@@ -773,7 +773,7 @@
 }
 .timeline-workflow-bar p {
   font-size: 13px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-preview-grid {
   grid-template-columns: minmax(0, 1fr);
@@ -791,7 +791,7 @@
 .timeline-source-browser {
   margin-top: 12px;
   font-size: 13px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-source-browser summary {
   cursor: pointer;
@@ -809,7 +809,7 @@
 .timeline-engineering-tools > summary span {
   margin-left: 12px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .timeline-render-feedback {
   margin: 12px 0;

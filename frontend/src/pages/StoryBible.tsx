@@ -3,6 +3,16 @@ import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookMarked,
+  Users,
+  MapPin,
+  Package,
+  Globe2,
+  Zap,
+  Flag,
+  BookOpen,
+  History,
+  Layers3,
+  SlidersHorizontal,
   ImagePlus,
   Loader2,
   Pencil,
@@ -31,6 +41,10 @@ import {
 import "./story.css";
 
 const TO_ASSET_CATEGORIES = new Set(["character", "location", "item"]);
+const CATEGORY_ICONS: Record<string, typeof BookMarked> = {
+  character: Users, location: MapPin, item: Package, world: Globe2,
+  power_system: Zap, faction: Flag, glossary: BookOpen, timeline: History,
+};
 export default function StoryBible() {
   const { projectId } = useParams();
   return <StoryBibleWorkspace key={projectId} />;
@@ -57,6 +71,7 @@ function StoryBibleWorkspace() {
   const [editor, setEditor] = useState<Setting | "new" | null>(null);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [extractOpen, setExtractOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [fromCh, setFromCh] = useState(""),
     [toCh, setToCh] = useState("");
   const [concurrency, setConcurrency] = usePersistentState<number>(
@@ -130,7 +145,7 @@ function StoryBibleWorkspace() {
   const categories = useMemo(
     () => [
       ...new Set<string>([
-        ...SETTING_CATEGORIES,
+        "character", "location", "item", ...SETTING_CATEGORIES,
         ...(settings ?? []).map((s) => s.category),
       ]),
     ],
@@ -172,9 +187,7 @@ function StoryBibleWorkspace() {
     <div className="story-bible">
       <header className="story-header">
         <div>
-          <span className="story-eyebrow">STORY BIBLE / 创作设定</span>
           <h1>{tr("bible.title")}</h1>
-          <p>让人物、世界与故事细节，在创作中保持连贯。</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link className="story-text-link" to={`${base}/narrative`}>
@@ -198,7 +211,7 @@ function StoryBibleWorkspace() {
           )}
         </div>
       </header>
-      <div className="story-bible-tools">
+      <div className={`story-bible-tools${filtersOpen ? " filters-open" : ""}`}>
         <SearchField
           className="min-w-[180px] flex-1"
           label="搜索设定"
@@ -206,6 +219,16 @@ function StoryBibleWorkspace() {
           value={q}
           onValueChange={(value) => setQ(value)}
         />
+        <button
+          className="story-mobile-filters"
+          aria-expanded={filtersOpen}
+          aria-controls="story-source-filters"
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <SlidersHorizontal size={16} />
+          {novelId || chFilter ? "已筛选" : "筛选"}
+        </button>
+        <div className="story-source-filters" id="story-source-filters">
         <StudioSelect
           aria-label="设定来源小说"
           value={novelId ?? ""}
@@ -229,6 +252,7 @@ function StoryBibleWorkspace() {
           value={chFilter}
           onChange={(e) => setChFilter(e.target.value)}
         />
+        </div>
         {(q || chFilter || category) && (
           <Button size="sm" variant="ghost" onClick={clearFilters}>
             清除筛选
@@ -347,15 +371,18 @@ function StoryBibleWorkspace() {
       )}
       <div className="story-bible-layout">
         <nav className="story-categories" aria-label="设定分类">
-          <p className="story-eyebrow">分类目录</p>
-          {["", ...categories].map((c) => (
+          <p className="story-category-label">设定分类</p>
+          {["", ...categories].map((c) => {
+            const Icon = CATEGORY_ICONS[c] ?? (c ? BookMarked : Layers3);
+            return (
             <button
               key={c}
               aria-current={category === c ? "true" : undefined}
               onClick={() => setCategory(c)}
             >
-              <span>{c ? catLabel(c) : tr("bible.all")}</span>
-              <span>
+              <Icon size={21} strokeWidth={1.65} aria-hidden="true" />
+              <span className="story-category-name">{c ? catLabel(c) : tr("bible.all")}</span>
+              <span className="story-category-count">
                 {catalog.isError || !settings
                   ? "—"
                   : c
@@ -363,7 +390,7 @@ function StoryBibleWorkspace() {
                     : settings.length}
               </span>
             </button>
-          ))}
+          ); })}
         </nav>
         <section className="story-setting-list" aria-label="设定列表">
           <div className="story-results-heading">

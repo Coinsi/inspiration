@@ -1,0 +1,2166 @@
+{
+  "type": "object",
+  "properties": {
+    "_type": {
+      "type": "string",
+      "enum": [
+        "Header",
+        "Text",
+        "Caption",
+        "Image",
+        "Divider",
+        "Diagram",
+        "Map",
+        "Fact",
+        "Button",
+        "Select",
+        "Input",
+        "DatePicker",
+        "Checkbox",
+        "Slider",
+        "RadioGroup",
+        "CheckboxGroup",
+        "Form",
+        "Card",
+        "Col",
+        "Row",
+        "Spacer",
+        "Badge",
+        "Box",
+        "Tabs",
+        "ListView",
+        "ListViewItem",
+        "Steps",
+        "Timeline",
+        "Table",
+        "Markdown",
+        "Chart",
+        "Citation",
+        "Alert",
+        "Carousel",
+        "Icon"
+      ],
+      "description": "The component to render. \"Header\": A section heading. Renders as a bold title.; \"Text\": A run of text. Use for paragraphs, labels, or inline copy.; \"Caption\": Secondary, de-emphasized text under a primary element.; \"Image\": An image. Provide `src` and `alt` for accessibility. Put several images in a `Row` for a gallery, or a `sm` image beside text for a thumbnail.; \"Divider\": A horizontal rule between sections.; \"Diagram\": A diagram drawn from Mermaid source, such as a flowchart, a sequence of messages, or the states of a process. Keep it small and label the nodes in plain words.; \"Map\": Places on a map, such as the stops of a trip or locations to compare, with an optional route through them in order.; \"Fact\": A label/value pair, rendered as a key followed by its value. Use for compact metadata, and put an answer's key figures side by side in a `Row`.; \"Button\": A clickable button. Carries `_action` describing the side effect or resume value. Set `submit` to submit an ancestor Form/Card instead of firing `_action` on click.; \"Select\": A dropdown selector. Carries `_action` describing the on-select behavior.; \"Input\": A text input. Carries `_action` describing the on-submit behavior.; \"DatePicker\": A date, datetime, or time input. Carries `_action`, which runs once per committed value: a pick from the picker, or a typed value on blur or Enter.; \"Checkbox\": A checkbox with a label. Carries `_action` describing the on-change behavior.; \"Slider\": A numeric range control. Carries `_action` describing the committed value.; \"RadioGroup\": A group of mutually exclusive radio options. Carries `_action` describing the on-change behavior.; \"CheckboxGroup\": A group of checkbox options where any number can be checked. Set `progress` for a checklist the user works through. Carries `_action` describing the on-change behavior.; \"Form\": Wraps named child controls (Select/Input/Checkbox/RadioGroup/CheckboxGroup/DatePicker with a `name`). Carries `_action`; on submit it fires with every named control's value, keyed by `name`.; \"Card\": A module the reader scans or acts on, such as a summary, a checklist, a form, or one option in a comparison. It renders as a panel, so keep plain sections (a `Header` with `Text` or `Markdown`) outside cards, and do not wrap the whole answer in one card or nest cards. It takes on a framed surface when `background` is set, when `confirm`/`cancel` add a footer, or when it is a slot in a `Carousel`. Set `asForm` to collect named child control values on submit.; \"Col\": A vertical stack; children laid out top to bottom.; \"Row\": A horizontal row; children laid out left to right.; \"Spacer\": Empty space that pushes neighbors apart.; \"Badge\": A small labeled tag, e.g. for status or category.; \"Box\": A generic container for composition, e.g. a progress bar built from an outer track Box containing a partial-width fill Box. Size, radius, and background accept arbitrary values, so they render as inline styles rather than data-attribute hooks.; \"Tabs\": Panels the user switches between with tabs, one visible at a time. Use it for parallel content the user looks at one part at a time, such as options, plans, or days. Each child is one panel, usually a Col, labeled by the matching entry in `tabs`.; \"ListView\": A vertical list container. Wrap `ListViewItem` children as rows.; \"ListViewItem\": A row inside a ListView. Carries `_action` to make the whole row clickable and keyboard-activatable.; \"Steps\": Numbered steps to follow in order, such as instructions or a how-to guide. Each step has a short `title` saying what to do and an optional `detail` on how.; \"Timeline\": Events in time order, each with a time or date label, such as a schedule, an itinerary, or a history.; \"Table\": Tabular data. Provide `columns` and `rows`; each row is an array of cells matching the columns.; \"Markdown\": A markdown string. Rendered as-is by default; override this component for a full markdown renderer.; \"Chart\": A chart. `variant` selects bar, line, sparkline, or area rendering. Provide `data` for a single series, or `series` for multiple named series (`series` takes precedence over `data` when both are present). Set `stacked` to accumulate series values instead of overlaying them, and `showAxis`/`showLegend` to add y-axis ticks, x-axis point labels, and a legend.; \"Citation\": A source the answer draws on, shown as a card with its title and site that links to it. Use one per source.; \"Alert\": A highlighted message conveying urgency. `tone` drives the severity.; \"Carousel\": A horizontally scrollable group of `Card` children (max 10). Set `label` for an accessible name.; \"Icon\": A small line icon from the built-in set. `size` controls the rendered pixel size."
+    },
+    "_key": {
+      "description": "Stable identity for this UI node. Use it for list items that may reorder.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "text": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "description": "The heading text or number."
+    },
+    "size": {
+      "anyOf": [
+        {
+          "description": "Heading size; defaults to `lg`.",
+          "type": "string",
+          "enum": [
+            "sm",
+            "md",
+            "lg",
+            "xl",
+            "2xl",
+            "3xl"
+          ]
+        },
+        {
+          "description": "Text size; defaults to `md`.",
+          "type": "string",
+          "enum": [
+            "sm",
+            "md",
+            "lg",
+            "xl",
+            "2xl",
+            "3xl"
+          ]
+        },
+        {
+          "description": "Size token or pixel value.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "sm",
+                "md",
+                "lg"
+              ]
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        {
+          "description": "Icon size; defaults to `md` (16px).",
+          "type": "string",
+          "enum": [
+            "sm",
+            "md",
+            "lg"
+          ]
+        }
+      ]
+    },
+    "value": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "The text or number to display."
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "The caption text or number."
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "The fact value as text or a number."
+        },
+        {
+          "description": "Initial value: YYYY-MM-DD for date, HH:mm or HH:mm:ss with optional fraction of at most 9 digits for time, YYYY-MM-DDTHH:mm with optional :ss and fraction of at most 9 digits for datetime. A datetime with Z or ±HH:mm is an instant, displayed in the viewer's time zone and submitted with the same offset and precision. A datetime without an offset is local and submitted unchanged. An empty datetime submits with the viewer's offset and seconds.",
+          "type": "string"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Badge text or number."
+        },
+        {
+          "type": "string",
+          "description": "Markdown source."
+        }
+      ]
+    },
+    "weight": {
+      "description": "Font weight.",
+      "type": "string",
+      "enum": [
+        "normal",
+        "medium",
+        "semibold",
+        "bold"
+      ]
+    },
+    "color": {
+      "anyOf": [
+        {
+          "description": "Foreground color token.",
+          "type": "string",
+          "enum": [
+            "emphasis",
+            "secondary",
+            "alpha-70",
+            "white",
+            "white-70",
+            "white-50"
+          ]
+        },
+        {
+          "description": "Series color (single-series mode only). One of `emphasis`, `secondary`, `alpha-70`, `white`, `white-70`, or `white-50`, matching Text's `color` tokens; other values have no visual effect.",
+          "type": "string"
+        }
+      ]
+    },
+    "src": {
+      "type": "string",
+      "description": "Image URL, taken from a tool result or the user; never invent one."
+    },
+    "alt": {
+      "type": "string",
+      "description": "Alt text for accessibility."
+    },
+    "round": {
+      "description": "Render as a circular avatar (fully rounded, cropped to a square).",
+      "type": "boolean"
+    },
+    "flush": {
+      "description": "Whether the divider spans the full width with no inset.",
+      "type": "boolean"
+    },
+    "code": {
+      "type": "string",
+      "description": "Mermaid source, such as `flowchart LR` followed by `A[Order] --> B[Ship]`."
+    },
+    "title": {
+      "anyOf": [
+        {
+          "description": "A caption for the diagram, as text or a number.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        {
+          "description": "Optional card title text or number.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "The source's title as text or a number."
+        },
+        {
+          "description": "Alert title text or number.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        }
+      ]
+    },
+    "places": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The place's name."
+          },
+          "lat": {
+            "type": "number",
+            "description": "Latitude in degrees."
+          },
+          "lng": {
+            "type": "number",
+            "description": "Longitude in degrees."
+          },
+          "detail": {
+            "description": "A short note about the place.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "lat",
+          "lng"
+        ]
+      },
+      "description": "The places, in order."
+    },
+    "route": {
+      "description": "Draw a line through the places in order.",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "The fact label (key) as text or a number."
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Button label text or number."
+        },
+        {
+          "description": "Accessible label for the control.",
+          "type": "string"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Label text or number next to the checkbox."
+        },
+        {
+          "description": "Accessible name for the group.",
+          "type": "string"
+        },
+        {
+          "description": "Accessible name as text or a number for the row of tabs.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        {
+          "description": "Accessible label for the carousel.",
+          "type": "string"
+        }
+      ]
+    },
+    "delta": {
+      "description": "Change from before.",
+      "type": "string"
+    },
+    "trend": {
+      "description": "Change direction.",
+      "type": "string",
+      "enum": [
+        "up",
+        "down",
+        "flat"
+      ]
+    },
+    "upIsGood": {
+      "description": "Whether up is good.",
+      "type": "boolean"
+    },
+    "buttonStyle": {
+      "description": "Visual style.",
+      "type": "string",
+      "enum": [
+        "primary",
+        "secondary",
+        "outline",
+        "ghost",
+        "danger"
+      ]
+    },
+    "block": {
+      "description": "Whether the button spans the full width.",
+      "type": "boolean"
+    },
+    "submit": {
+      "description": "Render as a submit button for an ancestor Form/Card instead of a click button.",
+      "type": "boolean"
+    },
+    "undoable": {
+      "description": "Delay the action with an undo control, for sends and other hard-to-reverse actions.",
+      "type": "boolean"
+    },
+    "options": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ]
+          },
+          "description": "Selectable options."
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ]
+          },
+          "description": "Selectable options."
+        }
+      ]
+    },
+    "placeholder": {
+      "anyOf": [
+        {
+          "description": "Placeholder text or number shown when nothing is selected.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        {
+          "description": "Placeholder text.",
+          "type": "string"
+        }
+      ]
+    },
+    "name": {
+      "anyOf": [
+        {
+          "description": "Field name used inside a Form.",
+          "type": "string"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "sun",
+            "moon",
+            "cloud",
+            "rain",
+            "snow",
+            "wind",
+            "play",
+            "pause",
+            "check",
+            "x",
+            "star",
+            "heart",
+            "arrow-right",
+            "arrow-up-right",
+            "chevron-right",
+            "calendar",
+            "clock",
+            "map-pin",
+            "plane",
+            "truck",
+            "credit-card",
+            "user",
+            "search",
+            "bell"
+          ],
+          "description": "Which built-in icon to render."
+        }
+      ]
+    },
+    "defaultValue": {
+      "anyOf": [
+        {
+          "description": "Initially selected value.",
+          "type": "string"
+        },
+        {
+          "description": "Initial text.",
+          "type": "string"
+        },
+        {
+          "description": "Initial value.",
+          "type": "number"
+        },
+        {
+          "description": "Initially checked values.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "inputType": {
+      "anyOf": [
+        {
+          "description": "Single-line input type. Values remain strings.",
+          "type": "string",
+          "enum": [
+            "text",
+            "password",
+            "number"
+          ]
+        },
+        {
+          "description": "Temporal input type. Defaults to \"date\". Values remain strings.",
+          "type": "string",
+          "enum": [
+            "date",
+            "datetime",
+            "time"
+          ]
+        }
+      ]
+    },
+    "multiline": {
+      "description": "Render a textarea instead of a single-line input; ignored when `inputType` is `\"password\"` or `\"number\"`.",
+      "type": "boolean"
+    },
+    "min": {
+      "anyOf": [
+        {
+          "description": "Minimum value: YYYY-MM-DD for date, HH:mm or HH:mm:ss with optional fraction of at most 9 digits for time, YYYY-MM-DDTHH:mm with optional :ss and fraction of at most 9 digits for datetime. Datetimes with Z or ±HH:mm are converted to the viewer's time zone.",
+          "type": "string"
+        },
+        {
+          "type": "number",
+          "description": "Minimum value."
+        }
+      ]
+    },
+    "max": {
+      "anyOf": [
+        {
+          "description": "Maximum value: YYYY-MM-DD for date, HH:mm or HH:mm:ss with optional fraction of at most 9 digits for time, YYYY-MM-DDTHH:mm with optional :ss and fraction of at most 9 digits for datetime. Datetimes with Z or ±HH:mm are converted to the viewer's time zone.",
+          "type": "string"
+        },
+        {
+          "type": "number",
+          "description": "Maximum value."
+        }
+      ]
+    },
+    "defaultChecked": {
+      "description": "Whether the checkbox starts checked.",
+      "type": "boolean"
+    },
+    "variant": {
+      "anyOf": [
+        {
+          "description": "Whether to render a checkbox or switch.",
+          "type": "string",
+          "enum": [
+            "checkbox",
+            "switch"
+          ]
+        },
+        {
+          "description": "Visual variant token.",
+          "type": "string"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "bar",
+            "line",
+            "sparkline",
+            "area"
+          ],
+          "description": "Chart variant."
+        }
+      ]
+    },
+    "step": {
+      "description": "Value increment. Defaults to 1.",
+      "type": "number"
+    },
+    "unit": {
+      "description": "Unit shown with the value.",
+      "type": "string"
+    },
+    "progress": {
+      "description": "Show how many options are checked, with a progress bar.",
+      "type": "boolean"
+    },
+    "gap": {
+      "description": "Gap between children in 4px units. 0 to 8 is the supported range.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 8
+    },
+    "padding": {
+      "description": "Padding in 4px units (e.g. 2 = 8px). 0 to 8 is the supported range.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 8
+    },
+    "background": {
+      "anyOf": [
+        {
+          "description": "Background color or gradient (any CSS background value). Setting this also switches the card's own text to white, since a custom background makes the card a tinted surface; children can still opt into a different color explicitly.",
+          "type": "string"
+        },
+        {
+          "description": "Background color or gradient (any CSS background value).",
+          "type": "string"
+        }
+      ]
+    },
+    "asForm": {
+      "description": "Render as a form; submitting it fires `confirm._action`, or the Card's own `_action` when `confirm` has none, with every named child control's value keyed by `name`.",
+      "type": "boolean"
+    },
+    "confirm": {
+      "description": "Confirm button shown in the footer.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Footer button label text or number."
+        },
+        "_action": {
+          "description": "Action fired when the button is activated.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "The action type, resolved by the host's action registry."
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "label"
+      ]
+    },
+    "cancel": {
+      "description": "Cancel button shown in the footer.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "Footer button label text or number."
+        },
+        "_action": {
+          "description": "Action fired when the button is activated.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "The action type, resolved by the host's action registry."
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "label"
+      ]
+    },
+    "align": {
+      "description": "Cross-axis alignment.",
+      "type": "string",
+      "enum": [
+        "start",
+        "center",
+        "end"
+      ]
+    },
+    "justify": {
+      "description": "Main-axis distribution.",
+      "type": "string",
+      "enum": [
+        "start",
+        "center",
+        "end",
+        "between"
+      ]
+    },
+    "width": {
+      "description": "Width; a number is pixels.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "height": {
+      "description": "Height; a number is pixels.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "radius": {
+      "description": "Corner radius; \"full\" is a pill/circle, a number is pixels.",
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "full"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "tabs": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          }
+        ]
+      },
+      "description": "Tab labels as text or numbers, one per child panel, in order."
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "What to do, in a few words, as text or a number."
+          },
+          "detail": {
+            "description": "How to do it, or what to watch for, as text or a number.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "description": "The steps, in order."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "When it happens, as the user should read it, such as `Day 1`, `6:00 pm`, or `1969`, as text or a number."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "What happens, as text or a number."
+          },
+          "detail": {
+            "description": "More about it, as text or a number.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "time",
+          "title"
+        ]
+      },
+      "description": "The events, in time order."
+    },
+    "columns": {
+      "description": "Column definitions.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Column header label."
+          },
+          "align": {
+            "description": "Cell alignment.",
+            "type": "string",
+            "enum": [
+              "start",
+              "end"
+            ]
+          },
+          "format": {
+            "description": "Cell value format.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "currency",
+                  "percent",
+                  "date"
+                ],
+                "description": "Format kind. `percent` takes a fraction, so 0.25 renders as 25%."
+              },
+              "currency": {
+                "description": "Currency code.",
+                "type": "string"
+              },
+              "decimals": {
+                "description": "Decimal places.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "label"
+        ]
+      }
+    },
+    "rows": {
+      "description": "Rows of cells.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "A cell value."
+        }
+      }
+    },
+    "sortable": {
+      "description": "Allow header sorting.",
+      "type": "boolean"
+    },
+    "data": {
+      "description": "Data points for a single series.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "description": "Point label.",
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "description": "Point value."
+          }
+        },
+        "required": [
+          "value"
+        ]
+      }
+    },
+    "series": {
+      "description": "Multiple named series; takes precedence over `data` when present.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "description": "Series label, shown in the legend.",
+            "type": "string"
+          },
+          "color": {
+            "description": "Series color. One of `emphasis`, `secondary`, `alpha-70`, `white`, `white-70`, or `white-50`, matching Text's `color` tokens; other values have no visual effect.",
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "description": "Point label.",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number",
+                  "description": "Point value."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "description": "Data points for this series."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      }
+    },
+    "stacked": {
+      "description": "Accumulate series values instead of overlaying them (bar and area variants; ignored for line and sparkline).",
+      "type": "boolean"
+    },
+    "showAxis": {
+      "description": "Show y-axis ticks and x-axis point labels.",
+      "type": "boolean"
+    },
+    "showLegend": {
+      "description": "Show a legend mapping each series to its color.",
+      "type": "boolean"
+    },
+    "url": {
+      "description": "Link to the source; only http and https links open.",
+      "type": "string"
+    },
+    "source": {
+      "description": "Where it comes from, such as a site or publication, as text or a number. Defaults to the link's domain.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "snippet": {
+      "description": "A short quote or summary of what the source says, as text or a number.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "description": {
+      "description": "Supporting description text or number.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "tone": {
+      "description": "Severity tone; defaults to `info`.",
+      "type": "string",
+      "enum": [
+        "info",
+        "success",
+        "warning",
+        "danger"
+      ]
+    },
+    "children": {
+      "$ref": "#/$defs/children"
+    }
+  },
+  "required": [
+    "_type"
+  ],
+  "$defs": {
+    "node": {
+      "type": "object",
+      "properties": {
+        "_type": {
+          "type": "string",
+          "enum": [
+            "Header",
+            "Text",
+            "Caption",
+            "Image",
+            "Divider",
+            "Diagram",
+            "Map",
+            "Fact",
+            "Button",
+            "Select",
+            "Input",
+            "DatePicker",
+            "Checkbox",
+            "Slider",
+            "RadioGroup",
+            "CheckboxGroup",
+            "Form",
+            "Card",
+            "Col",
+            "Row",
+            "Spacer",
+            "Badge",
+            "Box",
+            "Tabs",
+            "ListView",
+            "ListViewItem",
+            "Steps",
+            "Timeline",
+            "Table",
+            "Markdown",
+            "Chart",
+            "Citation",
+            "Alert",
+            "Carousel",
+            "Icon"
+          ],
+          "description": "The component to render. \"Header\": A section heading. Renders as a bold title.; \"Text\": A run of text. Use for paragraphs, labels, or inline copy.; \"Caption\": Secondary, de-emphasized text under a primary element.; \"Image\": An image. Provide `src` and `alt` for accessibility. Put several images in a `Row` for a gallery, or a `sm` image beside text for a thumbnail.; \"Divider\": A horizontal rule between sections.; \"Diagram\": A diagram drawn from Mermaid source, such as a flowchart, a sequence of messages, or the states of a process. Keep it small and label the nodes in plain words.; \"Map\": Places on a map, such as the stops of a trip or locations to compare, with an optional route through them in order.; \"Fact\": A label/value pair, rendered as a key followed by its value. Use for compact metadata, and put an answer's key figures side by side in a `Row`.; \"Button\": A clickable button. Carries `_action` describing the side effect or resume value. Set `submit` to submit an ancestor Form/Card instead of firing `_action` on click.; \"Select\": A dropdown selector. Carries `_action` describing the on-select behavior.; \"Input\": A text input. Carries `_action` describing the on-submit behavior.; \"DatePicker\": A date, datetime, or time input. Carries `_action`, which runs once per committed value: a pick from the picker, or a typed value on blur or Enter.; \"Checkbox\": A checkbox with a label. Carries `_action` describing the on-change behavior.; \"Slider\": A numeric range control. Carries `_action` describing the committed value.; \"RadioGroup\": A group of mutually exclusive radio options. Carries `_action` describing the on-change behavior.; \"CheckboxGroup\": A group of checkbox options where any number can be checked. Set `progress` for a checklist the user works through. Carries `_action` describing the on-change behavior.; \"Form\": Wraps named child controls (Select/Input/Checkbox/RadioGroup/CheckboxGroup/DatePicker with a `name`). Carries `_action`; on submit it fires with every named control's value, keyed by `name`.; \"Card\": A module the reader scans or acts on, such as a summary, a checklist, a form, or one option in a comparison. It renders as a panel, so keep plain sections (a `Header` with `Text` or `Markdown`) outside cards, and do not wrap the whole answer in one card or nest cards. It takes on a framed surface when `background` is set, when `confirm`/`cancel` add a footer, or when it is a slot in a `Carousel`. Set `asForm` to collect named child control values on submit.; \"Col\": A vertical stack; children laid out top to bottom.; \"Row\": A horizontal row; children laid out left to right.; \"Spacer\": Empty space that pushes neighbors apart.; \"Badge\": A small labeled tag, e.g. for status or category.; \"Box\": A generic container for composition, e.g. a progress bar built from an outer track Box containing a partial-width fill Box. Size, radius, and background accept arbitrary values, so they render as inline styles rather than data-attribute hooks.; \"Tabs\": Panels the user switches between with tabs, one visible at a time. Use it for parallel content the user looks at one part at a time, such as options, plans, or days. Each child is one panel, usually a Col, labeled by the matching entry in `tabs`.; \"ListView\": A vertical list container. Wrap `ListViewItem` children as rows.; \"ListViewItem\": A row inside a ListView. Carries `_action` to make the whole row clickable and keyboard-activatable.; \"Steps\": Numbered steps to follow in order, such as instructions or a how-to guide. Each step has a short `title` saying what to do and an optional `detail` on how.; \"Timeline\": Events in time order, each with a time or date label, such as a schedule, an itinerary, or a history.; \"Table\": Tabular data. Provide `columns` and `rows`; each row is an array of cells matching the columns.; \"Markdown\": A markdown string. Rendered as-is by default; override this component for a full markdown renderer.; \"Chart\": A chart. `variant` selects bar, line, sparkline, or area rendering. Provide `data` for a single series, or `series` for multiple named series (`series` takes precedence over `data` when both are present). Set `stacked` to accumulate series values instead of overlaying them, and `showAxis`/`showLegend` to add y-axis ticks, x-axis point labels, and a legend.; \"Citation\": A source the answer draws on, shown as a card with its title and site that links to it. Use one per source.; \"Alert\": A highlighted message conveying urgency. `tone` drives the severity.; \"Carousel\": A horizontally scrollable group of `Card` children (max 10). Set `label` for an accessible name.; \"Icon\": A small line icon from the built-in set. `size` controls the rendered pixel size."
+        },
+        "_key": {
+          "description": "Stable identity for this UI node. Use it for list items that may reorder.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "description": "The heading text or number."
+        },
+        "size": {
+          "anyOf": [
+            {
+              "description": "Heading size; defaults to `lg`.",
+              "type": "string",
+              "enum": [
+                "sm",
+                "md",
+                "lg",
+                "xl",
+                "2xl",
+                "3xl"
+              ]
+            },
+            {
+              "description": "Text size; defaults to `md`.",
+              "type": "string",
+              "enum": [
+                "sm",
+                "md",
+                "lg",
+                "xl",
+                "2xl",
+                "3xl"
+              ]
+            },
+            {
+              "description": "Size token or pixel value.",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "sm",
+                    "md",
+                    "lg"
+                  ]
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "description": "Icon size; defaults to `md` (16px).",
+              "type": "string",
+              "enum": [
+                "sm",
+                "md",
+                "lg"
+              ]
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "The text or number to display."
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "The caption text or number."
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "The fact value as text or a number."
+            },
+            {
+              "description": "Initial value: YYYY-MM-DD for date, HH:mm or HH:mm:ss with optional fraction of at most 9 digits for time, YYYY-MM-DDTHH:mm with optional :ss and fraction of at most 9 digits for datetime. A datetime with Z or ±HH:mm is an instant, displayed in the viewer's time zone and submitted with the same offset and precision. A datetime without an offset is local and submitted unchanged. An empty datetime submits with the viewer's offset and seconds.",
+              "type": "string"
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "Badge text or number."
+            },
+            {
+              "type": "string",
+              "description": "Markdown source."
+            }
+          ]
+        },
+        "weight": {
+          "description": "Font weight.",
+          "type": "string",
+          "enum": [
+            "normal",
+            "medium",
+            "semibold",
+            "bold"
+          ]
+        },
+        "color": {
+          "anyOf": [
+            {
+              "description": "Foreground color token.",
+              "type": "string",
+              "enum": [
+                "emphasis",
+                "secondary",
+                "alpha-70",
+                "white",
+                "white-70",
+                "white-50"
+              ]
+            },
+            {
+              "description": "Series color (single-series mode only). One of `emphasis`, `secondary`, `alpha-70`, `white`, `white-70`, or `white-50`, matching Text's `color` tokens; other values have no visual effect.",
+              "type": "string"
+            }
+          ]
+        },
+        "src": {
+          "type": "string",
+          "description": "Image URL, taken from a tool result or the user; never invent one."
+        },
+        "alt": {
+          "type": "string",
+          "description": "Alt text for accessibility."
+        },
+        "round": {
+          "description": "Render as a circular avatar (fully rounded, cropped to a square).",
+          "type": "boolean"
+        },
+        "flush": {
+          "description": "Whether the divider spans the full width with no inset.",
+          "type": "boolean"
+        },
+        "code": {
+          "type": "string",
+          "description": "Mermaid source, such as `flowchart LR` followed by `A[Order] --> B[Ship]`."
+        },
+        "title": {
+          "anyOf": [
+            {
+              "description": "A caption for the diagram, as text or a number.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "description": "Optional card title text or number.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "The source's title as text or a number."
+            },
+            {
+              "description": "Alert title text or number.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          ]
+        },
+        "places": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "The place's name."
+              },
+              "lat": {
+                "type": "number",
+                "description": "Latitude in degrees."
+              },
+              "lng": {
+                "type": "number",
+                "description": "Longitude in degrees."
+              },
+              "detail": {
+                "description": "A short note about the place.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "lat",
+              "lng"
+            ]
+          },
+          "description": "The places, in order."
+        },
+        "route": {
+          "description": "Draw a line through the places in order.",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "The fact label (key) as text or a number."
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "Button label text or number."
+            },
+            {
+              "description": "Accessible label for the control.",
+              "type": "string"
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "Label text or number next to the checkbox."
+            },
+            {
+              "description": "Accessible name for the group.",
+              "type": "string"
+            },
+            {
+              "description": "Accessible name as text or a number for the row of tabs.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "description": "Accessible label for the carousel.",
+              "type": "string"
+            }
+          ]
+        },
+        "delta": {
+          "description": "Change from before.",
+          "type": "string"
+        },
+        "trend": {
+          "description": "Change direction.",
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "flat"
+          ]
+        },
+        "upIsGood": {
+          "description": "Whether up is good.",
+          "type": "boolean"
+        },
+        "buttonStyle": {
+          "description": "Visual style.",
+          "type": "string",
+          "enum": [
+            "primary",
+            "secondary",
+            "outline",
+            "ghost",
+            "danger"
+          ]
+        },
+        "block": {
+          "description": "Whether the button spans the full width.",
+          "type": "boolean"
+        },
+        "submit": {
+          "description": "Render as a submit button for an ancestor Form/Card instead of a click button.",
+          "type": "boolean"
+        },
+        "undoable": {
+          "description": "Delay the action with an undo control, for sends and other hard-to-reverse actions.",
+          "type": "boolean"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ]
+              },
+              "description": "Selectable options."
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ]
+              },
+              "description": "Selectable options."
+            }
+          ]
+        },
+        "placeholder": {
+          "anyOf": [
+            {
+              "description": "Placeholder text or number shown when nothing is selected.",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "description": "Placeholder text.",
+              "type": "string"
+            }
+          ]
+        },
+        "name": {
+          "anyOf": [
+            {
+              "description": "Field name used inside a Form.",
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "sun",
+                "moon",
+                "cloud",
+                "rain",
+                "snow",
+                "wind",
+                "play",
+                "pause",
+                "check",
+                "x",
+                "star",
+                "heart",
+                "arrow-right",
+                "arrow-up-right",
+                "chevron-right",
+                "calendar",
+                "clock",
+                "map-pin",
+                "plane",
+                "truck",
+                "credit-card",
+                "user",
+                "search",
+                "bell"
+              ],
+              "description": "Which built-in icon to render."
+            }
+          ]
+        },
+        "defaultValue": {
+          "anyOf": [
+            {
+              "description": "Initially selected value.",
+              "type": "string"
+            },
+            {
+              "description": "Initial text.",
+              "type": "string"
+            },
+            {
+              "description": "Initial value.",
+              "type": "number"
+            },
+            {
+              "description": "Initially checked values.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "inputType": {
+          "anyOf": [
+            {
+              "description": "Single-line input type. Values remain strings.",
+              "type": "string",
+              "enum": [
+                "text",
+                "password",
+                "number"
+              ]
+            },
+            {
+              "description": "Temporal input type. Defaults to \"date\". Values remain strings.",
+              "type": "string",
+              "enum": [
+                "date",
+                "datetime",
+                "time"
+              ]
+            }
+          ]
+        },
+        "multiline": {
+          "description": "Render a textarea instead of a single-line input; ignored when `inputType` is `\"password\"` or `\"number\"`.",
+          "type": "boolean"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "description": "Minimum value: YYYY-MM-DD for date, HH:mm or HH:mm:ss with optional fraction of at most 9 digits for time, YYYY-MM-DDTHH:mm with optional :ss and fraction of at most 9 digits for datetime. Datetimes with Z or ±HH:mm are converted to the viewer's time zone.",
+              "type": "string"
+            },
+            {
+              "type": "number",
+              "description": "Minimum value."
+            }
+          ]
+        },
+        "max": {
+          "anyOf": [
+            {
+              "description": "Maximum value: YYYY-MM-DD for date, HH:mm or HH:mm:ss with optional fraction of at most 9 digits for time, YYYY-MM-DDTHH:mm with optional :ss and fraction of at most 9 digits for datetime. Datetimes with Z or ±HH:mm are converted to the viewer's time zone.",
+              "type": "string"
+            },
+            {
+              "type": "number",
+              "description": "Maximum value."
+            }
+          ]
+        },
+        "defaultChecked": {
+          "description": "Whether the checkbox starts checked.",
+          "type": "boolean"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "description": "Whether to render a checkbox or switch.",
+              "type": "string",
+              "enum": [
+                "checkbox",
+                "switch"
+              ]
+            },
+            {
+              "description": "Visual variant token.",
+              "type": "string"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "bar",
+                "line",
+                "sparkline",
+                "area"
+              ],
+              "description": "Chart variant."
+            }
+          ]
+        },
+        "step": {
+          "description": "Value increment. Defaults to 1.",
+          "type": "number"
+        },
+        "unit": {
+          "description": "Unit shown with the value.",
+          "type": "string"
+        },
+        "progress": {
+          "description": "Show how many options are checked, with a progress bar.",
+          "type": "boolean"
+        },
+        "gap": {
+          "description": "Gap between children in 4px units. 0 to 8 is the supported range.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "padding": {
+          "description": "Padding in 4px units (e.g. 2 = 8px). 0 to 8 is the supported range.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "background": {
+          "anyOf": [
+            {
+              "description": "Background color or gradient (any CSS background value). Setting this also switches the card's own text to white, since a custom background makes the card a tinted surface; children can still opt into a different color explicitly.",
+              "type": "string"
+            },
+            {
+              "description": "Background color or gradient (any CSS background value).",
+              "type": "string"
+            }
+          ]
+        },
+        "asForm": {
+          "description": "Render as a form; submitting it fires `confirm._action`, or the Card's own `_action` when `confirm` has none, with every named child control's value keyed by `name`.",
+          "type": "boolean"
+        },
+        "confirm": {
+          "description": "Confirm button shown in the footer.",
+          "type": "object",
+          "properties": {
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "Footer button label text or number."
+            },
+            "_action": {
+              "description": "Action fired when the button is activated.",
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "The action type, resolved by the host's action registry."
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "label"
+          ]
+        },
+        "cancel": {
+          "description": "Cancel button shown in the footer.",
+          "type": "object",
+          "properties": {
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "description": "Footer button label text or number."
+            },
+            "_action": {
+              "description": "Action fired when the button is activated.",
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "The action type, resolved by the host's action registry."
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "label"
+          ]
+        },
+        "align": {
+          "description": "Cross-axis alignment.",
+          "type": "string",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ]
+        },
+        "justify": {
+          "description": "Main-axis distribution.",
+          "type": "string",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "between"
+          ]
+        },
+        "width": {
+          "description": "Width; a number is pixels.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "height": {
+          "description": "Height; a number is pixels.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "radius": {
+          "description": "Corner radius; \"full\" is a pill/circle, a number is pixels.",
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "full"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "description": "Tab labels as text or numbers, one per child panel, in order."
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "description": "What to do, in a few words, as text or a number."
+              },
+              "detail": {
+                "description": "How to do it, or what to watch for, as text or a number.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "title"
+            ]
+          },
+          "description": "The steps, in order."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "time": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "description": "When it happens, as the user should read it, such as `Day 1`, `6:00 pm`, or `1969`, as text or a number."
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "description": "What happens, as text or a number."
+              },
+              "detail": {
+                "description": "More about it, as text or a number.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "time",
+              "title"
+            ]
+          },
+          "description": "The events, in time order."
+        },
+        "columns": {
+          "description": "Column definitions.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Column header label."
+              },
+              "align": {
+                "description": "Cell alignment.",
+                "type": "string",
+                "enum": [
+                  "start",
+                  "end"
+                ]
+              },
+              "format": {
+                "description": "Cell value format.",
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "number",
+                      "currency",
+                      "percent",
+                      "date"
+                    ],
+                    "description": "Format kind. `percent` takes a fraction, so 0.25 renders as 25%."
+                  },
+                  "currency": {
+                    "description": "Currency code.",
+                    "type": "string"
+                  },
+                  "decimals": {
+                    "description": "Decimal places.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "label"
+            ]
+          }
+        },
+        "rows": {
+          "description": "Rows of cells.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "A cell value."
+            }
+          }
+        },
+        "sortable": {
+          "description": "Allow header sorting.",
+          "type": "boolean"
+        },
+        "data": {
+          "description": "Data points for a single series.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "description": "Point label.",
+                "type": "string"
+              },
+              "value": {
+                "type": "number",
+                "description": "Point value."
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        "series": {
+          "description": "Multiple named series; takes precedence over `data` when present.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "description": "Series label, shown in the legend.",
+                "type": "string"
+              },
+              "color": {
+                "description": "Series color. One of `emphasis`, `secondary`, `alpha-70`, `white`, `white-70`, or `white-50`, matching Text's `color` tokens; other values have no visual effect.",
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "description": "Point label.",
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "number",
+                      "description": "Point value."
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ]
+                },
+                "description": "Data points for this series."
+              }
+            },
+            "required": [
+              "data"
+            ]
+          }
+        },
+        "stacked": {
+          "description": "Accumulate series values instead of overlaying them (bar and area variants; ignored for line and sparkline).",
+          "type": "boolean"
+        },
+        "showAxis": {
+          "description": "Show y-axis ticks and x-axis point labels.",
+          "type": "boolean"
+        },
+        "showLegend": {
+          "description": "Show a legend mapping each series to its color.",
+          "type": "boolean"
+        },
+        "url": {
+          "description": "Link to the source; only http and https links open.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Where it comes from, such as a site or publication, as text or a number. Defaults to the link's domain.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "snippet": {
+          "description": "A short quote or summary of what the source says, as text or a number.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "description": {
+          "description": "Supporting description text or number.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "tone": {
+          "description": "Severity tone; defaults to `info`.",
+          "type": "string",
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "danger"
+          ]
+        },
+        "children": {
+          "$ref": "#/$defs/children"
+        }
+      },
+      "required": [
+        "_type"
+      ]
+    },
+    "children": {
+      "description": "Nested generative UI rendered inside this component.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/node"
+        },
+        {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/node"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

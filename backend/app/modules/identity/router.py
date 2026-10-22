@@ -11,9 +11,11 @@ from app.core.deps import ProjectContext, get_current_user, get_project_context,
 from app.models.identity import AuditLog, User
 from app.modules.identity import preferences, schemas, service
 from app.modules.identity.account import router as account_router
+from app.modules.identity.google_router import router as google_router
 
 router = APIRouter()
 router.include_router(account_router)
+router.include_router(google_router)
 
 
 @router.get("/projects/{project_id}/creative-preferences", tags=["project"])

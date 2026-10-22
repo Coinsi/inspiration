@@ -14,7 +14,7 @@
 .task-eyebrow {
   font-size: 10px;
   letter-spacing: 0.16em;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-page-header h1 {
   display: flex;
@@ -25,7 +25,7 @@
   margin: 7px 0;
 }
 .task-page-header p {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 13px;
 }
 .task-related {
@@ -38,11 +38,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  color: hsl(var(--muted));
 }
 .task-related a:hover {
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
 }
 .task-toolbar {
   display: flex;
@@ -57,18 +57,18 @@
   flex: 1;
   min-width: 240px;
   max-width: 620px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-toolbar .studio-select-trigger {
   border: 1px solid hsl(var(--border));
   border-radius: 9px;
   background: hsl(var(--card));
   padding: 0 10px;
-  font-size: 12px;
+  font-size: 13px;
   height: 42px;
 }
 .task-reset {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 12px;
 }
 .task-status-filters {
@@ -83,13 +83,13 @@
   padding: 9px 14px;
   border: 1px solid transparent;
   border-radius: 8px;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  color: hsl(var(--muted));
+  font-size: 13px;
 }
 .task-status-filters button[aria-pressed="true"] {
   background: hsl(var(--card));
   border-color: hsl(var(--border));
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
 }
 .task-status-filters span {
   min-width: 20px;
@@ -100,15 +100,21 @@
   padding: 1px 4px;
 }
 .task-count-hint {
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  color: hsl(var(--muted));
   margin: 12px 0 20px;
 }
 .task-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+}
+.task-workspace.has-detail {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+}
+.task-detail[hidden] {
+  display: none;
 }
 .task-list {
   display: flex;
@@ -121,9 +127,9 @@
   align-items: start;
   gap: 14px;
   text-align: left;
-  padding: 18px;
+  padding: 18px 20px;
   border: 1px solid hsl(var(--border));
-  border-radius: 12px;
+  border-radius: 10px;
   background: hsl(var(--card));
   transition: background 0.15s;
 }
@@ -131,8 +137,8 @@
   background: hsl(var(--elevated));
 }
 .task-row.is-selected {
-  border-color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.04);
+  border-color: hsl(var(--muted) / 0.55);
+  background: hsl(var(--elevated) / 0.6);
 }
 .task-type-icon {
   height: 38px;
@@ -142,7 +148,7 @@
   place-items: center;
   flex-shrink: 0;
   background: hsl(var(--elevated));
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-type-icon svg {
   height: 18px;
@@ -159,15 +165,16 @@
   gap: 8px;
 }
 .task-row strong {
-  font-size: 13px;
+  font-size: 12px;
+  color: hsl(var(--muted));
   font-weight: 500;
 }
 .task-status {
-  font-size: 10px;
+  font-size: 12px;
   padding: 2px 7px;
   border-radius: 4px;
   background: hsl(var(--elevated));
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-status.status-failed {
   color: hsl(var(--danger));
@@ -184,18 +191,19 @@
   background: hsl(var(--warning) / 0.1);
 }
 .task-row h3 {
-  font-size: 12px;
-  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  margin-top: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .task-row small {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-row-content > p {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  color: hsl(var(--muted));
   margin-top: 5px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -208,12 +216,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
-  margin-top: 12px;
+  font-size: 12px;
+  color: hsl(var(--muted));
+  margin-top: 8px;
 }
 .task-row > svg {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   flex-shrink: 0;
 }
 .task-pagination {
@@ -222,7 +230,7 @@
   justify-content: space-between;
   margin-top: 8px;
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-detail {
   border: 1px solid hsl(var(--border));
@@ -257,8 +265,8 @@
   margin-top: 10px;
 }
 .task-detail-title p {
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  color: hsl(var(--fg) / 0.88);
   margin-top: 6px;
   overflow-wrap: anywhere;
 }
@@ -304,7 +312,7 @@
   padding: 8px;
   gap: 6px;
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-output-bar > div {
   display: flex;
@@ -321,7 +329,7 @@
   border: 1px dashed hsl(var(--border));
   border-radius: 10px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   line-height: 1.7;
 }
 .task-result-empty svg {
@@ -363,7 +371,7 @@
   gap: 10px;
   text-align: center;
   padding: 24px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 12px;
   line-height: 1.8;
 }
@@ -373,7 +381,7 @@
   opacity: 0.65;
 }
 .task-empty h2 {
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
 }
 .task-empty a {
   color: hsl(var(--primary));
@@ -398,7 +406,7 @@
 }
 .task-retries p {
   font-size: 10px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-events ol {
   display: flex;
@@ -417,7 +425,7 @@
   height: 6px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
   margin-top: 6px;
 }
 .task-events li i.status-failed {
@@ -427,12 +435,12 @@
   background: hsl(var(--success));
 }
 .task-events time {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
   font-size: 10px;
 }
 .task-metadata {
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-metadata summary {
   cursor: pointer;
@@ -444,7 +452,7 @@
   overflow-wrap: anywhere;
 }
 .task-metadata dd {
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
   margin-bottom: 8px;
 }
 .task-metadata pre {
@@ -458,7 +466,8 @@
   border-radius: 8px;
 }
 @media (max-width: 1150px) {
-  .task-workspace {
+  .task-workspace,
+  .task-workspace.has-detail {
     grid-template-columns: 1fr;
   }
   .task-detail {
@@ -482,11 +491,11 @@
     font-size: 21px;
   }
   .task-page-header p {
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.7;
   }
   .task-page-header > button {
-    font-size: 11px;
+    font-size: 12px;
   }
   .task-toolbar form {
     min-width: 100%;
@@ -500,7 +509,7 @@
   .task-status-filters button {
     padding: 8px;
     gap: 5px;
-    font-size: 11px;
+    font-size: 12px;
   }
   .task-related {
     gap: 12px;
@@ -520,23 +529,23 @@
 .activity-section {
   display: grid;
   gap: 12px;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: 14px;
+  line-height: 1.85;
 }
 .activity-section h4 {
   font-size: 13px;
   font-weight: 600;
-  color: hsl(var(--foreground));
+  color: hsl(var(--fg));
 }
 .activity-section p {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--fg) / 0.88);
   overflow-wrap: anywhere;
 }
 .activity-progress {
   display: grid;
   gap: 8px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .activity-progress progress {
   width: 100%;
@@ -585,7 +594,7 @@
 }
 .activity-history time {
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted));
 }
 .task-status.status-needs_review,
 .task-status.status-paused {

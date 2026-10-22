@@ -3,7 +3,7 @@
   justify-content: space-between;
   gap: 24px;
   align-items: center;
-  margin: 26px 0;
+  margin: 4px 0 24px;
 }
 .materials-heading h1 {
   font-size: 26px;
@@ -32,17 +32,41 @@
   font-size: 13px;
   color: hsl(var(--muted));
 }
+.materials-navigation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  border-bottom: 1px solid hsl(var(--border));
+  margin-bottom: 22px;
+  padding-bottom: 12px;
+}
+.materials-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.materials-sections a {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: hsl(var(--muted));
+}
+.materials-sections a:hover,
+.materials-sections a[aria-current] {
+  color: hsl(var(--fg));
+  background: hsl(var(--elevated));
+}
 .materials-views {
   display: flex;
-  gap: 20px;
+  gap: 16px;
   align-items: center;
-  border-bottom: 1px solid hsl(var(--border));
-  margin-bottom: 24px;
+  margin-left: auto;
   flex-wrap: wrap;
 }
 .materials-views > button {
-  font-size: 14px;
-  padding: 12px 0;
+  font-size: 13px;
+  padding: 8px 0;
   border-bottom: 2px solid transparent;
   color: hsl(var(--muted));
 }
@@ -52,14 +76,14 @@
 }
 .materials-more {
   margin-left: auto;
-  display: flex;
-  gap: 16px;
+  position: relative;
+  display: block;
   font-size: 12px;
   color: hsl(var(--muted));
 }
 .materials-toolbar {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -70,13 +94,13 @@
 }
 .materials-kinds button {
   padding: 8px 14px;
-  border-radius: 99px;
+  border-radius: 8px;
   font-size: 13px;
   color: hsl(var(--muted));
 }
 .materials-kinds button[aria-pressed="true"] {
-  background: hsl(var(--primary) / 0.12);
-  color: hsl(var(--primary));
+  background: hsl(var(--elevated));
+  color: hsl(var(--fg));
 }
 .materials-search {
   margin-left: auto;
@@ -107,17 +131,17 @@
 .materials-total {
   font-size: 12px;
   color: hsl(var(--muted));
-  margin: 20px 0 14px;
+  margin: 16px 0;
 }
 .materials-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 24px;
+  gap: 20px;
 }
 .material-tile {
   min-width: 0;
   border: 1px solid hsl(var(--border) / 0.3);
-  border-radius: 18px;
+  border-radius: 12px;
   position: relative;
   background: hsl(var(--card));
   transition:
@@ -132,7 +156,7 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16/9;
-  border-radius: 17px 17px 0 0;
+  border-radius: 11px 11px 0 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -493,17 +517,26 @@
     overflow-y: auto;
   }
   .materials-heading {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .materials-heading h1 { font-size: 24px; }
+  .materials-navigation { margin-bottom: 16px; }
+  .materials-total { margin: 12px 0; }
+  .materials-toolbar > .search-field { min-width: 0; width: 100%; }
+  .materials-toolbar > .studio-select-trigger { max-width: 112px; }
+  .materials-heading-actions > a { font-size: 12px; }
+  .materials-heading-actions > button { padding-inline: 12px; }
+  .materials-kinds { grid-column: 1 / -1; }
+  .materials-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
   .materials-heading-actions {
-    width: 100%;
-    justify-content: space-between;
+    gap: 12px;
   }
   .materials-more {
-    margin-left: 0;
-    padding-bottom: 12px;
-    width: 100%;
+    margin-left: auto;
   }
   .materials-search {
     margin-left: 0;
@@ -556,28 +589,13 @@
 .material-video-cover video.is-ready {
   opacity: 1;
 }
-.materials-heading {
-  margin: 16px 0;
-}
-.materials-views {
-  margin-bottom: 16px;
-}
-.materials-total {
-  margin: 14px 0;
-}
-
 .unified-materials.studio-page {
   padding-top: 20px;
 }
 
-.materials-more {
-  position: relative;
-  display: block;
-  margin-left: auto;
-}
 .materials-more summary {
   cursor: pointer;
-  padding: 12px 0;
+  padding: 8px 0;
   list-style: none;
 }
 .materials-more summary::-webkit-details-marker {
@@ -618,6 +636,8 @@
   }
   .materials-views {
     gap: 16px;
+    margin-left: 0;
+    width: 100%;
   }
   .materials-kinds {
     width: 100%;

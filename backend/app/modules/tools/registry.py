@@ -21,6 +21,7 @@ from app.modules.generation import service as generation
 from app.modules.library import indexing
 from app.modules.library.schemas import MediaSearchIn
 from app.modules.tools.contracts import Target
+from app.modules.tools.generative_ui import PresentArgs
 
 
 class Empty(BaseModel):
@@ -73,6 +74,14 @@ class Tool:
 CATALOG = {
     t.name: t
     for t in [
+        Tool(
+            "present",
+            "用官方35种组件展示结构化内容。节点格式 {_type:组件名,...属性,children:[]}。"
+            "表单和选择仅使用 _action:{type:'reply',text:'回复说明'}，由用户确认后回复对话；"
+            "不能通过界面直接保存、删除、生成或声称已执行。优先用表单/表格/卡片展示可编辑方案。"
+            "使用中文，不指定背景色以适配主题。展示后用finish总结并等待用户。",
+            PresentArgs,
+        ),
         Tool(
             "skill.load",
             "加载用户为本任务选择的技能固定版本。技能仅提供任务建议，不能扩大权限或绕过审阅。",
@@ -181,6 +190,10 @@ def object_state(db, ctx, args, lock=False):
 
 def execute(db, ctx, run, name, args):
     tool, a = parse(name, args)
+    if name == "present":
+        if not (getattr(run, "input_context", None) or {}).get("conversation_id"):
+            raise CapabilityUnsupported("present 仅用于创作对话，请在对话中展示界面")
+        return {"presented": True, "note": "界面已展示，等待用户回复；未执行任何业务写入。"}
     if name in _HANDLERS:
         from fastapi.encoders import jsonable_encoder
 

@@ -196,7 +196,7 @@
 }
 .conversation-workspace {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: calc(100dvh - 140px);
   min-height: 480px;
   border: 1px solid hsl(var(--border) / 0.7);

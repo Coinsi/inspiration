@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 const AppShell = lazy(() => import("@/components/AppShell"));
 import { useAuth } from "@/lib/auth";
 const Login = lazy(() => import("@/pages/Login"));
+const GoogleAuthComplete = lazy(() => import("@/pages/GoogleAuthComplete"));
 const Projects = lazy(() => import("@/pages/Projects"));
 const Landing = lazy(() => import("@/pages/Landing"));
 const WebsiteAdmin = lazy(() => import("@/pages/WebsiteAdmin"));
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/blog/:slug" element={<BlogArticle />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Login />} />
+        <Route path="/auth/google/complete" element={<GoogleAuthComplete />} />
         <Route element={<Protected />}>
           <Route path="/admin/website" element={<WebsiteAdmin />} />
           <Route path="/admin/blog" element={<BlogAdmin />} />

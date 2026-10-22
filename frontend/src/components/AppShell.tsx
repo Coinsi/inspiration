@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { WORKSPACE_DESTINATIONS } from "@/lib/workspace-navigation";
 import { WorkspaceNavigator } from "@/components/WorkspaceNavigator";
 import { WORKSPACE_STAGES } from "@/lib/workspace-stages";
+import { ConversationNavigationHost } from "@/lib/conversation-navigation";
 
 const COLLAPSE_KEY = "inspiration_sidebar_collapsed";
 
@@ -46,6 +47,7 @@ export default function AppShell() {
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigate = useNavigate();
   const [expandedStage, setExpandedStage] = useState<string | null>(null);
+  const [historyHost, setHistoryHost] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -70,7 +72,7 @@ export default function AppShell() {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
-  useEffect(() => setMobileOpen(false), [location.pathname]);
+  useEffect(() => setMobileOpen(false), [location.pathname, location.search]);
   const mobileRef = useDialogFocus(mobileOpen, () => setMobileOpen(false));
   const { t, lang } = useI18n();
   const [collapsed, setCollapsed] = useState(() => {
@@ -83,8 +85,15 @@ export default function AppShell() {
   const canvasWorkspace = location.pathname.endsWith("/canvas");
   const directorWorkspace = location.pathname.endsWith("/director");
   const cutsWorkspace = location.pathname.endsWith("/cuts");
-  const compact = collapsed && !narrow;
+  const writingWorkspace = /\/scripts\/[^/]+$/.test(location.pathname);
+  const editingWorkspace = writingWorkspace || cutsWorkspace || location.pathname.endsWith("/storyboard");
+  const [editorNavigationExpanded, setEditorNavigationExpanded] = useState(false);
+  const compact = (editingWorkspace ? !editorNavigationExpanded : collapsed) && !narrow;
   const toggleCollapse = () => {
+    if (editingWorkspace) {
+      setEditorNavigationExpanded((value) => !value);
+      return;
+    }
     setCollapsed((c) => {
       try {
         localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
@@ -137,6 +146,7 @@ export default function AppShell() {
   }, [activeStage?.id]);
 
   return (
+    <ConversationNavigationHost.Provider value={historyHost}>
     <div
       className={`studio-shell flex h-dvh overflow-hidden bg-bg text-foreground ${canvasWorkspace ? "is-canvas-workspace" : ""} ${directorWorkspace ? "is-director-workspace" : ""} ${cutsWorkspace ? "is-cuts-workspace" : ""}`}
     >
@@ -227,7 +237,7 @@ export default function AppShell() {
           )}
         >
           <Folder size={17} />
-          <span>{lang === "zh" ? "所有项目" : "All projects"}</span>
+          <span>{lang === "zh" ? "项目" : "All projects"}</span>
         </NavLink>
 
         <button
@@ -245,7 +255,7 @@ export default function AppShell() {
           {!compact && (
             <>
               <span className="flex-1 text-left">
-                {lang === "zh" ? "快速导航" : "Quick navigation"}
+                {lang === "zh" ? "导航" : "Quick navigation"}
               </span>
               <kbd className="text-[10px] text-faint">⌘ / Ctrl K</kbd>
             </>
@@ -286,7 +296,7 @@ export default function AppShell() {
                     <Icon size={18} className="shrink-0" />
                     {lang === "zh" ? stage.zh : stage.en}
                   </NavLink>
-                  {!compact && stage.items.length > 1 && (
+                  {!compact && (stage.items.length > 1 || (stage.id === "home" && active)) && (
                     <button
                       aria-label={`${lang === "zh" ? "展开" : "Expand"}${lang === "zh" ? stage.zh : stage.en}`}
                       aria-expanded={expanded}
@@ -302,6 +312,15 @@ export default function AppShell() {
                     </button>
                   )}
                 </div>
+                {stage.id === "home" && active && !compact && (
+                  <div hidden={!expanded} className="shell-conversations" ref={setHistoryHost}>
+                    {new URLSearchParams(location.search).get("view") === "overview" && (
+                      <NavLink className="block px-2 py-2 text-sm text-muted-foreground" to={`/projects/${projectId}/workbench?view=chat`}>
+                        {lang === "zh" ? "返回对话" : "Back to conversations"}
+                      </NavLink>
+                    )}
+                  </div>
+                )}
                 {!compact && expanded && stage.items.length > 1 && (
                   <div className="ml-5 mt-1 pl-3 border-l space-y-0.5">
                     {stage.items.map((it) => (
@@ -311,7 +330,7 @@ export default function AppShell() {
                         to={`/projects/${projectId}/${it.to}${it.to === "shots" ? "?view=status" : ""}`}
                         className={() =>
                           cn(
-                            "block rounded-lg px-3 py-2 text-[13px]",
+                            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px]",
                             (destination?.to === "shots" &&
                             new URLSearchParams(location.search).has("shot") &&
                             new URLSearchParams(location.search).get("view") !==
@@ -323,7 +342,8 @@ export default function AppShell() {
                           )
                         }
                       >
-                        {t(it.label)}
+                        <it.icon size={16} className="shrink-0" aria-hidden="true" />
+                        <span>{t(it.label)}</span>
                       </NavLink>
                     ))}
                   </div>
@@ -422,9 +442,11 @@ export default function AppShell() {
             </div>
           </HeaderMenu>
           <ChevronRight className="hidden sm:block h-3 w-3 shrink-0 text-faint" />
-          <span className="hidden sm:block truncate text-xs font-medium">
-            {pageTitle}
-          </span>
+          {!(compact && activeStage && activeStage.items.length > 1) && (
+            <span className="hidden sm:block truncate text-xs font-medium">
+              {pageTitle}
+            </span>
+          )}
           {compact && activeStage && activeStage.items.length > 1 && (
             <StudioSelect
               aria-label={lang === "zh" ? "切换相关工具" : "Related tools"}
@@ -488,5 +510,6 @@ export default function AppShell() {
         />
       )}
     </div>
+    </ConversationNavigationHost.Provider>
   );
 }

@@ -203,16 +203,13 @@ function TaskPage({ projectId }: { projectId: string }) {
       )}
       <header className="task-page-header">
         <div>
-          <span className="task-eyebrow">
-            {zh ? "创作记录" : "CREATIVE ACTIVITY"}
-          </span>
           <h1>
             <Activity size={22} />
             {zh ? "任务中心" : "Task center"}
           </h1>
           <p>
             {zh
-              ? "所有创作进度、保存结果和恢复入口，在这里找到。"
+              ? "查看创作进度、结果与需要处理的任务。"
               : "Track generation and exports, find results, and continue creating."}
           </p>
         </div>
@@ -311,7 +308,7 @@ function TaskPage({ projectId }: { projectId: string }) {
           ? "数量按当前类型和搜索范围统计；每 5 秒更新。"
           : "Counts reflect type/search filters; refreshed every 5 seconds."}
       </p>
-      <div className="task-workspace">
+      <div className={`task-workspace ${open ? "has-detail" : ""}`}>
         <section
           className="task-list"
           aria-label={zh ? "任务列表" : "Task list"}
@@ -393,7 +390,7 @@ function TaskPage({ projectId }: { projectId: string }) {
                     <small>{zh ? " · 来源已移除" : " · Source removed"}</small>
                   )}
                 </h3>
-                <p className={j.error ? "text-danger" : ""}>
+                {(j.error || j.has_warnings || j.last_event) && <p className={j.error ? "text-danger" : ""}>
                   {(j.error ? taskError(j.error, zh) : null) ||
                     (j.has_warnings
                       ? zh
@@ -403,7 +400,7 @@ function TaskPage({ projectId }: { projectId: string }) {
                     (zh
                       ? "查看结果、影响范围与恢复方式"
                       : "View results, scope and recovery")}
-                </p>
+                </p>}
                 <footer>
                   <span>
                     {j.provider === "local"
@@ -461,6 +458,7 @@ function TaskPage({ projectId }: { projectId: string }) {
           </footer>
         </section>
         <aside
+          hidden={!open}
           ref={detailRef}
           className={`task-detail ${open ? "is-open" : ""}`}
           aria-label={zh ? "任务详情" : "Task details"}

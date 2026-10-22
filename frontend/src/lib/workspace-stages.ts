@@ -3,35 +3,35 @@ import { WORKSPACE_DESTINATIONS } from "./workspace-navigation";
 // Full route catalog stays available to quick search. Sidebar shows stages and only related tools.
 export const WORKSPACE_STAGES = [
   { id: "works", zh: "作品", en: "Works", routes: ["works"] },
-  { id: "home", zh: "工作台", en: "Home", routes: ["workbench"] },
+  { id: "home", zh: "创作", en: "Home", routes: ["workbench"] },
   {
     id: "story",
-    zh: "故事与剧本",
+    zh: "故事",
     en: "Story",
     routes: ["narrative", "scripts", "bible"],
   },
   {
     id: "media",
-    zh: "素材库",
+    zh: "素材",
     en: "Materials",
     routes: ["materials"],
   },
   {
     id: "shots",
-    zh: "镜头创作",
+    zh: "镜头",
     en: "Shots",
     routes: ["storyboard", "shots", "director"],
   },
-  { id: "canvas", zh: "自由画布", en: "Canvas", routes: ["canvas"] },
+  { id: "canvas", zh: "画布", en: "Canvas", routes: ["canvas"] },
   {
     id: "editing",
-    zh: "剪辑成片",
+    zh: "剪辑",
     en: "Editing",
     routes: ["cuts", "transcriptions"],
   },
   {
     id: "tools",
-    zh: "创作工具",
+    zh: "工具",
     en: "Creative tools",
     routes: ["skills", "prompts"],
   },

@@ -43,7 +43,7 @@ def validate_user_session(user, payload):
 def limit_auth(db, request: Request, action):
     # Use the trusted ASGI peer address; never trust a caller-supplied forwarding header.
     peer = request.client.host if request.client else "unknown"
-    window, limit = (60, 30) if action == "login" else (3600, 10)
+    window, limit = (60, 30) if action in {"login", "google_start", "google_exchange"} else (3600, 10)
     now = datetime.now(UTC)
     bucket = int(now.timestamp()) // window
     key = token_hash(f"{action}:{peer}:{bucket}")

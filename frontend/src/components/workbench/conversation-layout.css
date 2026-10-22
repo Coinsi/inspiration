@@ -1,0 +1,45 @@
+/* The shell owns navigation; the reading area never reserves a second sidebar. */
+.conversation-workspace.integrated-history {
+  grid-template-columns: minmax(0, 1fr);
+  background: hsl(var(--bg));
+  border: 0;
+  border-radius: 0;
+  min-height: 480px;
+}
+.conversation-history-panel { display: flex; flex-direction: column; gap: 16px; }
+.conversation-history-panel .conversation-list { max-height: 50dvh; min-height: 100px; }
+.conversation-history-panel .conversation-list-tools { font-size: 13px; }
+.integrated-history .conversation-compose {
+  max-width: 880px;
+  border-radius: 22px;
+  background: hsl(var(--card));
+  box-shadow: 0 10px 20px -12px #0006, 0 2px 5px #0001;
+  padding: 20px 18px 16px;
+  transition: border-color 160ms, box-shadow 160ms;
+}
+.integrated-history .conversation-compose textarea { font-size: 17px; }
+.light .integrated-history .conversation-compose { box-shadow: 0 10px 22px -12px #23372c30, 0 2px 5px #23372c09; }
+.integrated-history .conversation-compose-tools { gap: 8px; }
+.integrated-history .conversation-tool { border: 1px solid hsl(var(--border)); border-radius: 10px; padding: 8px 12px; font-size: 14px; background: hsl(var(--bg) / .45); }
+.integrated-history .conversation-tool > span { display: inline; }
+.integrated-history .conversation-send { border-radius: 50%; width: 40px; height: 40px; }
+.integrated-history .conversation-starters { margin: 0 auto 24px; padding: 0 16px; flex-shrink: 0; }
+.integrated-history .conversation-starters button { font-size: 14px; border-radius: 10px; }
+.integrated-history.is-empty .conversation-main { overflow-y: auto; }
+.integrated-history.is-empty .conversation-messages { flex: 0 0 auto; overflow: visible; padding: clamp(32px, 9vh, 90px) 20px 26px; }
+.integrated-history.is-empty .conversation-empty { padding: 0; min-height: 0; height: auto; }
+.integrated-history .conversation-empty h3 { display: flex; align-items: center; justify-content: center; gap: 16px; font-size: clamp(28px, 2.7vw, 43px); font-weight: 350; letter-spacing: 0; max-width: none; }
+.integrated-history .conversation-empty h3 svg { width: 33px; height: 33px; flex-shrink: 0; color: hsl(var(--muted)); }
+.integrated-history.is-empty .conversation-compose textarea { min-height: 96px; font-size: 18px; }
+.integrated-history .conversation-heading { padding: 10px 22px; }
+@media (max-width: 767px) {
+  .integrated-history.is-empty .conversation-messages { padding: 34px 14px 24px; }
+  .integrated-history .conversation-empty h3 { font-size: 25px; gap: 9px; }
+  .integrated-history .conversation-empty h3 svg { width: 25px; height: 25px; }
+  .integrated-history .conversation-compose { padding: 14px; border-radius: 16px; }
+  .integrated-history .conversation-tool { padding: 8px; }
+  .integrated-history .conversation-starters button { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .integrated-history .conversation-compose { transition: none; }
+}

@@ -35,3 +35,25 @@ GitHub 构建主 API、前端和 MinIO 三个镜像，将镜像与生产 Compose
 生产配置默认单文件 512MiB、暂存总额 2GiB、预留 3GiB；这是业务软限制，不是磁盘硬配额。40GB 根盘仍需监控素材和卷占用。没有域名时仅有 HTTP，正式使用供应商密钥前应补域名和 HTTPS，或使用 SSH 隧道访问。
 
 配置改动随下一次发布生效；运行密钥只在服务器配置，绝不提交仓库。域名/HTTPS 入口以及未来新增服务需要相应基础设施配置，不会仅凭业务代码推送自动出现。
+
+## Google 注册与登录
+
+Google 登录作为独立入口使用现有用户和权限体系。新增迁移包含短期 OAuth 事务表，发布时仍执行现有数据库迁移流程。`/auth/providers` 只在配置完整有效时公开 Google；未配置的安装继续使用账号密码。
+
+在服务器的私有 `/opt/inspiration/runtime.env` 中设置以下五项，不把凭据加入 Git、前端环境变量或镜像构建参数：
+
+```dotenv
+GOOGLE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-private-client-secret
+GOOGLE_REDIRECT_URI=https://coinisi.com/api/v1/auth/google/callback
+GOOGLE_FRONTEND_URL=https://coinisi.com
+GOOGLE_REGISTRATION_ENABLED=true
+```
+
+Google Auth Platform 的 Web 客户端中，JavaScript 来源填写 `https://coinisi.com`，重定向 URI 填写上述完整回调地址。只申请 `openid email profile`。生产使用同一站点承载前端和 `/api/v1`，所有 OAuth Cookie 均使用 HttpOnly、SameSite=Lax 和 Secure；回调后的登录令牌通过同源 POST 换取，不写入 URL。代理应保留 Origin，并覆盖可信转发头。不要缓存 `/api/v1/auth/` 或 `/auth/google/complete`。面板 OpenResty 的回调访问日志也应关闭或去除查询参数，避免记录短期授权码。
+
+`GOOGLE_REGISTRATION_ENABLED=true` 允许已验证邮箱的 Google 用户首次登录时创建普通账户，不授予平台管理员或任何现有项目权限。设为 `false` 后已有绑定仍可登录，已登录账户仍可绑定。它不开放 Nginx 当前关闭的密码注册接口。已有邮箱不会自动合并：用户需先通过原登录方式进入账户安全设置，再主动绑定 Google。Google 创建的无密码账户使用 Google 登录，当前不提供设置本地密码或解绑入口。
+
+正式公开使用前，发布可访问的隐私政策等必要页面并配置 Google 品牌信息，按控制台提示完成发布/验证。客户端 JSON 只提供凭据和允许的地址，不能证明这些控制台设置或真实用户授权已完成。配置后发布新版本，再用浏览器完整验证取消授权、首次注册、再次登录、原账号绑定以及退出。
+
+若另外需要本机测试，应为开发配置独立客户端及相同来源的回调，例如前端 `http://localhost:5173` 和经 Vite 代理的 `http://localhost:5173/api/v1/auth/google/callback`；不能把正式回调与本地前端混用。开发配置不要修改正式服务器的值。

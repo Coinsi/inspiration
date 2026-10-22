@@ -6,7 +6,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia";
 import { TimelineWorks } from "./WorkEditing";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { ObjectPicker } from "@/components/ObjectPicker";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   edit,
   editableContent,
@@ -24,7 +24,10 @@ import {
 } from "@/lib/timeline-edit";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, Download, Film, Trash2 } from "lucide-react";
+import {
+  ArrowDown, ArrowUp, Download, Film, PanelRight, Plus,
+  Redo2, Save, Trash2, Undo2, X,
+} from "lucide-react";
 import {
   api,
   blobUrl,
@@ -58,10 +61,12 @@ export function TimelineStudio({
   projectId,
   timelines,
   shots,
+  headerAction,
 }: {
   projectId: string;
   timelines: Timeline[];
   shots: Shot[];
+  headerAction?: ReactNode;
 }) {
   const [search, setSearch] = useSearchParams();
   const { lang } = useI18n();
@@ -95,14 +100,9 @@ export function TimelineStudio({
   return (
     <section className="timeline-studio">
       <div className="editing-project-bar">
-        <TimelineWorks key={id} projectId={projectId} timelineId={id} />
         <div className="timeline-document-bar">
-          <h2>
-            <Film className="h-4 w-4" />
-            {zh ? "剪辑与成片" : "Timeline & film"}
-          </h2>
           <label className="text-xs text-muted-foreground">
-            {zh ? "工作时间线" : "Working timeline"}
+            {zh ? "时间线" : "Timeline"}
             <StudioSelect
               aria-label={zh ? "工作时间线" : "Working timeline"}
               className="mt-1 h-9 w-full rounded-md border bg-bg px-2 text-sm text-foreground"
@@ -136,6 +136,10 @@ export function TimelineStudio({
               ))}
             </StudioSelect>
           </label>
+        </div>
+        <div className="editing-project-tools">
+          <TimelineWorks key={id} projectId={projectId} timelineId={id} />
+          {headerAction}
         </div>
       </div>
       {q.error && (
@@ -259,9 +263,14 @@ function TimelineDraft({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [addingType, setAddingType] = useState<"all" | "audio">("all");
   const [exportsOpen, setExportsOpen] = useState(false);
-  const [trackHeight, setTrackHeight] = useState(210);
+  const [trackHeight, setTrackHeight] = useState(180);
+  const [propertiesOpen, setPropertiesOpen] = useState(hasContent);
   const [selectedVisual, setSelectedVisual] = useState("");
   const [trackTab, setTrackTab] = useState<"audio" | "subtitles">("audio");
+  const openPanel = (next: typeof panel) => {
+    setPanel(next);
+    setPropertiesOpen(true);
+  };
   const activeClip = Math.min(clipPreview ?? 0, Math.max(0, clips.length - 1));
   const [videoTools, setVideoTools] = useState<Generation | null>(null);
   const gens = useQuery({
@@ -425,9 +434,46 @@ function TimelineDraft({
     window.addEventListener("beforeunload", leave);
     return () => window.removeEventListener("beforeunload", leave);
   }, [saved]);
+  const shotPicker = shots.some((s) => s.selected_generation_id) && (
+    <ObjectPicker
+      title={zh ? "添加镜头" : "Add a shot"}
+      closeOnSelect
+      disabled={
+        pending ||
+        clips.length >= 100 ||
+        !shots.some((s) => s.selected_generation_id)
+      }
+      selected={[]}
+      items={shots
+        .filter((s) => s.selected_generation_id)
+        .map((s) => ({
+          id: s.id,
+          name: s.title || s.description || s.code,
+          context: s.code,
+        }))}
+      onSelect={(id) => {
+        const shot = shots.find((s) => s.id === id);
+        if (!shot || !shot.selected_generation_id) return;
+        change([
+          ...clips,
+          {
+            shot_id: shot.id,
+            id: crypto.randomUUID(),
+            generation_id: shot.selected_generation_id,
+            in_point_ms: 0,
+            out_point_ms: 0,
+            duration_ms: 3000,
+          },
+        ]);
+        setClipPreview(clips.length);
+        setComposition(true);
+        openPanel("clips");
+      }}
+    />
+  );
   return (
     <div
-      className={`timeline-draft editing-workspace ${clips.length ? "has-clips" : ""} ${exportOpen ? "is-exporting" : ""}`}
+      className={`timeline-draft editing-workspace ${hasContent ? "has-content" : "is-empty"} ${clips.length ? "has-clips" : ""} ${propertiesOpen ? "has-properties" : ""} ${exportOpen ? "is-exporting" : ""}`}
       style={{ "--track-height": `${trackHeight}px` } as React.CSSProperties}
       onKeyDown={(e) => {
         if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -460,19 +506,25 @@ function TimelineDraft({
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
+            className="editing-history-action"
+            title={zh ? "撤销剪辑 · Ctrl / ⌘ + Z" : "Undo edit · Ctrl / ⌘ + Z"}
+            aria-label={zh ? "撤销剪辑" : "Undo edit"}
             disabled={!history.past.length || pending}
             onClick={() => setHistory(undo)}
           >
-            {zh ? "撤销剪辑" : "Undo edit"}
+            <Undo2 size={16} />
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
+            className="editing-history-action"
+            title={zh ? "重做剪辑 · Ctrl / ⌘ + Shift + Z" : "Redo edit · Ctrl / ⌘ + Shift + Z"}
+            aria-label={zh ? "重做剪辑" : "Redo edit"}
             disabled={!history.future.length || pending}
             onClick={() => setHistory(redo)}
           >
-            {zh ? "重做剪辑" : "Redo edit"}
+            <Redo2 size={16} />
           </Button>
           <span className="timeline-undo-hint self-center text-xs text-muted-foreground">
             {zh
@@ -501,10 +553,21 @@ function TimelineDraft({
             disabled={saved || invalid || pending}
             onClick={() => save.mutate()}
           >
-            {zh ? "保存时间线" : "Save timeline"}
+            <Save size={14} />
+            {zh ? "保存" : "Save"}
           </Button>
         </div>
         <div className="editing-main-actions">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={propertiesOpen}
+            aria-controls="editing-properties"
+            onClick={() => setPropertiesOpen(!propertiesOpen)}
+          >
+            <PanelRight size={15} />
+            {zh ? "属性" : "Inspector"}
+          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -563,7 +626,7 @@ function TimelineDraft({
                   }),
                 ),
               );
-              setPanel("tracks");
+              openPanel("tracks");
               setTrackTab("audio");
             } else {
               change([
@@ -584,7 +647,7 @@ function TimelineDraft({
                 },
               ]);
               setClipPreview(clips.length);
-              setPanel("clips");
+              openPanel("clips");
             }
             setComposition(true);
             void qc.invalidateQueries({
@@ -593,7 +656,7 @@ function TimelineDraft({
           }}
         />
       )}
-      <aside className="editing-media" aria-label="剪辑素材">
+      <aside className="editing-media" aria-label="剪辑素材" hidden={!hasContent}>
         <header>
           <strong>剪辑素材</strong>
           <span>{clips.length} 个画面</span>
@@ -605,11 +668,9 @@ function TimelineDraft({
             setAddingMedia(true);
           }}
         >
-          添加素材
+          <Plus size={15} />
+          {zh ? "添加素材" : "Add media"}
         </Button>
-        <p className="text-xs text-muted-foreground">
-          从素材库选择或上传本地文件
-        </p>
         <div className="editing-media-list" aria-label="画面序列">
           {clips.map((c, i) => (
             <ClipThumbnail
@@ -626,16 +687,11 @@ function TimelineDraft({
                 setComposition(true);
                 setCompositionTime(clipSpans(content)[i]?.start || 0);
                 setClipPreview(i);
-                setPanel("clips");
+                openPanel("clips");
               }}
             />
           ))}
 
-          {!clips.length && (
-            <p className="text-sm text-muted-foreground">
-              还没有素材，添加后即可开始剪辑。
-            </p>
-          )}
         </div>
       </aside>
       <Modal
@@ -828,7 +884,22 @@ function TimelineDraft({
           </Button>
         </fieldset>{" "}
       </Modal>
-      <aside className="editing-properties" aria-label="剪辑属性">
+      <aside
+        className="editing-properties"
+        id="editing-properties"
+        aria-label={zh ? "剪辑属性" : "Editing inspector"}
+        hidden={!propertiesOpen}
+      >
+        <header className="editing-properties-header">
+          <strong>{zh ? "属性" : "Inspector"}</strong>
+          <button
+            type="button"
+            aria-label={zh ? "收起属性" : "Close inspector"}
+            onClick={() => setPropertiesOpen(false)}
+          >
+            <X size={16} />
+          </button>
+        </header>
         <div
           className="timeline-editor-tabs"
           role="tablist"
@@ -844,13 +915,13 @@ function TimelineDraft({
               aria-controls={`timeline-panel-${p}`}
               id={`timeline-tab-${p}`}
               onClick={() => {
-                setPanel(p);
+                openPanel(p);
                 if (p === "visuals") setComposition(true);
               }}
             >
               {
                 (zh
-                  ? ["片段调整", "叠加画面", "声音与字幕", "编辑历史"]
+                  ? ["片段", "画面", "音频/字幕", "历史"]
                   : [
                       "Clip editing",
                       "Visual layers",
@@ -938,76 +1009,15 @@ function TimelineDraft({
           id="timeline-panel-clips"
           aria-labelledby="timeline-tab-clips"
         >
-          <h3 className="text-sm font-medium">
-            {zh ? "添加与调整片段" : "Clip order"}
-          </h3>
-          <div
-            className={
-              clips.length ? "timeline-add-clip" : "timeline-first-clip"
-            }
-          >
-            {!clips.length && (
-              <div>
-                <Film size={28} />
-                <h3>
-                  {zh ? "添加素材，开始剪辑" : "Start with your first shot"}
-                </h3>
-                <p>
-                  {zh
-                    ? "点击上方「添加素材」，从素材库选择或本地上传图片、视频。也可以使用已有镜头。"
-                    : "Choose a shot, then arrange its order and duration. Add sound and captions afterwards."}
-                </p>
-              </div>
-            )}
-            {shots.some((s) => s.selected_generation_id) && (
-              <ObjectPicker
-                title={zh ? "添加镜头" : "Add a shot"}
-                closeOnSelect
-                disabled={
-                  pending ||
-                  clips.length >= 100 ||
-                  !shots.some((s) => s.selected_generation_id)
-                }
-                selected={[]}
-                items={shots
-                  .filter((s) => s.selected_generation_id)
-                  .map((s) => ({
-                    id: s.id,
-                    name: s.title || s.description || s.code,
-                    context: s.code,
-                  }))}
-                onSelect={(id) => {
-                  const shot = shots.find((s) => s.id === id);
-                  if (!shot || !shot.selected_generation_id) return;
-                  change([
-                    ...clips,
-                    {
-                      shot_id: shot.id,
-                      id: crypto.randomUUID(),
-                      generation_id: shot.selected_generation_id,
-                      in_point_ms: 0,
-                      out_point_ms: 0,
-                      duration_ms: 3000,
-                    },
-                  ]);
-                  setClipPreview(clips.length);
-                }}
-              />
-            )}
-            {!clips.length && !shots.some((s) => s.selected_generation_id) && (
-              <p className="text-sm text-muted-foreground">
-                {zh
-                  ? "也可以先到分镜中准备镜头画面。"
-                  : "No shots have an adopted image yet."}{" "}
-                <Link
-                  className="underline text-primary"
-                  to={`/projects/${projectId}/shots`}
-                >
-                  {zh ? "去分镜选择画面 →" : "Choose shot media →"}
-                </Link>
-              </p>
-            )}
-          </div>
+          {clips.length > 0 && shotPicker && (
+            <div className="timeline-add-clip">{shotPicker}</div>
+          )}
+          {!clips.length && (
+            <div className="editing-inspector-empty">
+              <Film size={24} strokeWidth={1.4} />
+              <p>{zh ? "添加画面后，在这里调整片段。" : "Clip controls appear here after you add media."}</p>
+            </div>
+          )}
           {clips.map((c, i) => (
             <div
               key={`${i}-${c.shot_id}`}
@@ -1254,7 +1264,6 @@ function TimelineDraft({
       )}
       <div
         className={`timeline-preview-grid ${exportOpen ? "is-exporting" : ""}`}
-        hidden={!clips.length && !outputs.length && !exportOpen}
       >
         <div className="timeline-monitor" data-aspect={aspect}>
           <div className="timeline-monitor-screen">
@@ -1288,19 +1297,26 @@ function TimelineDraft({
                 label={zh ? "成片预览" : "Film preview"}
               />
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-2 p-5 text-center text-sm text-muted-foreground">
-                <Film className="h-7 w-7" />
-                {zh
-                  ? "从左侧添加图片或视频，开始剪辑"
-                  : "Add an image or video from the left to start editing"}
+              <div className="editing-start">
+                <span className="editing-start-icon"><Film size={30} strokeWidth={1.3} /></span>
+                <h2>{zh ? "让故事在这里连起来" : "Bring your story together"}</h2>
+                <p>{zh ? "添加图片或视频，再编排镜头、声音与字幕。" : "Add images or video, then arrange your shots, sound and captions."}</p>
+                <Button disabled={pending} onClick={() => { setAddingType("all"); setAddingMedia(true); }}>
+                  <Plus size={17} />
+                  {zh ? "添加素材" : "Add media"}
+                </Button>
+                {shotPicker && <div className="editing-start-existing">{shotPicker}</div>}
+                {!shots.some((shot) => shot.selected_generation_id) && (
+                  <Link to={`/projects/${projectId}/shots`} className="editing-start-link">{zh ? "前往分镜准备画面" : "Prepare shots in the storyboard"}</Link>
+                )}
               </div>
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          {(clips.length > 0 || !!result) && <div className="editing-preview-caption mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>
               {composition
                 ? zh
-                  ? "实时预览 · 声音、字幕与转场；最终编码与字幕排版以导出为准"
+                  ? "实时预览 · 最终效果以导出为准"
                   : "Live preview · audio, captions and transitions; export for final encoding"
                 : clipPreview !== null || !result
                   ? zh
@@ -1335,7 +1351,7 @@ function TimelineDraft({
                 {zh ? "查看成片" : "View film"}
               </Button>
             )}
-          </div>
+          </div>}
           {gens.error && (
             <p className="mt-2 text-xs text-danger">
               {(gens.error as Error).message}
@@ -1409,7 +1425,7 @@ function TimelineDraft({
             size="sm"
             variant="ghost"
             onClick={() => {
-              setPanel("clips");
+              openPanel("clips");
               requestAnimationFrame(() =>
                 document
                   .getElementById("timeline-panel-clips")
@@ -1424,7 +1440,7 @@ function TimelineDraft({
           </span>
         </div>
       )}
-      <label className="editing-track-size">
+      {hasContent && <label className="editing-track-size">
         时间线高度
         <input
           aria-label="时间线高度"
@@ -1435,7 +1451,7 @@ function TimelineDraft({
           value={trackHeight}
           onChange={(e) => setTrackHeight(Number(e.target.value))}
         />
-      </label>
+      </label>}
       {hasContent && (
         <TimelineOverview
           bounds={sourceBounds}
@@ -1453,10 +1469,10 @@ function TimelineDraft({
             setComposition(true);
             setCompositionTime(clipSpans(content)[index]?.start || 0);
             setClipPreview(index);
-            setPanel("clips");
+            openPanel("clips");
           }}
           onVisualSelect={(id) => {
-            setPanel("visuals");
+            openPanel("visuals");
             setComposition(true);
             setSelectedVisual(id);
             const v = content.visuals.find((v) => v.id === id);
@@ -1464,7 +1480,7 @@ function TimelineDraft({
           }}
           onTracks={(tab) => {
             setTrackTab(tab);
-            setPanel("tracks");
+            openPanel("tracks");
           }}
         />
       )}
@@ -1504,7 +1520,7 @@ function TimelineDraft({
                     : message.includes("叠加")
                       ? "visuals"
                       : "clips";
-                setPanel(target);
+                openPanel(target);
                 if (target === "tracks")
                   setTrackTab(message.includes("字幕") ? "subtitles" : "audio");
                 const match = message.match(/第 (\d+) 个画面/);

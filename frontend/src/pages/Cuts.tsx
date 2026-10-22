@@ -92,7 +92,9 @@ export default function Cuts() {
 
   return (
     <div className="cuts-page">
-      <header className="cuts-page-header">
+      {!!timelines?.length ? (
+        <h1 className="sr-only">{tr("cuts.title")}</h1>
+      ) : <header className="cuts-page-header">
         <div>
           <h1>
             <Film className="h-5 w-5" />
@@ -104,17 +106,7 @@ export default function Cuts() {
               : "Bring shots, sound and captions together."}
           </p>
         </div>
-        {!!timelines?.length && (
-          <Button variant="outline" onClick={() => setCreateOpen(!createOpen)}>
-            {createOpen ? (
-              <X className="h-4 w-4" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
-            {zh ? "新建时间线" : "New timeline"}
-          </Button>
-        )}
-      </header>
+      </header>}
       {timelines?.length === 0 && !createOpen && (
         <section className="studio-empty !min-h-80">
           <Film size={36} />
@@ -185,6 +177,12 @@ export default function Cuts() {
           projectId={projectId!}
           timelines={timelines || []}
           shots={shots || []}
+          headerAction={
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(!createOpen)}>
+              {createOpen ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {zh ? "新建时间线" : "New timeline"}
+            </Button>
+          }
         />
       )}
 

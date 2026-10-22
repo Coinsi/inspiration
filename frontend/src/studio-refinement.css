@@ -1,0 +1,44 @@
+/* Approved round-07 workspace proportions. Shared tokens live in index.css. */
+.studio-shell { padding: 8px 8px 8px 0; background: hsl(var(--surface)); }
+.studio-shell .studio-sidebar { margin: 0; border-radius: 0; }
+.studio-shell > div.flex { border-radius: 14px; overflow: hidden; background: hsl(var(--bg)); }
+.studio-sidebar > div:first-child { min-height: 72px; }
+.studio-sidebar > div:first-child > span:nth-child(2) { font-size: 22px; }
+.studio-sidebar > div:first-child small { display: none; }
+.studio-shell .studio-brand-mark, .studio-home .studio-brand-mark { background: transparent; color: hsl(var(--fg)); box-shadow: none; border: 0; }
+.studio-shell .studio-brand-mark svg, .studio-home .studio-brand-mark svg { width: 27px; height: 27px; }
+.studio-sidebar nav > div > div > a { font-size: 16px; font-weight: 400; border-radius: 9px; }
+.studio-sidebar nav > div > div > a.flex-col { font-size: 12px; }
+.studio-sidebar nav > div > div > a > svg { width: 21px; height: 21px; }
+.studio-sidebar nav > div > div > button { transition: background 160ms; }
+.studio-sidebar nav > div > div > button svg { transition: transform 160ms; }
+.shell-conversations { margin: 6px 8px 12px 26px; padding-left: 12px; border-left: 1px solid hsl(var(--border)); }
+.shell-conversation-list { display: flex; flex-direction: column; gap: 2px; }
+.shell-conversation-list > button { display: flex; align-items: center; gap: 8px; padding: 8px; min-width: 0; text-align: left; font-size: 13px; color: hsl(var(--muted)); border-radius: 7px; transition: background 160ms, color 160ms; }
+.shell-conversation-list > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-conversation-list > button:hover, .shell-conversation-list > button[aria-current] { background: hsl(var(--elevated)); color: hsl(var(--fg)); }
+.shell-conversation-list > p { font-size: 13px; padding: 8px; color: hsl(var(--muted)); }
+.studio-home { background: hsl(var(--surface)); padding: 8px 8px 8px 0; }
+.home-sidebar { margin: 0; border-radius: 0; background: transparent; }
+.home-main { background: hsl(var(--bg)); border-radius: 14px; }
+.home-brand { font-size: 22px; }.home-brand small { display: none; }
+.home-hero { display: flex; flex-direction: column; text-align: left; max-width: none; gap: 24px; margin-bottom: 36px; }
+.home-hero > .studio-eyebrow { display: none; }
+.home-hero h1 { order: -1; font-size: clamp(26px, 2.4vw, 38px); font-weight: 400; letter-spacing: 0; margin: 10px 0 0; }
+.home-hero .creative-launch { width: 100%; }
+.inspiration-carousel.studio-scenes { width: 100%; height: clamp(190px, 19vw, 280px); margin: 0; border-radius: 16px; overflow: hidden; }
+.inspiration-carousel .studio-scene { inset: 0; width: 100%; height: 100%; transform: none; filter: none; box-shadow: none; border: 0; border-radius: 0; }
+.inspiration-carousel .studio-scene > span { left: 24px; right: auto; bottom: 22px; font-size: 20px; letter-spacing: 0; }
+.scene-controls { position: absolute; right: 20px; bottom: 20px; display: flex; gap: 8px; z-index: 3; }
+.scene-controls button { width: 32px; height: 32px; border-radius: 50%; border: 1px solid #ffffff80; background: #202226b3; color: white; transition: background 160ms, color 160ms; }
+.scene-controls button[aria-pressed=true] { background: white; color: #202226; }
+.scene-controls button:focus-visible { outline-color: white; }
+@media (max-width: 767px) {
+  .studio-shell, .studio-home { padding: 0; }
+  .studio-shell > div.flex, .home-main { border-radius: 0; }
+  .studio-shell .studio-sidebar { background: hsl(var(--surface)); }
+  .inspiration-carousel .studio-scene > span { font-size: 16px; bottom: 60px; left: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell-conversation-list > button, .scene-controls button, .studio-sidebar nav > div > div > button svg { transition: none; }
+}
