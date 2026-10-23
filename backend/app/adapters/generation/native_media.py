@@ -38,6 +38,7 @@ class NativeMedia(GenerationProvider):
             modalities={self.modality},
             features=features,
             max_reference_images=refs,
+            reference_transports={"image": ["data_url"]} if refs else {},
             max_video_seconds=self.config.get("max_video_seconds", 12)
             if self.modality == "video"
             else None,
@@ -158,9 +159,9 @@ class NativeMedia(GenerationProvider):
             raise ProviderError("服务连接或返回格式异常；若已提交，请先查询原任务") from None
 
     def _image(self, ref):
-        if not ref.data_url or not ref.data_url.startswith("data:image/"):
-            raise CapabilityUnsupported("参考图尚未准备好，请重新选择图片")
-        return ref.data_url
+        from app.adapters.generation.reference_transport import image_data_url
+
+        return image_data_url(ref)
 
     def _output(self, url):
         if not isinstance(url, str):

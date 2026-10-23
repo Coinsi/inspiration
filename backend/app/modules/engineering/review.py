@@ -31,12 +31,14 @@ def propose_timeline(db, ctx, work, candidate, command):
         )
     else:
         data = command.document
-    if data.revision != t.revision:
-        raise Conflict("时间线已更新，请保留草稿并重新载入")
-    document, frozen = jobs.document_render_snapshot(db, ctx, t.id, data)
+    from app.modules.engineering.collaboration import timeline_baseline
+
     before = TimelineDocumentIn.model_validate(
-        editing.document(db, ctx.project.id, t.id)
+        timeline_baseline(db, ctx, t.id, data.revision)
     ).model_dump(mode="json")
+    if data.revision != t.revision:
+        data = fixed_timeline_draft(data, before)
+    document, frozen = jobs.document_render_snapshot(db, ctx, t.id, data)
     summary = []
     for field, label in (
         ("items", "片段"),
@@ -55,12 +57,47 @@ def propose_timeline(db, ctx, work, candidate, command):
     timeline.store(candidate, t.id, document, frozen)
     return {
         "timeline_id": str(t.id),
-        "expected_revision": t.revision,
+        "expected_revision": data.revision,
         "document": document,
         "render_snapshot": frozen,
         "aspect_ratio": command.aspect_ratio,
         "summary": summary or ["保留当前剪辑内容，建立可审阅版本"],
     }
+
+
+def fixed_timeline_draft(data, before):
+    """Resolve omitted legacy fields against the old revision, never live edits."""
+    raw = data.model_dump(mode="json")
+    if "visuals" not in data.model_fields_set:
+        raw["visuals"] = copy.deepcopy(before.get("visuals", []))
+    for field, key in (("items", "shot_id"), ("audio", "generation_id"), ("subtitles", None)):
+        used = {item["id"] for item in raw[field] if item.get("id")}
+        for item in raw[field]:
+            if not item.get("id"):
+                previous = next(
+                    (
+                        old
+                        for old in before[field]
+                        if old.get("id") not in used
+                        and (key is None or old.get(key) == item.get(key))
+                    ),
+                    None,
+                )
+                item["id"] = previous["id"] if previous else str(uuid.uuid4())
+                used.add(item["id"])
+            if field == "items" and not item.get("generation_id"):
+                previous = next(
+                    (
+                        old
+                        for old in before[field]
+                        if old.get("id") == item["id"] and old.get("shot_id") == item.get("shot_id")
+                    ),
+                    None,
+                )
+                if not previous or not previous.get("generation_id"):
+                    raise Conflict("旧基线候选必须明确指定画面素材，不能读取镜头的当前选用结果")
+                item["generation_id"] = previous["generation_id"]
+    return TimelineDocumentIn.model_validate(raw)
 
 
 def get_change(db, work_id, change_id):
@@ -148,7 +185,7 @@ def details(db, ctx, change):
     return result
 
 
-def preview(db, ctx, work_id, change_id, data):
+def preview(db, ctx, work_id, change_id, data, *, execution_snapshot=None):
     require(ctx.role, "engineering.edit")
     service.work(db, ctx, work_id, lock=True)
     change = get_change(db, work_id, change_id)
@@ -164,7 +201,7 @@ def preview(db, ctx, work_id, change_id, data):
         None,
     )
     if not selected:
-        return preview_native(db, ctx, work_id, change, data)
+        return preview_native(db, ctx, work_id, change, data, execution_snapshot=execution_snapshot)
     output_id = timeline_output_id(change, selected)
     prior = find_preview(db, ctx, change, output_id)
     if prior and (prior.status not in ("failed", "canceled") or data.retry_job_id != prior.id):
@@ -187,6 +224,7 @@ def preview(db, ctx, work_id, change_id, data):
         uuid.UUID(selected["timeline_id"]),
         "render",
         {
+            **(execution_snapshot or {}),
             "clips": frozen["clips"],
             "options": {
                 "height": 720,
@@ -209,7 +247,7 @@ def preview(db, ctx, work_id, change_id, data):
     return service.change_out(change)
 
 
-def preview_native(db, ctx, work_id, change, data):
+def preview_native(db, ctx, work_id, change, data, *, execution_snapshot=None):
     from app.modules.engineering import executors
 
     if change.status != "proposed":
@@ -237,6 +275,7 @@ def preview_native(db, ctx, work_id, change, data):
         work_id,
         "engineering_render",
         {
+            **(execution_snapshot or {}),
             "engineering_plan": plan,
             "engineering_output_id": output_id,
             "engineering_change_id": str(change.id),

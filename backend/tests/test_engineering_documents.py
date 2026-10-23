@@ -112,7 +112,7 @@ def test_corrupted_revision_is_rejected_before_preview(studio):
     assert result.status_code == 409
 
 
-def test_document_edit_rejects_stale_projection_and_unknown_operation(studio):
+def test_document_edit_retains_stale_candidate_without_adopting_it(studio):
     client, _, _, path, tid, url = ready(studio)
     change = draft(client, path, tid, url)
     ref = change["timeline_update"]["document_ref"]
@@ -133,7 +133,16 @@ def test_document_edit_rejects_stale_projection_and_unknown_operation(studio):
             ],
         },
     )
-    assert result.status_code == 409
+    assert result.status_code == 200, result.text
+    late = result.json()
+    assert late["timeline_update"]["expected_revision"] == 0
+    assert (
+        client.post(
+            path + f"/changes/{late['id']}/accept", json={"fingerprint": late["fingerprint"]}
+        ).status_code
+        == 409
+    )
+    assert client.get(url).json()["revision"] == 1
     invalid = client.post(
         path + "/changes",
         json={

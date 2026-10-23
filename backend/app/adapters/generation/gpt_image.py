@@ -54,6 +54,7 @@ class GptImageProvider(GenerationProvider):
             features={"reference", "img2img"}
             | ({"inpaint"} if self.config.get("mask_editing", True) else set()),
             max_reference_images=int(self.config.get("max_reference_images", 4)),
+            reference_transports={"image": ["multipart"]},
             param_schema=self.config.get("param_schema", {}),
         )
 
@@ -266,8 +267,10 @@ class GptImageProvider(GenerationProvider):
         if n is not None:
             field("n", str(n))
         for i, r in enumerate(refs):
-            mime, blob = _parse_data_url(r.data_url)
-            ext = mime.split("/")[-1] or "png"
+            from app.adapters.generation.reference_transport import image_file
+
+            filename, blob, mime = image_file(r)
+            ext = filename.rsplit(".", 1)[-1]
             parts.append(
                 (
                     f'--{boundary}\r\nContent-Disposition: form-data; name="image[]"; '

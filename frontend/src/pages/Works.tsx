@@ -7,7 +7,7 @@ import {
 import { DocumentChangeReview } from "@/components/WorkPackage";
 import { WorkEditing } from "@/components/WorkEditing";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowUpRight, Film, Layers, Loader2 } from "lucide-react";
 import { api, blobUrl, type Timeline } from "@/lib/api";
@@ -148,11 +148,22 @@ function WorkDetail({
   const base = `/projects/${projectId}`;
   const path = `${base}/works/${workId}/engineering`;
   const work = works?.find((w) => w.id === workId);
-  const [tab, setTab] = useState<
-    "current" | "candidates" | "history" | "documents"
-  >("current");
+  const [query, setQuery] = useSearchParams();
+  type WorkTab = "current" | "candidates" | "history" | "documents";
+  const requestedTab = query.get("view");
+  const tab: WorkTab = requestedTab === "candidates" || requestedTab === "history" || requestedTab === "documents" ? requestedTab : "current";
+  const setTab = (value: WorkTab) => setQuery(previous => {
+    const next = new URLSearchParams(previous);
+    next.set("view", value);
+    return next;
+  }, { replace: true });
   const [offset, setOffset] = useState(0);
-  const [selected, setSelected] = useState("");
+  const selected = query.get("change") || "";
+  const setSelected = (value: string) => setQuery(previous => {
+    const next = new URLSearchParams(previous);
+    if (value) next.set("change", value); else next.delete("change");
+    return next;
+  }, { replace: true });
   const [revision, setRevision] = useState<number | null>(null);
   const current = useQuery({
     queryKey: ["engineering", projectId, workId],

@@ -22,6 +22,7 @@ def background_status():
         ("library", "library_worker_enabled"),
         ("transcription", "transcription_worker_enabled"),
         ("agent", "agent_worker_enabled"),
+        ("production", "agent_worker_enabled"),
         ("canvas", "canvas_worker_enabled"),
     ):
         if not getattr(settings, flag):

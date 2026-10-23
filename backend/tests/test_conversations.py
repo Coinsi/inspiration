@@ -3,8 +3,10 @@
 # ruff: noqa: F811
 import uuid
 
+import pytest
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.core.security import create_access_token
 from app.models.agent import AgentRun
 from app.models.conversation import ConversationMessage
@@ -12,6 +14,12 @@ from app.models.identity import Membership, User
 from app.modules.agent import worker
 from app.modules.agent.schemas import ModelAction
 from tests.test_media_workflow import post_ok, studio  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def legacy_conversation_adapter(monkeypatch):
+    """Keep exercising persisted legacy AgentRun chats and the opt-out route."""
+    monkeypatch.setattr(settings, "production_harness_enabled", False)
 
 
 def setup(studio, monkeypatch):

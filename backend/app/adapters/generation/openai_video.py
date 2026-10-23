@@ -1,6 +1,5 @@
 """OpenAI-compatible multipart /videos task protocol. No vendor-name inference."""
 
-import base64
 import re
 from urllib.parse import quote
 
@@ -35,6 +34,7 @@ class OpenAIVideoProvider(GenerationProvider):
             modalities={"video"},
             features={"reference", "img2img", "first_frame"} if refs else set(),
             max_reference_images=1 if refs else 0,
+            reference_transports={"image": ["multipart"]} if refs else {},
             max_video_seconds=self.config.get("max_video_seconds", 12),
             param_schema=self.config.get("param_schema", {}),
         )
@@ -104,9 +104,9 @@ class OpenAIVideoProvider(GenerationProvider):
         if req.references:
             if len(req.references) != 1 or not self.config.get("max_reference_images"):
                 raise CapabilityUnsupported("当前模型只支持已声明的一张参考图")
-            head, data = req.references[0].data_url.split(",", 1)
-            mime = head.split(":", 1)[1].split(";")[0]
-            files.append(("input_reference", ("reference.png", base64.b64decode(data), mime)))
+            from app.adapters.generation.reference_transport import image_file
+
+            files.append(("input_reference", image_file(req.references[0])))
         result = self._request("POST", "/videos", files=files)
         if not isinstance(result.get("id"), str) or not result["id"]:
             raise ProviderError("视频服务未返回任务编号；请检查上游记录后再决定是否重试")

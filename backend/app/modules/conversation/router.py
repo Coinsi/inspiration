@@ -1,11 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import ProjectContext, get_project_context, require_action
+from app.core.deps import ProjectContext, _bearer, get_project_context, require_action
 from app.models.conversation import Conversation
 from app.modules.conversation import schemas, service
 
@@ -13,6 +15,24 @@ router = APIRouter(prefix="/projects/{project_id}/conversations", tags=["convers
 DB = Depends(get_db, scope="function")
 READ = Depends(get_project_context)
 WRITE = Depends(require_action("agent.run"))
+
+
+@router.get("/{conversation_id}/events")
+def live_events(
+    conversation_id: uuid.UUID,
+    request: Request,
+    ctx: ProjectContext = READ,
+    db: Session = DB,
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+):
+    from app.modules.conversation.live import events
+
+    service.get(db, ctx, conversation_id)
+    return StreamingResponse(
+        events(request, credentials, ctx.project.id, conversation_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("")

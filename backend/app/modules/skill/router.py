@@ -222,6 +222,7 @@ def sync_preview(
         "id": str(skill.id),
         "revision": skill.revision,
         "archived": skill.archived,
+        "cover_image": skill.document.get("cover_image", ""),
         "category": skill.document.get("category", "general"),
         "required_tools": skill.document.get("required_tools", []),
     }

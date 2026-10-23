@@ -16,6 +16,7 @@ from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderE
 from app.models.generation import CreativeModel, GenerationJob, ModelChannel, ProviderConfig
 from app.models.identity import Project
 from app.modules.generation.model_catalog import Price
+from app.modules.harness.kernel_modalities import InputCapabilities
 
 PROTOCOLS = {
     "gpt_image": {"name": "OpenAI Images 兼容", "types": ["image"]},
@@ -84,6 +85,7 @@ class ModelIn(BaseModel):
     is_default: bool = False
     revision: int | None = None
     request_id: uuid.UUID | None = None
+    input_capabilities: InputCapabilities | None = None
     max_reference_images: int = Field(default=0, ge=0, le=16)
     max_reference_videos: int = Field(default=0, ge=0, le=10)
     mask_editing: bool = False
@@ -93,6 +95,8 @@ class ModelIn(BaseModel):
 
     @model_validator(mode="after")
     def supported(self):
+        if self.input_capabilities is not None and self.modality != "text":
+            raise ValueError("输入理解能力仅用于文字模型")
         if self.max_reference_videos and (self.protocol != "video_v1" or self.modality != "video"):
             raise ValueError("参考视频仅用于支持此能力的 Video v1 视频模型")
         if self.price.mode == "per_second" and self.modality != "video":
@@ -181,6 +185,7 @@ def public_model(row):
         "enabled": row.enabled,
         "is_default": bool(c.get("is_default")),
         "revision": c.get("revision", 1),
+        "input_capabilities": c.get("input_capabilities", InputCapabilities().model_dump()),
         "max_reference_images": c.get("max_reference_images", 0),
         "max_reference_videos": c.get("max_reference_videos", 0),
         "mask_editing": c.get("mask_editing", False),
@@ -309,6 +314,9 @@ def save_model(db, ctx, channel_id, data, model_id=None):
                 }
     old_name = row.config.get("display_name", row.provider_name)
     old_modality = row.config.get("modality")
+    same_model = (
+        row.config.get("model") == data.model and row.config.get("protocol") == data.protocol
+    )
     row.kind = "llm" if data.modality == "text" else "generation"
     row.enabled = data.enabled
     # Explicit allowlist: credentials never enter config, API output, logs or task snapshots.
@@ -319,6 +327,15 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         "model": data.model,
         "protocol": data.protocol,
         "modality": data.modality,
+        "input_capabilities": (
+            data.input_capabilities.model_dump(mode="json")
+            if data.input_capabilities
+            else row.config.get("input_capabilities", InputCapabilities().model_dump())
+            if same_model
+            else InputCapabilities().model_dump()
+        )
+        if data.modality == "text"
+        else None,
         "is_default": data.is_default,
         "revision": row.config.get("revision", 0) + 1,
         "max_reference_images": data.max_reference_images,
@@ -332,12 +349,16 @@ def save_model(db, ctx, channel_id, data, model_id=None):
     row.endpoint = None
     row.credentials_encrypted = None
     # Keep a simple, same-name default in sync; preserve intentionally named or multi-route groups.
-    for linked in db.scalars(select(CreativeModel).where(
-        CreativeModel.project_id == ctx.project.id
-    ).with_for_update()):
+    for linked in db.scalars(
+        select(CreativeModel).where(CreativeModel.project_id == ctx.project.id).with_for_update()
+    ):
         routes = linked.definition.get("routes", [])
-        if (len(routes) == 1 and str(routes[0].get("profile_id")) == str(row.id)
-                and linked.name == old_name and linked.modality == old_modality):
+        if (
+            len(routes) == 1
+            and str(routes[0].get("profile_id")) == str(row.id)
+            and linked.name == old_name
+            and linked.modality == old_modality
+        ):
             linked.name = data.name
             if linked.modality != data.modality:
                 # Changed capabilities invalidate the old group until it is configured again.
@@ -417,6 +438,8 @@ def resolved(db, row):
     c = row.config or {}
     if not c.get("channel_id"):
         return SimpleNamespace(
+            id=row.id,
+            provider_name=row.provider_name,
             endpoint=row.endpoint,
             credentials_encrypted=row.credentials_encrypted,
             config=c,
@@ -425,6 +448,8 @@ def resolved(db, row):
         )
     ch = channel(db, row.project_id, uuid.UUID(c["channel_id"]))
     return SimpleNamespace(
+        id=row.id,
+        provider_name=row.provider_name,
         endpoint=ch.endpoint,
         credentials_encrypted=ch.credentials_encrypted,
         config=c,
@@ -459,7 +484,7 @@ def selected_llm(db, project_id, name, user_id=None):
         try:
             model_id = uuid.UUID(name[len(catalog.PREFIX) :])
         except ValueError:
-            raise NotFound("文字模型不存在")
+            raise NotFound("文字模型不存在") from None
         model = catalog.get_model(db, project_id, model_id)
         if model.modality != "text" or not model.enabled:
             raise CapabilityUnsupported("请选择已启用的文字模型")

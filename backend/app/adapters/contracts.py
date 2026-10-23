@@ -20,6 +20,7 @@ class Capabilities(BaseModel):
     max_reference_images: int = 0
     max_reference_videos: int = 0
     reference_unavailable_reason: str | None = None
+    reference_transports: dict[str, list[Literal["multipart", "data_url", "public_url", "file_id"]]] = Field(default_factory=dict)
     max_video_seconds: float | None = None
     param_schema: dict = Field(default_factory=dict)
 

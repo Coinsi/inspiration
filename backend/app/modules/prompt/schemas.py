@@ -3,9 +3,11 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.core.cover_image import CoverImage
 
 
 class PromptIn(BaseModel):
+    cover_image: CoverImage = ""
     name: str
     positive: str = ""
     negative: str = ""
@@ -13,6 +15,7 @@ class PromptIn(BaseModel):
 
 
 class PromptUpdate(BaseModel):
+    cover_image: CoverImage | None = None
     name: str | None = None
     positive: str | None = None
     negative: str | None = None
@@ -20,6 +23,7 @@ class PromptUpdate(BaseModel):
 
 
 class PromptOut(BaseModel):
+    cover_image: str = ""
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     code: str
@@ -31,12 +35,14 @@ class PromptOut(BaseModel):
 
 
 class FragmentIn(BaseModel):
+    cover_image: CoverImage = ""
     category: str = "custom"  # quality/camera/lighting/style/custom
     name: str
     text: str = ""
 
 
 class FragmentUpdate(BaseModel):
+    cover_image: CoverImage | None = None
     name: str = Field(min_length=1, max_length=255)
     text: str = Field(min_length=1)
     category: str = Field(min_length=1, max_length=32)
@@ -44,6 +50,7 @@ class FragmentUpdate(BaseModel):
 
 
 class FragmentOut(BaseModel):
+    cover_image: str = ""
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     code: str

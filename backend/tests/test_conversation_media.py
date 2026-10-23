@@ -3,14 +3,22 @@
 # ruff: noqa: F811
 import uuid
 
+import pytest
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.models.agent import AgentRun
 from app.models.generation import GenerationJob
 from app.models.identity import Membership
 from app.modules.generation import jobs
 from tests.test_conversations import finish, message, setup
 from tests.test_media_workflow import post_ok, studio  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def legacy_media_adapter(monkeypatch):
+    """Verify legacy GenerationJob messages remain compatible after the default switches."""
+    monkeypatch.setattr(settings, "production_harness_enabled", False)
 
 
 def media_message(kind="image", **kwargs):

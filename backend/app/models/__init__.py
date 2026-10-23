@@ -3,6 +3,7 @@ from app.models.base import Base  # noqa: F401
 from app.models import (  # noqa: F401
     identity,
     engineering,
+    harness,
     website,
     auth,
     versioning,

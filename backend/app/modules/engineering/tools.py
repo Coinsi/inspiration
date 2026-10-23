@@ -79,10 +79,19 @@ def read(db, ctx, context, args):
 
 def propose(db, ctx, context, args):
     from app.modules.engineering import service
+    from app.modules.harness.read_tracking import merge
 
     scoped(context, args.work_id)
     return service.propose(
-        db, ctx, args.work_id, schemas.Propose.model_validate(args.model_dump(exclude={"work_id"}))
+        db,
+        ctx,
+        args.work_id,
+        schemas.Propose.model_validate(
+            {
+                **args.model_dump(exclude={"work_id"}),
+                "read_preconditions": merge(context, args.model_dump()["read_preconditions"]),
+            }
+        ),
     )
 
 
@@ -90,12 +99,42 @@ def preview(db, ctx, context, args):
     from app.modules.engineering import review
 
     scoped(context, args.work_id)
+    execution = context.input_context.get("execution", {})
+    execution_snapshot = None
+    if execution.get("run_id"):
+        from app.models.harness import ProductionRun
+
+        run = db.get(ProductionRun, uuid.UUID(str(execution["run_id"])))
+        key = "preview:" + str(execution.get("request_key"))
+        entry = (run.context.get("resource_reservations", {}) if run else {}).get(key)
+        if (
+            not run
+            or run.project_id != ctx.project.id
+            or run.created_by != ctx.user.id
+            or run.work_id != args.work_id
+            or not entry
+            or entry["reserved"].get("output_storage_bytes") != 512 * 1024 * 1024
+        ):
+            raise Forbidden("预览缺少有效的持久资源预留")
+        execution_snapshot = {
+            "harness_resource_limits": {
+                "output_bytes": entry["reserved"]["output_storage_bytes"],
+                "reservation_key": key,
+            },
+            "harness_origin": {
+                "run_id": str(run.id),
+                "task_id": execution.get("task_id"),
+                "request_key": execution.get("request_key"),
+                "tool": "engineering.preview",
+            },
+        }
     return review.preview(
         db,
         ctx,
         args.work_id,
         args.change_id,
         schemas.Preview.model_validate(args.model_dump(exclude={"work_id", "change_id"})),
+        execution_snapshot=execution_snapshot,
     )
 
 

@@ -8,6 +8,7 @@
 - 指令不明确时反问(needs_clarification),而不是乱猜;
 - 严格 JSON,便于服务层逐条校验后再 dry-run 预览。
 """
+
 import json
 import urllib.request
 
@@ -28,9 +29,20 @@ _SYSTEM = """你是「Inspiration」影视创作平台的 AI 编辑助手。用�
 {"reply":"","summary":"","needs_clarification":false,"ops":[]}"""
 
 
-def _chat(system: str, user: str | list[dict], base_url: str, api_key: str | None, model: str) -> str:
+def _chat(
+    system: str,
+    user: str | list[dict],
+    base_url: str,
+    api_key: str | None,
+    model: str,
+    *,
+    max_output_tokens=None,
+    capture_usage=False,
+):
     if not api_key:
-        raise ProviderError("未配置 LLM API Key,无法使用 AI 助手(请在项目设置中配置,或用 mock 引擎)")
+        raise ProviderError(
+            "未配置 LLM API Key,无法使用 AI 助手(请在项目设置中配置,或用 mock 引擎)"
+        )
     payload = {
         "model": model,
         "messages": [
@@ -39,16 +51,22 @@ def _chat(system: str, user: str | list[dict], base_url: str, api_key: str | Non
         ],
         "temperature": 0.4,
         "response_format": {"type": "json_object"},
+        "stream": True,
+        "stream_options": {"include_usage": True},
     }
+    if max_output_tokens is not None:
+        payload["max_completion_tokens"] = max_output_tokens
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
     )
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:  # noqa: S310
-            data = json.loads(resp.read())
-        return data["choices"][0]["message"]["content"]
+            from app.adapters.assist.streaming import read_completion
+
+            content, usage = read_completion(resp)
+        return (content, usage) if capture_usage else content
     except Exception as exc:  # noqa: BLE001
         raise ProviderError(f"云 LLM 调用失败:{exc}") from exc
 
@@ -57,15 +75,15 @@ def _chat(system: str, user: str | list[dict], base_url: str, api_key: str | Non
 class CloudLLMAssist(AssistEngine):
     name = "cloud_llm"
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None, **_):
+    def __init__(
+        self, base_url: str | None = None, api_key: str | None = None, model: str | None = None, **_
+    ):
         self.base_url = base_url or settings.llm_base_url
         self.api_key = api_key if api_key is not None else settings.llm_api_key
         self.model = model or settings.llm_model
 
     def propose(self, *, object_desc, ops_help, state, history, instruction, **_) -> AssistProposal:
-        hist = "\n".join(
-            f"{m.get('role')}: {m.get('content', '')}" for m in (history or [])[-8:]
-        )
+        hist = "\n".join(f"{m.get('role')}: {m.get('content', '')}" for m in (history or [])[-8:])
         user = (
             f"【对象说明】\n{object_desc}\n\n"
             f"【支持的操作(ops)】\n{ops_help}\n\n"
@@ -77,7 +95,9 @@ class CloudLLMAssist(AssistEngine):
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return AssistProposal(reply="（助手返回的内容无法解析,请重试或换种说法）", needs_clarification=True)
+            return AssistProposal(
+                reply="（助手返回的内容无法解析,请重试或换种说法）", needs_clarification=True
+            )
         ops = data.get("ops") or []
         if not isinstance(ops, list):
             ops = []

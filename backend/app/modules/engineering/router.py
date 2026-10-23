@@ -198,6 +198,13 @@ def change(work_id: uuid.UUID, change_id: uuid.UUID, ctx: ProjectContext = CTX, 
     return review.details(db, ctx, row)
 
 
+@router.post("/changes/{change_id}/rebase")
+def rebase(
+    work_id: uuid.UUID, change_id: uuid.UUID, data: schemas.Rebase, ctx: ProjectContext = CTX, db=DB
+):
+    return service.rebase(db, ctx, work_id, change_id, data)
+
+
 @router.post("/changes/{change_id}/accept")
 def accept(
     work_id: uuid.UUID, change_id: uuid.UUID, data: schemas.Accept, ctx: ProjectContext = CTX, db=DB

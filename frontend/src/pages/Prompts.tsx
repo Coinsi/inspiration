@@ -1,3 +1,4 @@
+import { EffectCoverEditor } from "@/components/EffectCover";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -21,6 +22,8 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
       null,
     ),
     [kind, setKind] = useState("prompt");
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [cover, setCover] = useState("");
   const [name, setName] = useState(""),
     [text, setText] = useState(""),
     [negative, setNegative] = useState(""),
@@ -31,6 +34,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
     base = `/projects/${projectId}`;
   const [reloading, setReloading] = useState(false);
   const dirty =
+    cover !== (editing && editing !== "new" ? editing.cover_image ?? "" : "") ||
     name !== (editing && editing !== "new" ? editing.name : "") ||
     text !==
       (editing && editing !== "new"
@@ -54,23 +58,27 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
         ? "text" in editing
           ? api.patch(`${base}/prompt-fragments/${editing.id}`, {
               name: name.trim(),
+              cover_image: cover,
               text,
               category,
               expected_updated_at: editing.updated_at,
             })
           : api.patch(`${base}/prompts/${editing.id}`, {
               name: name.trim(),
+              cover_image: cover,
               positive: text,
               negative,
             })
         : kind === "prompt"
           ? api.post(`${base}/prompts`, {
               name: name.trim(),
+              cover_image: cover,
               positive: text,
               negative,
             })
           : api.post(`${base}/prompt-fragments`, {
               name: name.trim(),
+              cover_image: cover,
               text,
               category,
             }),
@@ -86,6 +94,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
   function open(p: Prompt | Fragment | "new") {
     save.reset();
     setEditing(p);
+    setCover(p === "new" ? "" : p.cover_image ?? "");
     setKind(p !== "new" && "text" in p ? "fragment" : "prompt");
     setCategory(p !== "new" && "text" in p ? p.category : "quality");
     setName(p === "new" ? "" : p.name);
@@ -122,7 +131,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
     onError: (e) => toast.push(e.message, "error"),
   });
   async function close() {
-    if (save.isPending || reloading) return;
+    if (save.isPending || reloading || coverBusy) return;
     if (
       dirty &&
       !(await confirm({ message: "放弃这次尚未保存的提示词修改？" }))
@@ -168,12 +177,12 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (name.trim() && text.trim() && !save.isPending && !reloading)
+            if (name.trim() && text.trim() && !save.isPending && !reloading && !coverBusy)
               save.mutate();
           }}
         >
           <fieldset
-            disabled={save.isPending || reloading}
+            disabled={save.isPending || reloading || coverBusy}
             className="space-y-4"
           >
             {editing === "new" && (
@@ -229,6 +238,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
                 placeholder="记录画面、光线、镜头或风格描述…"
               />
             </label>
+            <EffectCoverEditor value={cover} onChange={setCover} onBusyChange={setCoverBusy} />
             {kind === "prompt" && (
               <details open={!!negative || undefined}>
                 <summary className="text-sm text-muted-foreground cursor-pointer">
@@ -267,7 +277,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
             <Button
               type="button"
               variant="ghost"
-              disabled={save.isPending || reloading}
+              disabled={save.isPending || reloading || coverBusy}
               onClick={() => void close()}
             >
               取消
@@ -275,7 +285,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
             <Button
               type="submit"
               disabled={
-                !name.trim() || !text.trim() || save.isPending || reloading
+                !name.trim() || !text.trim() || save.isPending || reloading || coverBusy
               }
             >
               {save.isPending ? "正在保存…" : "保存提示词"}

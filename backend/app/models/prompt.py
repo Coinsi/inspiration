@@ -14,6 +14,7 @@ class Prompt(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    cover_image: Mapped[str] = mapped_column(Text, default="", server_default="")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     positive: Mapped[str] = mapped_column(Text, default="")
     negative: Mapped[str] = mapped_column(Text, default="")
@@ -29,6 +30,7 @@ class PromptFragment(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
     category: Mapped[str] = mapped_column(String(32), default="custom")  # quality/camera/lighting/style
+    cover_image: Mapped[str] = mapped_column(Text, default="", server_default="")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     text: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))

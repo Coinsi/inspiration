@@ -19,6 +19,7 @@ from app.models.generation import GenerationJob, ProviderConfig
 from app.models.identity import User
 from app.models.personal_model import PersonalModelService
 from app.modules.generation import presets
+from app.modules.harness.kernel_modalities import InputCapabilities
 
 PREFIX = "personal_"
 router = APIRouter(tags=["personal-model-services"])
@@ -60,6 +61,9 @@ def public(row):
                 "name": spec["name"],
                 "modality": spec["modality"],
                 "verification": row.verification.get(key, {"status": "unverified"}),
+                "input_capabilities": spec.get(
+                    "input_capabilities", InputCapabilities().model_dump()
+                ),
             }
             for key, spec in row.models.items()
             if spec.get("enabled", True)
@@ -140,6 +144,10 @@ def save(preset_id: str, data: Save, user=USER, db: Session = DB):
             k: {**copy.deepcopy(spec), "enabled": k in data.models}
             for k, spec in preset["models"].items()
         }
+    for key, spec in updated_models.items():
+        old = (row.models or {}).get(key, {})
+        if spec.get("modality") == "text" and old.get("input_capabilities"):
+            spec["input_capabilities"] = copy.deepcopy(old["input_capabilities"])
     if row.revision and not token and updated_models == row.models:
         return public(row)
     row.models = updated_models
@@ -147,6 +155,40 @@ def save(preset_id: str, data: Save, user=USER, db: Session = DB):
     row.enabled = True
     row.revision += 1
     db.flush()
+    return public(row)
+
+
+class SaveInputCapabilities(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    input_capabilities: InputCapabilities
+
+
+@router.patch("/me/model-services/{service_id}/models/{model_key}/input-capabilities")
+def save_input_capabilities(
+    service_id: uuid.UUID, model_key: str, data: SaveInputCapabilities, user=USER, db: Session = DB
+):
+    row = owned(db, user.id, service_id, lock=True)
+    if row.revision != data.revision:
+        raise Conflict("服务配置已变化，请重新读取后保存")
+    spec = row.models.get(model_key)
+    if not row.enabled or not spec or not spec.get("enabled", True):
+        raise NotFound("个人模型已不存在或停用")
+    if spec.get("modality") != "text":
+        raise CapabilityUnsupported("输入理解能力仅用于文字模型")
+    row.models = {
+        **row.models,
+        model_key: {**spec, "input_capabilities": data.input_capabilities.model_dump(mode="json")},
+    }
+    row.revision += 1
+    db.flush()
+    audit.record(
+        db,
+        action="model.input_capabilities.update",
+        user_id=user.id,
+        target_id=row.id,
+        detail={"model": model_key, "revision": row.revision},
+    )
     return public(row)
 
 
@@ -353,11 +395,20 @@ class PersonalProvider:
 
     def phase(self, value, external_job_id=None):
         if self.job_id:
-            job = self.db.get(GenerationJob, self.job_id)
+            job = self.db.scalar(
+                select(GenerationJob)
+                .where(GenerationJob.id == self.job_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            from app.modules.engineering.delivery import fence
+
+            fence(self.db, self.job_id)
             job.routing_state = {
                 **(job.routing_state or {}),
                 "phase": value,
                 "provider_name": self.name,
+                "receipt_poll_tracking": True,
                 **({"external_job_id": external_job_id} if external_job_id else {}),
             }
             if external_job_id:
@@ -369,6 +420,10 @@ class PersonalProvider:
 
         if self.job_id:
             job = self.db.get(GenerationJob, self.job_id)
+            if (job.routing_state or {}).get("harness_receipt_recovery"):
+                from app.modules.harness.recovery_tools import validate_resume_guard
+
+                validate_resume_guard(self.db, job)
             resume = (job.routing_state or {}).get("resume")
             if resume:
                 self.phase("accepted", resume["external_job_id"])
@@ -386,7 +441,12 @@ class PersonalProvider:
         return handle
 
     def poll(self, handle):
-        return self.adapter.poll(handle)
+        result = self.adapter.poll(handle)
+        if result.status == "failed":
+            self.phase("upstream_failed")
+        elif result.status == "succeeded":
+            self.phase("generated")
+        return result
 
     def cancel(self, handle):
         return self.adapter.cancel(handle)

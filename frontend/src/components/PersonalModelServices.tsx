@@ -16,6 +16,11 @@ import { Input } from "./ui/input";
 import { EditorFrame } from "./ModelEditorFrame";
 import { ModelBrandIcon } from "./workbench/ModelBrandIcon";
 import "./personal-model-services.css";
+import {
+  ModelInputCapabilitiesFields,
+  textInputCapabilities,
+  type ModelInputCapabilities,
+} from "./ModelInputCapabilities";
 
 type Verification = { status: string; message?: string };
 type Service = {
@@ -31,6 +36,7 @@ type Service = {
     name: string;
     modality: string;
     verification: Verification;
+    input_capabilities?: ModelInputCapabilities;
   }[];
 };
 type Preset = {
@@ -91,6 +97,36 @@ export function PersonalModelServices({ projectId }: { projectId?: string }) {
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const [revision, setRevision] = useState<number | undefined>();
+  const [inputEditing, setInputEditing] = useState<{
+    service: Service;
+    model: Service["models"][number];
+  } | null>(null);
+  const [inputValue, setInputValue] = useState<ModelInputCapabilities>(
+    textInputCapabilities,
+  );
+  const [inputDirty, setInputDirty] = useState(false);
+  const [inputError, setInputError] = useState("");
+  async function saveInputs() {
+    if (!inputEditing) return;
+    setBusy(true);
+    setInputError("");
+    try {
+      await api.patch(
+        `/me/model-services/${inputEditing.service.id}/models/${encodeURIComponent(inputEditing.model.id)}/input-capabilities`,
+        {
+          revision: inputEditing.service.revision,
+          input_capabilities: inputValue,
+        },
+      );
+      setInputEditing(null);
+      await refresh();
+      setNotice("输入理解能力已保存；进行中的任务需暂停并确认新配置后继续。");
+    } catch (error) {
+      setInputError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   function edit(preset: Preset) {
     const service = services.data?.find((s) => s.preset_id === preset.id);
     setRevision(service?.revision);
@@ -276,6 +312,24 @@ export function PersonalModelServices({ projectId }: { projectId?: string }) {
                       {model.verification.message && (
                         <p>{model.verification.message}</p>
                       )}
+                      {model.modality === "text" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => {
+                            setInputEditing({ service, model });
+                            setInputValue(
+                              model.input_capabilities || textInputCapabilities,
+                            );
+                            setInputDirty(false);
+                            setInputError("");
+                          }}
+                        >
+                          <Settings2 size={14} />
+                          输入理解能力
+                        </Button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -352,6 +406,39 @@ export function PersonalModelServices({ projectId }: { projectId?: string }) {
       <p className="personal-services-footnote">
         模型目录表示已适配的能力，不代表账号已开通。验证状态来自真实生成；保存配置不会发起付费请求。
       </p>
+      {inputEditing && (
+        <EditorFrame
+          title={`${inputEditing.model.name} · 输入能力`}
+          close={() => setInputEditing(null)}
+          dirty={inputDirty}
+          busy={busy}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveInputs();
+            }}
+          >
+            <fieldset disabled={busy} className="grid gap-5 pb-6">
+              <ModelInputCapabilitiesFields
+                value={inputValue}
+                onChange={(value) => {
+                  setInputValue(value);
+                  setInputDirty(true);
+                }}
+              />
+              {inputError && (
+                <p role="alert" className="text-sm text-danger">
+                  {inputError}
+                </p>
+              )}
+              <Button type="submit" disabled={busy} className="mx-6">
+                {busy ? "正在保存…" : "保存输入能力"}
+              </Button>
+            </fieldset>
+          </form>
+        </EditorFrame>
+      )}
       {editing && (
         <EditorFrame
           title={`连接 ${editing.name}`}

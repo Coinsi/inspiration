@@ -1,3 +1,4 @@
+import { EffectCover } from "./EffectCover";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Copy, Type } from "lucide-react";
@@ -19,6 +20,7 @@ type Entry = {
   name: string;
   text: string;
   negative: string;
+  cover_image?: string;
   category: string;
   prompt?: Prompt;
   fragment?: Fragment;
@@ -60,6 +62,7 @@ export function PromptLibrary({
       negative: p.negative,
       category: "template",
       prompt: p,
+      cover_image: p.cover_image,
     })),
     ...(fragments.data ?? []).map((f) => ({
       id: f.id,
@@ -69,6 +72,7 @@ export function PromptLibrary({
       negative: "",
       category: f.category,
       fragment: f,
+      cover_image: f.cover_image,
     })),
   ];
   const selected = entries.find((e) => e.id === selectedId);
@@ -97,6 +101,7 @@ export function PromptLibrary({
           </p>
           <h3 className="text-xl font-semibold">{selected.name}</h3>
         </div>
+        {selected.cover_image && <EffectCover src={selected.cover_image} name={selected.name} detail />}
         <div className="rounded-xl bg-elevated p-5 text-sm leading-7 whitespace-pre-wrap break-words max-h-[45vh] overflow-auto">
           {selected.text || "尚未填写内容"}
         </div>
@@ -206,8 +211,10 @@ export function PromptLibrary({
                 key={e.id}
                 aria-label={`查看提示词 ${e.name}`}
                 onClick={() => setSelectedId(e.id)}
-                className="rounded-xl border bg-card p-5 text-left hover:border-primary/50 transition-colors min-w-0"
+                className="prompt-cover-card"
               >
+                <EffectCover src={e.cover_image} name={e.name} />
+                <div className="prompt-cover-body">
                 <div className="flex items-center justify-between text-xs text-muted-foreground mb-5">
                   <Type size={18} />
                   <span>{categories[e.category] ?? e.category}</span>
@@ -219,6 +226,7 @@ export function PromptLibrary({
                 <p className="text-xs text-muted-foreground mt-5">
                   查看与使用 →
                 </p>
+                </div>
               </button>
             ))}
           </div>

@@ -1,5 +1,6 @@
 import { ComposerPrimitive, ThreadPrimitive, MessagePrimitive } from "@assistant-ui/react";
 import { AssistantConversation } from "./AssistantConversation";
+import { useConversationStream } from "./useConversationStream";
 import type { ComposerReference } from "./ComposerReferences";
 import { GenerativeMessage, type UIBlock } from "./GenerativeMessage";
 import { SelectField } from "@/components/ui/select-field";
@@ -64,6 +65,7 @@ import {
 import type { SkillUse } from "@/lib/skills";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ConversationTaskState } from "./ConversationTaskState";
+import { ProductionTask } from "./ProductionTask";
 import { ConversationListItem } from "./ConversationListItem";
 import "./composer.css";
 import "./conversations.css";
@@ -90,6 +92,7 @@ type Message = {
     skills?: SkillUse[];
     outputs?: MediaOutput[];
     media?: { request_type: string };
+    production?: { run_id: string; is_current: boolean; revision: number; status: string };
   };
   progress: { id: string; tool: string; message: string; status: string }[];
 };
@@ -227,6 +230,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     refetchInterval: (q) =>
       q.state.data?.messages.some((m) => active.has(m.status)) ? 2000 : false,
   });
+  useConversationStream(
+    projectId,
+    detail.data?.messages.some((m) => active.has(m.status)) ? selected : null,
+  );
   const providers = useQuery({
     queryKey: ["providers", projectId],
     queryFn: () => api.get<ProviderConfig[]>(`${root}/providers`),
@@ -286,7 +293,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     ...(detail.data?.messages || []),
   ].filter((m, i, a) => a.findIndex((x) => x.id === m.id) === i);
   const latest = messages[messages.length - 1];
-  const blocked = !!latest && active.has(latest.status);
+  const blocked = !!latest && active.has(latest.status) && latest.execution_kind !== "production";
   const select = (id: string) => {
     const next = new URLSearchParams(params);
     if (id) next.set("conversation", id);
@@ -895,7 +902,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                       outputs={m.context.outputs}
                       returnTo={returnLink(m)}
                       taskHref={
-                        m.task_id
+                        m.task_id && m.execution_kind !== "production"
                           ? `${root}/tasks?kind=generation&task=${m.task_id}&return=${encodeURIComponent(returnLink(m))}`
                           : undefined
                       }
@@ -904,7 +911,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                       reuse={useOutput}
                     />
                   )}
-                  <ConversationTaskState
+                  {m.execution_kind === "production" && m.task_id && m.context.production?.is_current !== false ? (
+                    <ProductionTask projectId={projectId} runId={m.task_id} onUpdated={() => void refresh()} />
+                  ) : m.execution_kind !== "production" ? <ConversationTaskState
                     status={m.status}
                     kind={
                       m.execution_kind === "generation"
@@ -922,8 +931,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                     }
                     retry={() => retryTurn.mutate(m)}
                     edit={() => editRetry.mutate(m)}
-                  />
-                  {!(
+                  /> : null}
+                  {m.execution_kind !== "production" && !(
                     m.execution_kind === "generation" &&
                     m.status === "completed" &&
                     m.context.outputs?.length

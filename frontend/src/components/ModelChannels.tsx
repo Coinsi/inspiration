@@ -23,6 +23,11 @@ import { CreativeModels, PriceFields, type ModelPrice } from "./CreativeModels";
 import { ConnectModelService } from "./ConnectModelService";
 import { DefaultModels } from "./DefaultModels";
 import "./model-settings.css";
+import {
+  ModelInputCapabilitiesFields,
+  textInputCapabilities,
+  type ModelInputCapabilities,
+} from "./ModelInputCapabilities";
 
 type Model = {
   id: string;
@@ -40,6 +45,7 @@ type Model = {
   max_video_seconds: number;
   parameters: Record<string, (string | number)[]>;
   price: ModelPrice;
+  input_capabilities?: ModelInputCapabilities;
 };
 type Channel = {
   id: string;
@@ -703,6 +709,9 @@ function ModelEditor({
           : protocol === "minimax_video"
             ? ["duration", "resolution"]
             : ["duration", "aspect_ratio", "resolution"];
+  const [inputCapabilities, setInputCapabilities] = useState(
+    model?.input_capabilities || textInputCapabilities,
+  );
   const save = useMutation({
     mutationFn: () => {
       const params = Object.fromEntries(
@@ -726,10 +735,14 @@ function ModelEditor({
         revision: model?.revision,
         request_id: requestId,
         max_reference_images: modality === "text" ? 0 : refs,
-        max_reference_videos: modality === "video" && protocol === "video_v1" ? videoRefs : 0,
+        max_reference_videos:
+          modality === "video" && protocol === "video_v1" ? videoRefs : 0,
         mask_editing: protocol === "gpt_image" && mask,
         max_video_seconds: seconds,
         parameters: params,
+        ...(modality === "text"
+          ? { input_capabilities: inputCapabilities }
+          : {}),
         price:
           modality === "text" ? { mode: "unconfigured", amount: "0" } : price,
       };
@@ -782,6 +795,7 @@ function ModelEditor({
                 onChange={(e) => {
                   const value = e.target.value;
                   setCode(value);
+                  setInputCapabilities(textInputCapabilities);
                   if (!model) {
                     if (!name || name === code.slice(0, 100))
                       setName(value.slice(0, 100));
@@ -811,6 +825,7 @@ function ModelEditor({
             ]}
             onChange={(value) => {
               setModality(value);
+              setInputCapabilities(textInputCapabilities);
               const hint = modelSuggestion(code);
               setProtocol(
                 hint.modality === value
@@ -865,11 +880,23 @@ function ModelEditor({
           )}
           {protocol === "video_v1" && (
             <p className="model-notice">
-              使用 video.v1 JSON 格式创建视频。通过公网 HTTPS 网站提交时，
-              系统会自动生成临时素材链接，无需单独填写域名。
+              使用 video.v1 JSON 格式创建视频，参考素材需提供临时公网链接。
+              公网 HTTPS 部署可自动生成；本地使用需由管理员配置可访问当前素材的 HTTPS 入口。
               请按渠道能力设置图片和视频参考上限，可混合引用；不支持首尾帧角色。
               请按服务商文档填写时长选项，提示词中的秒数不能代替时长设置。
             </p>
+          )}
+          {modality === "text" && protocol && (
+            <details className="model-optional-settings">
+              <summary>输入理解能力 · 图片与音频</summary>
+              <ModelInputCapabilitiesFields
+                value={inputCapabilities}
+                onChange={(value) => {
+                  setInputCapabilities(value);
+                  setDirty(true);
+                }}
+              />
+            </details>
           )}
           {modality && protocol && modality !== "text" && (
             <details className="model-optional-settings">
@@ -905,9 +932,19 @@ function ModelEditor({
                   <small>0 表示不使用参考图；只开启服务实际支持的能力。</small>
                 </label>
                 {protocol === "video_v1" && modality === "video" && (
-                  <label>最多参考视频数
-                    <Input type="number" min={0} max={10} value={videoRefs} onChange={e => setVideoRefs(Number(e.target.value))} />
-                    <small>0 表示不接收视频；仅对渠道明确支持视频参考的模型启用，可与参考图片混用。</small>
+                  <label>
+                    最多参考视频数
+                    <Input
+                      type="number"
+                      min={0}
+                      max={10}
+                      value={videoRefs}
+                      onChange={(e) => setVideoRefs(Number(e.target.value))}
+                    />
+                    <small>
+                      0
+                      表示不接收视频；仅对渠道明确支持视频参考的模型启用，可与参考图片混用。
+                    </small>
                   </label>
                 )}
                 {protocol === "gpt_image" && refs > 0 && (

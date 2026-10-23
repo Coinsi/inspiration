@@ -28,7 +28,11 @@ class SourceMetadata(BaseModel):
     origin_id: str = Field(default="", max_length=80)
 
 
+from app.core.cover_image import CoverImage
+
+
 class SkillIn(BaseModel):
+    cover_image: CoverImage = ""
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(min_length=1, max_length=1000)

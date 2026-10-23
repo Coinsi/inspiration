@@ -1,3 +1,4 @@
+import hashlib
 import json
 import math
 import urllib.request
@@ -68,7 +69,76 @@ def out(r, detail=True):
     return data
 
 
-def start(db, ctx, data):
+DEFERRED_MODEL_KEY = "__pending_health_check__"
+
+
+def resolve_model_key():
+    key = inference("/health").get("model_key")
+    if not isinstance(key, str) or not key or len(key) > 255 or key == DEFERRED_MODEL_KEY:
+        raise ProviderError("语音识别服务协议不兼容")
+    return key
+
+
+def endpoint_digest():
+    # Never store endpoint credentials or tokens in a public task receipt.
+    return hashlib.sha256(settings.transcriber_url.rstrip("/").encode()).hexdigest()
+
+
+def execution_snapshot(db, version):
+    from app.models.storage import Blob
+
+    if settings.harness_transcription_cost_mode != "self_hosted" or not settings.transcriber_url:
+        raise CapabilityUnsupported("转写服务执行策略未确认为自托管")
+    blob = db.get(Blob, version.original_hash)
+    if not blob or blob.size_bytes > 256 * 1024 * 1024 or not 0 < version.duration_ms <= 1_800_000:
+        raise CapabilityUnsupported("转写固定输入超过执行上限")
+    return {
+        "version": 1,
+        "source_blob_hash": blob.hash,
+        "source_bytes": blob.size_bytes,
+        "duration_ms": version.duration_ms,
+        "endpoint_digest": endpoint_digest(),
+        "cost_mode": "self_hosted",
+    }
+
+
+def validate_execution_snapshot(db, run):
+    snapshot = run.execution_snapshot or {}
+    if not snapshot:
+        return  # Existing API records retain their original domain behavior.
+    from app.core.deps import get_project_context
+    from app.core.permissions import require
+    from app.models.identity import User
+    from app.models.storage import Blob
+
+    if snapshot.get("version") != 1 or snapshot.get("cost_mode") != "self_hosted":
+        raise ValueError("转写执行契约变化，请检查既有任务")
+    if (
+        settings.harness_transcription_cost_mode != "self_hosted"
+        or snapshot["endpoint_digest"] != endpoint_digest()
+    ):
+        raise ValueError("转写服务地址或费用策略已变化，请确认后续接原任务")
+    # Re-read the grant and fixed source at every checkpoint, including after
+    # an inference returns. Revoked membership cannot publish its late result.
+    db.expire_all()
+    user = db.get(User, run.created_by)
+    if not user or not user.is_active:
+        raise ValueError("转写创建者已停用，请检查任务权限")
+    ctx = get_project_context(project_id=run.project_id, user=user, db=db)
+    require(ctx.role, "asset.edit")
+    _, version = library.version(db, run.project_id, run.version_id)
+    blob = db.get(Blob, snapshot["source_blob_hash"])
+    if (
+        version.original_hash != snapshot["source_blob_hash"]
+        or version.status != "ready"
+        or version.duration_ms != snapshot["duration_ms"]
+        or not blob
+        or blob.size_bytes != snapshot["source_bytes"]
+    ):
+        raise ValueError("转写源素材与固定版本不符，请检查原任务")
+
+
+def start(db, ctx, data, *, defer_health=False):
     _, v = library.version(db, ctx.project.id, data.version_id, lock=True)
     if v.media_type == "image" or not v.duration_ms:
         raise Conflict("请选择包含音轨的音视频素材")
@@ -82,10 +152,10 @@ def start(db, ctx, data):
     )
     if r:
         return out(r)
-    health = inference("/health")
-    key = health.get("model_key")
-    if not key or len(key) > 255:
-        raise ProviderError("语音识别服务协议不兼容")
+    # Harness callers persist the intent first; worker health/model resolution
+    # happens after the caller releases its production/media locks. Legacy API
+    # calls preserve synchronous health checks and completed-result reuse.
+    key = DEFERRED_MODEL_KEY if defer_health else resolve_model_key()
     if not data.new_run:
         old = db.scalar(
             select(TranscriptionRun)
@@ -104,6 +174,7 @@ def start(db, ctx, data):
         project_id=ctx.project.id,
         version_id=v.id,
         model_key=key,
+        execution_snapshot=execution_snapshot(db, v) if defer_health else {},
         language=data.language,
         total=math.ceil(v.duration_ms / 30000),
         created_by=ctx.user.id,

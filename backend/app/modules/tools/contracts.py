@@ -18,3 +18,5 @@ class ToolContext:
     scope: list[dict] = field(default_factory=list)
     skill_snapshot: list[dict] = field(default_factory=list)
     work_id: uuid.UUID | None = None
+    # Optional presentation/selection metadata, never an additional permission grant.
+    input_context: dict = field(default_factory=dict)

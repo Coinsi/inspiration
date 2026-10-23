@@ -16,6 +16,7 @@ class TranscriptionRun(Base, TimestampMixin):
     version_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("media_version.id"), index=True)
     status: Mapped[str] = mapped_column(String(16), default="queued")
     model_key: Mapped[str] = mapped_column(String(255))
+    execution_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     language: Mapped[str | None] = mapped_column(String(8))
     total: Mapped[int] = mapped_column(Integer, default=0)
     completed: Mapped[int] = mapped_column(Integer, default=0)

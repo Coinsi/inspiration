@@ -1,3 +1,4 @@
+import { EffectCover, EffectCoverEditor } from "@/components/EffectCover";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { SearchField } from "@/components/ui/search-field";
 import { useEffect, useRef, useState } from "react";
@@ -117,6 +118,7 @@ function SkillWorkspace({
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   const busyRef = useRef(false);
+  const [coverBusy, setCoverBusy] = useState(false);
   const dirty =
     !!draft && JSON.stringify(draft) !== JSON.stringify(baseline ?? blank);
   const editorTabs = [
@@ -220,7 +222,7 @@ function SkillWorkspace({
     }
   }
   async function save() {
-    if (!draft) return;
+    if (!draft || coverBusy) return;
     const { id, revision, archived: _, ...body } = draft;
     const result = id
       ? await api.put<Skill>(`${base}/skills/${id}`, { ...body, revision })
@@ -287,7 +289,7 @@ function SkillWorkspace({
     setOffset(0);
   }
   async function closeEditor() {
-    if (busyRef.current) return;
+    if (busyRef.current || coverBusy) return;
     if (
       dirty &&
       !(await confirm({
@@ -561,10 +563,11 @@ function SkillWorkspace({
                   )}{" "}
                   {g.items.map((s) => (
                     <article
-                      className="knowledge-card"
+                      className="knowledge-card knowledge-cover-card"
                       data-skill-id={s.id}
                       key={s.id ?? s.name}
                     >
+                      <button className="knowledge-cover-button" disabled={busy} onClick={() => void openDetail(s)} aria-label={`预览技能 ${s.name}`}><EffectCover src={s.cover_image} name={s.name} /></button>
                       <div className="knowledge-card-top">
                         <span className={`knowledge-tile tone-${g.key}`}>
                           <Icon size={23} />
@@ -614,6 +617,7 @@ function SkillWorkspace({
                             disabled={busy || !canEdit}
                             onClick={() =>
                               void choose({
+                                cover_image: s.cover_image,
                                 name: s.name,
                                 description: s.description,
                                 instructions: s.instructions,
@@ -772,7 +776,7 @@ function SkillWorkspace({
       <SkillOverlay
         open={!!draft}
         className="knowledge-editor"
-        dismissDisabled={busy}
+        dismissDisabled={busy || coverBusy}
         title={draft?.id ? `编辑技能 · 版本 ${draft.revision}` : "创建技能"}
         subtitle="把常用的创作方法，整理成可复用的技能"
         onClose={() => void closeEditor()}
@@ -901,6 +905,7 @@ function SkillWorkspace({
                     onChange={(e) => edit({ name: e.target.value })}
                   />
                 </label>
+                <EffectCoverEditor value={draft.cover_image ?? ""} onChange={(cover_image) => edit({ cover_image })} onBusyChange={setCoverBusy} />
                 <label className="block text-xs space-y-2">
                   <span>适用任务</span>
                   <textarea
@@ -1148,6 +1153,7 @@ function SkillWorkspace({
                 <Button
                   disabled={
                     busy ||
+                    coverBusy ||
                     !dirty ||
                     !draft.name.trim() ||
                     !draft.description.trim() ||

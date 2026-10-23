@@ -1,6 +1,7 @@
 """应用配置:从环境变量 / .env 读取。"""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,11 +45,14 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "inspiration"
     minio_secure: bool = False
+    # Optional public HTTPS ingress to this API, independent of browser/worker origin.
+    generation_reference_public_base_url: str = ""
     library_staging_dir: str = "./_library_staging"
     library_max_upload_bytes: int = 10 * 1024 * 1024 * 1024
     library_staging_max_bytes: int = 100 * 1024 * 1024 * 1024
     library_staging_reserve_bytes: int = 2 * 1024 * 1024 * 1024
     agent_worker_enabled: bool = True
+    production_harness_enabled: bool = True
     canvas_worker_enabled: bool = True
     library_worker_enabled: bool = True
     library_indexer_url: str = "http://127.0.0.1:8011"
@@ -70,6 +74,8 @@ class Settings(BaseSettings):
     transcription_worker_enabled: bool = True
     transcriber_url: str = ""
     transcriber_token: str | None = None
+    # Harness must not assume an arbitrary ASR endpoint is free.
+    harness_transcription_cost_mode: Literal["unknown", "self_hosted"] = "unknown"
 
     # 密钥加密
     credentials_fernet_key: str | None = None

@@ -429,6 +429,10 @@ def aggregate(db, row):
         if c.reference_unavailable_reason:
             caps.reference_unavailable_reason = c.reference_unavailable_reason
         caps.features |= c.features
+        for kind, transports in c.reference_transports.items():
+            caps.reference_transports[kind] = sorted(
+                set(caps.reference_transports.get(kind, [])) | set(transports)
+            )
         caps.max_reference_images = max(caps.max_reference_images, c.max_reference_images)
         caps.max_reference_videos = max(caps.max_reference_videos, c.max_reference_videos)
         caps.max_video_seconds = max(caps.max_video_seconds or 0, c.max_video_seconds or 0)

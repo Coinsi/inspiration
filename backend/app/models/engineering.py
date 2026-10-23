@@ -34,6 +34,11 @@ class EngineeringChange(Base, TimestampMixin):
     committed_revision: Mapped[int | None] = mapped_column(Integer)
     timeline_update: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     preview_job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generation_job.id"))
+    canonical_commands: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    read_preconditions: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    write_scopes: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    rebased_from_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("engineering_change.id"))
     __table_args__ = (UniqueConstraint("work_id", "created_by", "request_key"),)
 
 

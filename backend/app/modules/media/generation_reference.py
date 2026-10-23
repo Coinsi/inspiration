@@ -51,7 +51,7 @@ class ReferenceOriginMiddleware:
 
 
 def public_base():
-    value = _origin.get().strip().rstrip("/")
+    value = (settings.generation_reference_public_base_url or _origin.get()).strip().rstrip("/")
     try:
         parsed = urlsplit(value)
         host = parsed.hostname or ""

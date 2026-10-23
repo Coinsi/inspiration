@@ -5,6 +5,7 @@ export type SkillFile = {
 };
 export type SkillUse = { id: string; revision: number; name?: string };
 export type Skill = {
+  cover_image?: string;
   id?: string;
   revision?: number;
   archived?: boolean;

@@ -17,7 +17,7 @@ def create_prompt(db: Session, ctx: ProjectContext, data: schemas.PromptIn) -> P
     p = Prompt(
         project_id=ctx.project.id, code=coding.next_code(db, ctx.project, "prompt"),
         name=data.name, positive=data.positive, negative=data.negative,
-        tags=data.tags, created_by=ctx.user.id,
+        cover_image=data.cover_image, tags=data.tags, created_by=ctx.user.id,
     )
     db.add(p)
     db.flush()
@@ -28,7 +28,7 @@ def update_prompt(db: Session, ctx: ProjectContext, prompt_id: uuid.UUID, data: 
     p = db.get(Prompt, prompt_id)
     if p is None or p.project_id != ctx.project.id or p.deleted_at is not None:
         raise NotFound("提示词不存在")
-    for f in ("name", "positive", "negative", "tags"):
+    for f in ("name", "positive", "negative", "tags", "cover_image"):
         v = getattr(data, f)
         if v is not None:
             setattr(p, f, v)
@@ -48,7 +48,7 @@ def list_prompts(db: Session, project_id: uuid.UUID) -> list[Prompt]:
 def create_fragment(db: Session, ctx: ProjectContext, data: schemas.FragmentIn) -> PromptFragment:
     f = PromptFragment(
         project_id=ctx.project.id, code=coding.next_code(db, ctx.project, "prompt_fragment"),
-        category=data.category, name=data.name, text=data.text, created_by=ctx.user.id,
+        cover_image=data.cover_image, category=data.category, name=data.name, text=data.text, created_by=ctx.user.id,
     )
     db.add(f)
     db.flush()
@@ -76,6 +76,8 @@ def update_fragment(db: Session, ctx: ProjectContext, fragment_id: uuid.UUID, da
     if fragment.updated_at != data.expected_updated_at:
         raise Conflict("片段已被其他操作更新，请重新读取后再编辑")
     fragment.name, fragment.text, fragment.category = data.name.strip(), data.text, data.category
+    if data.cover_image is not None:
+        fragment.cover_image = data.cover_image
     if not fragment.name:
         raise Conflict("片段名称不能为空")
     db.flush()

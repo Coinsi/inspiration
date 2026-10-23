@@ -196,15 +196,28 @@ def change_out(row):
         "snapshot": row.snapshot,
         "timeline_update": row.timeline_update,
         "preview_job_id": row.preview_job_id,
+        "canonical_commands": row.canonical_commands,
+        "read_preconditions": row.read_preconditions,
+        "write_scopes": row.write_scopes,
+        "provenance": row.provenance,
+        "rebased_from_id": row.rebased_from_id,
     }
 
 
 def propose(db, ctx, work_id, data):
     require(ctx.role, "engineering.edit")
     row = work(db, ctx, work_id, lock=True)
+    # Keep fingerprints of requests made before the collaboration contract stable.
+    request_content = data.model_dump(mode="json", exclude={"read_preconditions", "provenance"})
+    if data.read_preconditions:
+        request_content["read_preconditions"] = [
+            item.model_dump(mode="json") for item in data.read_preconditions
+        ]
+    if any(data.provenance.model_dump().values()):
+        request_content["provenance"] = data.provenance.model_dump(mode="json")
     fp = hashlib.sha256(
         json.dumps(
-            data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            request_content, sort_keys=True, ensure_ascii=False, separators=(",", ":")
         ).encode()
     ).hexdigest()
     prior = db.scalar(
@@ -218,11 +231,12 @@ def propose(db, ctx, work_id, data):
         if prior.fingerprint != fp:
             raise Conflict("请求标识已用于不同修改")
         return change_out(prior)
-    if data.base_revision != row.engineering_revision:
-        raise Conflict("工程已更新，请基于最新版本重新提出修改")
+    if data.base_revision > row.engineering_revision:
+        raise Conflict("工程基线版本尚不存在")
     if any(isinstance(c, schemas.Restore) for c in data.commands) and len(data.commands) != 1:
         raise CapabilityUnsupported("恢复操作须单独审阅")
-    candidate = snapshot_at(db, row.id, row.engineering_revision)
+    base = snapshot_at(db, row.id, data.base_revision)
+    candidate = copy.deepcopy(base)
     imports = [c for c in data.commands if isinstance(c, schemas.ImportPackage)]
     if imports:
         if len(data.commands) != 1 or row.engineering_revision != 0:
@@ -444,14 +458,21 @@ def propose(db, ctx, work_id, data):
                 f"同时采用工程文档：{command.title}（{command.kind}）；剪辑预览不代表该文档已完成渲染验收"
                 for command in native_commands
             )
+    from app.modules.engineering.collaboration import capture_contract
+
+    reads, writes = capture_contract(db, ctx, row.id, base, data, timeline_updates)
     change = EngineeringChange(
         work_id=row.id,
         created_by=ctx.user.id,
         request_key=data.request_key,
         fingerprint=fp,
-        base_revision=row.engineering_revision,
+        base_revision=data.base_revision,
         snapshot=candidate,
         timeline_update=update,
+        canonical_commands=[command.model_dump(mode="json") for command in data.commands],
+        read_preconditions=reads,
+        write_scopes=writes,
+        provenance=data.provenance.model_dump(mode="json", exclude_none=True),
     )
     db.add(change)
     db.flush()
@@ -474,6 +495,11 @@ def accept(db, ctx, work_id, change_id, data):
         return change_out(change)
     if change.base_revision != row.engineering_revision:
         raise Conflict("工程已更新，旧候选保留但不能直接采用")
+    from app.modules.engineering.collaboration import conflicts
+
+    changed = conflicts(db, ctx, row, change, snapshot_at(db, row.id, row.engineering_revision))
+    if changed:
+        raise Conflict("候选的读取或写入前提已变化，请重新检查后再采用", {"conflicts": changed})
     validate_sources(db, ctx, row.id, change.snapshot)
     from app.modules.engineering.documents import closure
 
@@ -514,3 +540,68 @@ def accept(db, ctx, work_id, change_id, data):
     )
     db.flush()
     return change_out(change)
+
+
+def rebase(db, ctx, work_id, change_id, data):
+    """Create a new reviewable candidate; never mutate the old one or auto-adopt."""
+    require(ctx.role, "engineering.edit")
+    row = work(db, ctx, work_id, lock=True)
+    from app.modules.engineering import collaboration, review
+
+    change = review.get_change(db, row.id, change_id)
+    if change.fingerprint != data.fingerprint:
+        raise Conflict("审阅内容不匹配")
+    prior = db.scalar(
+        select(EngineeringChange).where(
+            EngineeringChange.work_id == row.id,
+            EngineeringChange.created_by == ctx.user.id,
+            EngineeringChange.request_key == data.request_key,
+        )
+    )
+    if prior:
+        if prior.rebased_from_id != change.id or prior.base_revision != data.expected_revision:
+            raise Conflict("请求标识已用于不同修改")
+        return change_out(prior)
+    if change.status != "proposed":
+        raise Conflict("只允许整合尚未采用的候选")
+    if row.engineering_revision != data.expected_revision:
+        raise Conflict("工程再次更新，请重新检查整合目标")
+    current = snapshot_at(db, row.id, row.engineering_revision)
+    commands = collaboration.replay_commands(db, row, change, current)
+    changed = collaboration.conflicts(db, ctx, row, change, current)
+    if changed:
+        raise Conflict("候选依赖或修改范围存在冲突，已保留原候选", {"conflicts": changed})
+    declared = [
+        schemas.ReadPrecondition(kind=read["kind"], id=read["id"], revision=revision)
+        for read in change.read_preconditions
+        if "declared" in read["origins"]
+        for revision in read["declared_revisions"]
+    ]
+    result = propose(
+        db,
+        ctx,
+        row.id,
+        schemas.Propose(
+            request_key=data.request_key,
+            base_revision=data.expected_revision,
+            commands=commands,
+            read_preconditions=declared,
+            provenance=schemas.Provenance.model_validate(change.provenance),
+        ),
+    )
+    rebased = db.get(EngineeringChange, result["id"])
+    rebased.rebased_from_id = change.id
+    audit.record(
+        db,
+        action="engineering.rebase",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        target_id=row.id,
+        detail={
+            "from_change_id": str(change.id),
+            "change_id": str(rebased.id),
+            "revision": row.engineering_revision,
+        },
+    )
+    db.flush()
+    return change_out(rebased)

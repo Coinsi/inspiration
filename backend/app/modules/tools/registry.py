@@ -204,7 +204,7 @@ def execute(db, ctx, run, name, args):
             raise Forbidden("只能加载用户为本次任务选择的技能")
         if name == "skill.load":
             return {
-                **{k: v for k, v in skill.items() if k != "files"},
+                **{k: v for k, v in skill.items() if k not in ("files", "cover_image")},
                 "files": [
                     {"path": f["path"], "encoding": f["encoding"]} for f in skill.get("files", [])
                 ],

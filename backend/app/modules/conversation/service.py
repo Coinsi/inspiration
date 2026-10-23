@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 
 from app.core import audit
+from app.core.config import settings
 from app.core.errors import Conflict, NotFound
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.identity import Project
@@ -53,7 +54,13 @@ def message_out(m):
         "created_at": m.created_at,
         "task_id": m.execution_id,
         "execution_kind": m.execution_kind,
-        "task_path": f"tasks?kind={kind}&task={m.execution_id}" if m.execution_id else None,
+        "task_path": (
+            f"workbench?conversation={m.conversation_id}&message={m.id}&ordinal={m.ordinal}"
+            if m.execution_kind == "production"
+            else f"tasks?kind={kind}&task={m.execution_id}"
+            if m.execution_id
+            else None
+        ),
     }
 
 
@@ -112,6 +119,9 @@ def detail(db, ctx, conversation_id, before=None):
     from app.modules.conversation.media import sync
 
     sync(db, c.id)
+    from app.modules.conversation.production import sync as sync_production
+
+    sync_production(db, c.id)
     q = select(ConversationMessage).where(ConversationMessage.conversation_id == c.id)
     if before is not None:
         q = q.where(ConversationMessage.ordinal < before)
@@ -149,6 +159,9 @@ def send(db, ctx, conversation_id, data):
     from app.modules.conversation import media
 
     media.sync(db, c.id)
+    from app.modules.conversation import production
+
+    production.sync(db, c.id)
     query = select(ConversationMessage).where(ConversationMessage.conversation_id == c.id)
     prior = db.scalar(
         query.where(
@@ -163,6 +176,9 @@ def send(db, ctx, conversation_id, data):
             "scope": [item.model_dump(mode="json") for item in data.scope],
             "skills": [item.model_dump(mode="json") for item in data.skills],
             "media": data.media.model_dump(mode="json") if data.media else None,
+            "production_request": data.production.model_dump(mode="json")
+            if data.production
+            else None,
         }
         if prior.content != data.content or any(
             prior.context.get(k) != v for k, v in expected.items()
@@ -173,7 +189,9 @@ def send(db, ctx, conversation_id, data):
         raise Conflict("请先恢复这段对话再继续发送")
     if db.scalar(
         query.where(
-            ConversationMessage.role == "assistant", ConversationMessage.status.in_(ACTIVE)
+            ConversationMessage.role == "assistant",
+            ConversationMessage.status.in_(ACTIVE),
+            ConversationMessage.execution_kind != "production",
         ).limit(1)
     ):
         raise Conflict("这段对话还有未结束的任务，请先审阅、继续或停止任务")
@@ -201,7 +219,9 @@ def send(db, ctx, conversation_id, data):
         status="queued",
     )
     job = None
-    if data.media:
+    if settings.production_harness_enabled or data.production:
+        production.start(db, ctx, c, reply, data, history)
+    elif data.media:
         job = media.start(db, ctx, c, reply, data)
     else:
         execution.start(db, ctx, c, reply, data, history)
@@ -242,6 +262,8 @@ def retry_input(db, ctx, conversation_id, message_id):
     )
     if not reply:
         raise NotFound("消息不存在")
+    if reply.execution_kind == "production":
+        raise Conflict("请在制作进度中重试失败步骤或提出修改意见，避免重复提交付费任务")
     if reply.status not in {"failed", "cancelled"}:
         raise Conflict("只有失败或已停止的任务可以重试")
     source = db.scalar(
@@ -267,6 +289,20 @@ def retry_input(db, ctx, conversation_id, message_id):
 def retry(db, ctx, conversation_id, message_id, data):
     from app.modules.conversation.schemas import Send
 
+    c = get(db, ctx, conversation_id)
+    reply = db.scalar(
+        select(ConversationMessage).where(
+            ConversationMessage.id == message_id,
+            ConversationMessage.conversation_id == c.id,
+            ConversationMessage.role == "assistant",
+        )
+    )
+    if reply and reply.execution_kind == "production":
+        from app.modules.conversation.production import retry as retry_production
+
+        retry_production(db, ctx, reply, data)
+        return detail(db, ctx, c.id)
+
     payload = retry_input(db, ctx, conversation_id, message_id)
     return send(db, ctx, conversation_id, Send(**payload, request_key=data.request_key))
 
@@ -287,9 +323,15 @@ def control(db, ctx, conversation_id, message_id, data):
             ConversationMessage.conversation_id == c.id
         )
     )
-    if data.action == "resume" and (c.archived_at or m.ordinal != latest):
+    if data.action == "resume" and (
+        c.archived_at or (m.execution_kind != "production" and m.ordinal != latest)
+    ):
         raise Conflict("只能在未归档的对话中继续最后一条任务，旧任务请重新描述需求")
-    if m.execution_kind == "generation":
+    if m.execution_kind == "production":
+        from app.modules.conversation.production import control as production_control
+
+        production_control(db, ctx, m, data)
+    elif m.execution_kind == "generation":
         from app.modules.conversation.media import control as media_control
 
         media_control(db, ctx, m, data)

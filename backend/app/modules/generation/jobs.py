@@ -1,6 +1,8 @@
 """Persistent task history and execution shared by providers and local media tools."""
 
 import copy
+import io
+import tempfile
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -36,13 +38,18 @@ def event(job, status, message):
 
 def validate_target(db, project_id, target_type, target_id):
     from app.models.asset import Asset
+    from app.models.creation import Creation
     from app.models.shot import Shot
     from app.models.timeline import Timeline
-    from app.models.creation import Creation
     from app.models.work import CreativeWork
 
-    cls = {"shot": Shot, "asset": Asset, "timeline": Timeline, "creation": Creation,
-           "work": CreativeWork}.get(target_type)
+    cls = {
+        "shot": Shot,
+        "asset": Asset,
+        "timeline": Timeline,
+        "creation": Creation,
+        "work": CreativeWork,
+    }.get(target_type)
     target = db.get(cls, target_id) if cls else None
     if target is None or target.project_id != project_id or getattr(target, "deleted_at", None):
         raise NotFound("目标不存在")
@@ -379,7 +386,8 @@ def retry(db, ctx, job_id):
             route = {"model_profile": snapshot.get("model_profile", {})}
         if (
             not route
-            or route["model_profile"].get("protocol") not in {"openai_video", "video_v1", "ark_video", "minimax_video"}
+            or route["model_profile"].get("protocol")
+            not in {"openai_video", "video_v1", "ark_video", "minimax_video"}
             or not resume.get("external_job_id")
         ):
             raise Conflict(
@@ -418,6 +426,25 @@ def retry(db, ctx, job_id):
     return dispatch(db, new)
 
 
+def _harness_output_limit(snapshot):
+    """Only new application-owned production jobs opt into a frozen hard cap."""
+    limits = snapshot.get("harness_resource_limits")
+    if limits is None:
+        return None
+    value = limits.get("output_bytes") if isinstance(limits, dict) else None
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("制作任务的输出大小限制无效，未执行生成")
+    return value
+
+
+def _check_output_limit(outputs, limit):
+    if limit is None:
+        return
+    total = sum(data.stat().st_size if isinstance(data, Path) else len(data) for data, _ in outputs)
+    if total > limit:
+        raise ValueError(f"制作输出总大小超过已预留上限（{limit} 字节），未保存任何结果")
+
+
 def execute(db, job_id):
     # Claim exactly once; external work runs without holding a transaction open.
     job = db.scalar(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update())
@@ -427,6 +454,8 @@ def execute(db, job_id):
     from app.modules.engineering import delivery
 
     lease_token = delivery.claim(db, job) if delivery.eligible(job) else None
+    if lease_token:
+        db.info.setdefault(delivery.LEASE_CONTEXT, {})[job_id] = lease_token
     event(job, "submitted", "正在准备输入")
     db.commit()
     stop_heartbeat = None
@@ -436,11 +465,25 @@ def execute(db, job_id):
 
     def canceled():
         with SessionLocal() as check:
-            return (
-                check.scalar(select(GenerationJob.status).where(GenerationJob.id == job_id))
-                == "canceled"
-                or not delivery.owned(check, job_id, lease_token)
-            )
+            return check.scalar(
+                select(GenerationJob.status).where(GenerationJob.id == job_id)
+            ) == "canceled" or not delivery.owned(check, job_id, lease_token)
+
+    def stop_remote(handle):
+        # Losing a lease is not a user cancellation. A newer worker may already
+        # be receiving this exact upstream job; never cancel it from a stale one.
+        with SessionLocal() as check:
+            if not delivery.owned(check, job_id, lease_token):
+                raise delivery.LeaseLost("Generation worker no longer owns this receipt")
+            explicit_cancel = check.scalar(
+                select(GenerationJob.status).where(GenerationJob.id == job_id)
+            ) == "canceled"
+        if explicit_cancel:
+            try:
+                provider.cancel(handle)
+            except Exception:
+                pass
+            raise media_engine.Canceled()
 
     files = ExitStack()
     from app.modules.media.generation_reference import reference_origin
@@ -466,6 +509,14 @@ def execute(db, job_id):
             raise ValueError("无法读取源文件，请检查对象存储服务或重新上传素材") from exc
 
     try:
+        output_limit = _harness_output_limit(snap)
+        from app.modules.harness.job_authorization import validate_job
+
+        submission_phase = (
+            "resume" if (job.routing_state or {}).get("harness_receipt_recovery") else "submit"
+        )
+        validate_job(db, job, snap, phase=submission_phase)
+        db.commit()
         if lease_token:
             stop_heartbeat = delivery.heartbeat(job_id, lease_token, SessionLocal)
         from app.modules.generation.service import _materialize_references, _provider_instance
@@ -480,7 +531,9 @@ def execute(db, job_id):
             materialized = _materialize_references(
                 db, [ReferenceImage(**r) for r in snap.get("references", [])]
             )
-            provider = _provider_instance(db, project_id, provider_name, snap, user_id=job.created_by)
+            provider = _provider_instance(
+                db, project_id, provider_name, snap, user_id=job.created_by
+            )
             if hasattr(provider, "bind_job"):
                 provider.bind_job(job_id)
             if snap.get("mask"):
@@ -527,9 +580,11 @@ def execute(db, job_id):
         elif operation in ("engineering_image", "engineering_render"):
             from app.modules.engineering import executors
 
-            outputs = [files.enter_context(executors.execute(
-                snap["engineering_plan"], read_blob, disk_blob, canceled
-            ))]
+            outputs = [
+                files.enter_context(
+                    executors.execute(snap["engineering_plan"], read_blob, disk_blob, canceled)
+                )
+            ]
             output_mimes = [executors.resolve(snap["engineering_plan"]["executor"]).mime]
         elif operation == "render":
             outputs = [
@@ -566,22 +621,47 @@ def execute(db, job_id):
                 references=materialized,
                 mask=materialized_mask,
             )
+            validate_job(db, job, snap, phase=submission_phase)
+            if delivery.policy(job) == "remote_receipt" and submission_phase != "resume":
+                delivery.remote_phase(db, job_id, "dispatching")
+            delivery.fence(db, job_id)
+            db.commit()
             handle = provider.submit(req)
             if getattr(provider, "actual_route", None):
                 snap["model_profile"] = provider.actual_route["model_profile"]
             # Do not overwrite a concurrent cancellation while recording the remote handle.
-            db.refresh(job)
+            job = db.scalar(
+                select(GenerationJob)
+                .where(GenerationJob.id == job_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            delivery.fence(db, job_id)
+            if delivery.policy(job) == "remote_receipt":
+                delivery.remote_phase(db, job_id, "accepted", handle.external_job_id)
             job.external_job_id = handle.external_job_id
             db.commit()
             result = None
             for _ in range(600):
                 if canceled():
-                    try:
-                        provider.cancel(handle)
-                    except Exception:
-                        pass
-                    raise media_engine.Canceled()
+                    stop_remote(handle)
+                try:
+                    delivery.fence(db, job_id)
+                    validate_job(db, job, snap, phase="receipt")
+                    db.commit()
+                except delivery.LeaseLost:
+                    raise
+                except Exception:
+                    with SessionLocal() as check:
+                        still_owned = delivery.owned(check, job_id, lease_token)
+                    if still_owned:
+                        try:
+                            provider.cancel(handle)
+                        except Exception:
+                            pass
+                    raise
                 result = provider.poll(handle)
+                delivery.fence(db, job_id)
                 if result.status != "running":
                     break
                 time.sleep(2)
@@ -589,16 +669,26 @@ def execute(db, job_id):
                 raise ValueError(
                     (result.error if result else None) or "供应商未返回有效结果或任务超时"
                 )
+            if delivery.policy(job) == "remote_receipt":
+                delivery.remote_phase(db, job_id, "generated", handle.external_job_id)
+                db.commit()
             outputs = []
+            received_bytes = 0
             for out in result.outputs:
                 data = out.data
                 if data is None and out.url:
+                    download_limit = 256 * 1024 * 1024
+                    if output_limit is not None:
+                        download_limit = min(download_limit, max(0, output_limit - received_bytes))
                     with urllib.request.urlopen(out.url, timeout=120) as response:
-                        data = response.read(256 * 1024 * 1024 + 1)
+                        data = response.read(download_limit + 1)
                     if len(data) > 256 * 1024 * 1024:
                         raise ValueError("供应商输出超过 256 MB")
                 if not data:
                     raise ValueError("供应商返回了空文件")
+                received_bytes += len(data)
+                if output_limit is not None and received_bytes > output_limit:
+                    raise ValueError("供应商输出总大小超过已预留上限，未保存任何结果")
                 if out.type != req.request_type:
                     raise ValueError("供应商返回的媒体类型与请求不一致")
                 data, dimensions = media_engine.validate_output(data, out.type)
@@ -613,16 +703,44 @@ def execute(db, job_id):
                         )
                 outputs.append((data, out.type))
             cost_raw = result.cost_raw or {}
+        # Check the complete batch before even its first CAS write. Local tools
+        # return temporary paths, providers may return bytes or normalized images.
+        # Partial writes would consume storage despite a failed budget decision.
+        _check_output_limit(outputs, output_limit)
+        if operation in {"engineering_image", "engineering_render", "render", "refine"}:
+            # Persist real output metadata before downstream tools see the file.
+            # A native audio preview is also a reusable production input.
+            from PIL import Image
+
+            from app.modules.generation.video_tools import probe_file
+
+            media_details = []
+            for data, typ in outputs:
+                if typ == "image":
+                    with Image.open(data if isinstance(data, Path) else io.BytesIO(data)) as image:
+                        media_details.append({"width": image.width, "height": image.height})
+                elif isinstance(data, Path):
+                    media_details.append(probe_file(data, canceled))
+                else:
+                    directory = Path(files.enter_context(tempfile.TemporaryDirectory()))
+                    target = directory / "output.media"
+                    target.write_bytes(data)
+                    media_details.append(probe_file(target, canceled))
         if canceled():
             raise media_engine.Canceled()
+        _check_output_limit(outputs, output_limit)
+        receipt_phase = "receipt" if provider_name != "local" and job.external_job_id else "submit"
+        validate_job(db, job, snap, phase=receipt_phase)
+        db.commit()
         # Store bytes before the final row lock so cancel is still responsive during I/O.
         blobs = [
             (
                 (cas.put_file if isinstance(data, Path) else cas.put_bytes)(
                     db,
                     data,
-                    output_mimes[index] if index < len(output_mimes) else
-                    {"video": "video/mp4", "image": "image/png", "audio": "audio/mp4"}[typ],
+                    output_mimes[index]
+                    if index < len(output_mimes)
+                    else {"video": "video/mp4", "image": "image/png", "audio": "audio/mp4"}[typ],
                     **{
                         name: media_details[index][name]
                         for name in ("width", "height", "duration_ms")
@@ -642,6 +760,7 @@ def execute(db, job_id):
         if job.status == "canceled" or not delivery.owned(db, job_id, lease_token):
             db.rollback()
             return
+        validate_job(db, job, snap, phase=receipt_phase)
         points = (
             provider.actual_cost()
             if hasattr(provider, "actual_cost")
@@ -688,15 +807,24 @@ def execute(db, job_id):
                             else {}
                         ),
                         "operation": operation,
-                        **({"engineering_plan": {
-                            "executor": snap["engineering_plan"]["executor"],
-                            "root": snap["engineering_plan"]["root"],
-                            "fingerprint": snap["engineering_plan"]["fingerprint"],
-                        }} if snap.get("engineering_plan") else {}),
                         **(
-                            {"engineering_change_id": snap["engineering_change_id"],
-                             "engineering_work_id": snap["engineering_work_id"]}
-                            if snap.get("engineering_change_id") else {}
+                            {
+                                "engineering_plan": {
+                                    "executor": snap["engineering_plan"]["executor"],
+                                    "root": snap["engineering_plan"]["root"],
+                                    "fingerprint": snap["engineering_plan"]["fingerprint"],
+                                }
+                            }
+                            if snap.get("engineering_plan")
+                            else {}
+                        ),
+                        **(
+                            {
+                                "engineering_change_id": snap["engineering_change_id"],
+                                "engineering_work_id": snap["engineering_work_id"],
+                            }
+                            if snap.get("engineering_change_id")
+                            else {}
                         ),
                         **(
                             {"library_origin": snap["library_origin"]}
@@ -722,6 +850,7 @@ def execute(db, job_id):
             )
         event(job, "succeeded", f"已保存 {len(blobs)} 个结果")
         from app.modules.generation.personal import record_result
+
         record_result(db, job)
         if warnings:
             job.cost_raw = {**(job.cost_raw or {}), "warnings": warnings}
@@ -739,7 +868,7 @@ def execute(db, job_id):
             .values(used_cost=Quota.used_cost + points)
         )
         db.commit()
-    except media_engine.Canceled:
+    except (media_engine.Canceled, delivery.LeaseLost):
         db.rollback()
     except Exception as exc:
         db.rollback()
@@ -748,9 +877,16 @@ def execute(db, job_id):
             job.error = str(exc)[:2000]
             event(job, "failed", job.error)
             from app.modules.generation.personal import record_result
+
             record_result(db, job)
             db.commit()
     finally:
         if stop_heartbeat:
             stop_heartbeat()
         files.close()
+        db.info.get(delivery.LEASE_CONTEXT, {}).pop(job_id, None)
+        # A stale error may have reacquired the job row before discovering that
+        # its token is obsolete. Release that transaction before cleanup opens
+        # another session, or its own row lock would deadlock cleanup.
+        db.rollback()
+        delivery.release(job_id, lease_token, SessionLocal)

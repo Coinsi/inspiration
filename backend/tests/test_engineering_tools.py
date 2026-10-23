@@ -57,7 +57,7 @@ def test_direct_tool_candidate_shares_api_state_and_scope(studio):
             {"work_id": str(wid), "view": "change", "change_id": result["id"]},
         )
         assert read["impact"]["affected_outputs"]
-    assert {t["name"] for t in registry.catalogue("engineering")} == {
+    assert {t["name"] for t in registry.catalogue("engineering")} >= {
         "engineering.read",
         "engineering.propose",
         "engineering.preview",

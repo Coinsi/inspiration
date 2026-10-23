@@ -159,10 +159,32 @@ Command = Annotated[
 ]
 
 
+class ReadPrecondition(Strict):
+    kind: Literal["work", "document", "resource_usage", "timeline"]
+    id: uuid.UUID
+    revision: int | None = Field(default=None, ge=0)
+
+
+class Provenance(Strict):
+    # Attribution only: never grants permissions or proves a task owns this work.
+    run_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    attempt_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+
+
 class Propose(Strict):
     request_key: uuid.UUID
     base_revision: int = Field(ge=0)
     commands: list[Command] = Field(min_length=1, max_length=100)
+    read_preconditions: list[ReadPrecondition] = Field(default_factory=list, max_length=2000)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
+class Rebase(Strict):
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_key: uuid.UUID
+    expected_revision: int = Field(ge=0)
 
 
 class Accept(Strict):

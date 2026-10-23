@@ -354,6 +354,10 @@ def _materialize_references(db: Session, refs: list[ReferenceImage]) -> list[Ref
             continue
         if not blob.mime.startswith("image/"):
             raise CapabilityUnsupported("参考图片文件类型不匹配")
+        from app.adapters.generation.reference_transport import MAX_IMAGE_BYTES
+
+        if blob.size_bytes > MAX_IMAGE_BYTES:
+            raise CapabilityUnsupported("参考图片超过 50 MB，请先缩小图片")
         b64 = base64.b64encode(cas.read_bytes(blob)).decode()
         out.append(
             ReferenceImage(

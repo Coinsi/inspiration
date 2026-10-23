@@ -1,6 +1,7 @@
 """A durable 30-second checkpoint queue. In-flight canceled results are discarded."""
 
 import base64
+import hashlib
 import logging
 import shutil
 import tempfile
@@ -41,17 +42,49 @@ def process(run_id, stopped=lambda: False):
                 return not current or current.cancel_requested
 
         try:
+            service.validate_execution_snapshot(db, run)
+            db.commit()
+            if run.model_key == service.DEFERRED_MODEL_KEY:
+                # No production or library row lock is held during this call.
+                # Commit the selected model before the first checkpoint so a
+                # restart cannot silently switch models for a partial result.
+                if run.completed:
+                    raise ValueError("模型记录缺失，请检查已有转写片段")
+                model_key = service.resolve_model_key()
+                if canceled():
+                    raise media_engine.Canceled()
+                db.refresh(run)
+                service.validate_execution_snapshot(db, run)
+                run.model_key = model_key
+                db.commit()
             with tempfile.TemporaryDirectory(prefix="inspiration-transcription-") as directory:
                 root = Path(directory)
                 source = root / "source.mp4"
+                snapshot = dict(run.execution_snapshot or {})
+                source_hash = snapshot.get("source_blob_hash") or v.proxy_hash or v.original_hash
                 with (
-                    cas.open_range(db.get(Blob, v.proxy_hash or v.original_hash)) as stream,
+                    cas.open_range(db.get(Blob, source_hash)) as stream,
                     source.open("wb") as output,
                 ):
-                    shutil.copyfileobj(stream, output, 1024 * 1024)
+                    if snapshot:
+                        digest, size = hashlib.sha256(), 0
+                        while block := stream.read(1024 * 1024):
+                            if canceled():
+                                raise media_engine.Canceled()
+                            size += len(block)
+                            if size > snapshot["source_bytes"]:
+                                raise ValueError("原文件大小变化，请检查固定素材")
+                            digest.update(block)
+                            output.write(block)
+                        if digest.hexdigest() != source_hash or size != snapshot["source_bytes"]:
+                            raise ValueError("原文件校验失败，请检查固定素材")
+                    else:
+                        shutil.copyfileobj(stream, output, 1024 * 1024)
                 for ordinal in range(run.completed, run.total):
                     if canceled():
                         raise media_engine.Canceled()
+                    service.validate_execution_snapshot(db, run)
+                    db.commit()
                     start = ordinal * 30000
                     end = min(duration, start + 30000)
                     wav = root / "audio.wav"
@@ -82,6 +115,8 @@ def process(run_id, stopped=lambda: False):
                         )
                     except ValueError as exc:
                         raise ValueError("音轨无法解码，请确认视频包含有效声音") from exc
+                    service.validate_execution_snapshot(db, run)
+                    db.commit()
                     result = service.inference(
                         "/transcribe",
                         {
@@ -117,6 +152,7 @@ def process(run_id, stopped=lambda: False):
                     db.refresh(run)
                     if canceled():
                         raise media_engine.Canceled()
+                    service.validate_execution_snapshot(db, run)
                     run.raw_cues = [*run.raw_cues, *cues]
                     run.cues = run.raw_cues
                     run.completed = ordinal + 1

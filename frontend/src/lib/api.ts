@@ -388,6 +388,7 @@ export interface Board {
   by_status: Record<string, number>;
 }
 export interface Fragment {
+  cover_image?: string;
   updated_at: string;
   id: string;
   code: string;
@@ -396,6 +397,7 @@ export interface Fragment {
   text: string;
 }
 export interface Prompt {
+  cover_image?: string;
   id: string;
   code: string;
   name: string;

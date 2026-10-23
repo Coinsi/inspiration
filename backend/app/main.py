@@ -16,6 +16,17 @@ from app.modules.director.router import router as director_router
 from app.modules.evidence.router import router as evidence_router
 from app.modules.transcription.router import router as transcription_router
 from app.modules.agent.router import router as agent_router
+from app.modules.harness.router import router as production_router
+from app.modules.harness.media_tools import register_tools as register_production_tools
+from app.modules.harness.editing_tools import register_tools as register_editing_tools
+from app.modules.harness.search_tools import register_tools as register_search_tools
+from app.modules.harness.work_tools import register_tools as register_work_tools
+from app.modules.harness.feedback_tools import register_tools as register_feedback_tools
+from app.modules.harness.quality_tools import register_tools as register_quality_tools
+from app.modules.harness.process_tools import register_tools as register_process_tools
+from app.modules.harness.transcription_tools import register_tools as register_transcription_tools
+from app.modules.harness.recovery_tools import register_tools as register_recovery_tools
+from app.modules.harness.model_tools import register_tools as register_model_tools
 from app.modules.conversation.router import router as conversation_router
 from app.modules.canvas.router import router as canvas_router
 from app.modules.asset.router import router as asset_router
@@ -35,6 +46,17 @@ from app.modules.shot.router import router as shot_router
 from app.modules.generation.channel_router import router as channel_router
 from app.modules.generation.model_router import router as creative_model_router
 from app.modules.timeline.router import router as timeline_router
+
+register_production_tools()
+register_editing_tools()
+register_search_tools()
+register_work_tools()
+register_feedback_tools()
+register_quality_tools()
+register_process_tools()
+register_transcription_tools()
+register_recovery_tools()
+register_model_tools()
 
 
 @asynccontextmanager
@@ -70,6 +92,7 @@ async def lifespan(app):
         archive_stop = start_archives()
         background_workers["engineering_archives"] = archive_stop.is_alive
     agent_stop = None
+    production_stop = None
     transcription_stop = None
     if settings.transcription_worker_enabled:
         from app.modules.transcription.worker import start as start_transcription
@@ -79,6 +102,9 @@ async def lifespan(app):
         from app.modules.agent.worker import start as start_agent
         agent_stop = start_agent()
         background_workers["agent"] = agent_stop.is_alive
+        from app.modules.harness.runtime import start as start_production
+        production_stop = start_production()
+        background_workers["production"] = production_stop.is_alive
     canvas_stop = None
     if settings.canvas_worker_enabled:
         from app.modules.canvas.worker import start as start_canvas
@@ -97,6 +123,8 @@ async def lifespan(app):
             await to_thread(transcription_stop)
         if agent_stop:
             await to_thread(agent_stop)
+        if production_stop:
+            await to_thread(production_stop)
         if canvas_stop:
             await to_thread(canvas_stop)
         if library_stop:
@@ -135,6 +163,7 @@ app.include_router(director_router, prefix="/api/v1")
 app.include_router(evidence_router, prefix="/api/v1")
 app.include_router(transcription_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
+app.include_router(production_router, prefix="/api/v1")
 app.include_router(conversation_router, prefix="/api/v1")
 from app.modules.conversation.works import router as works_router
 app.include_router(works_router, prefix="/api/v1")

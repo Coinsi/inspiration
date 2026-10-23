@@ -42,6 +42,16 @@ class MediaRequest(BaseModel):
     references: list[Reference] = Field(default_factory=list, max_length=8)
 
 
+class ProductionControl(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: uuid.UUID
+    action: Literal["steer", "reply", "approve_plan", "guidance", "confirm_guidance"]
+    expected_revision: int = Field(ge=1)
+    task_ids: list[uuid.UUID] = Field(default_factory=list, max_length=256)
+    budget_points: int | None = Field(default=None, ge=0, le=1000000)
+    guidance_id: uuid.UUID | None = None
+
+
 class Send(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
     request_key: uuid.UUID
@@ -50,9 +60,12 @@ class Send(BaseModel):
     scope: list[Target] = Field(default_factory=list, max_length=12)
     skills: list[SkillUse] = Field(default_factory=list, max_length=3)
     media: MediaRequest | None = None
+    production: ProductionControl | None = None
 
     @model_validator(mode="after")
     def media_controls(self):
+        if self.production and self.media:
+            raise ValueError("任务指导和单独生成请分别发送")
         if self.media and (self.mode != "standard" or self.scope):
             raise ValueError("直接生成使用标准模式，不修改已选创作对象")
         if self.media and len(self.content) > 6000:

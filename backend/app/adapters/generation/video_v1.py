@@ -24,8 +24,8 @@ class VideoV1Provider(OpenAIVideoProvider):
             reason = "此模型尚未启用参考图或视频，请确认渠道能力并配置参考素材上限。"
         elif not public_base():
             reason = (
-                "参考素材生成视频需要通过公网 HTTPS 网站提交，系统会自动生成素材链接。"
-                "若已上线，请检查反向代理是否正确传递访问协议，以及正式签名密钥。"
+                "此供应商仅接受公网 HTTPS 参考素材链接，不支持直接上传文件。"
+                "平台需配置参考素材公网入口或通过已部署的 HTTPS 站点提交；素材可以继续保存在本地。"
             )
             refs = 0
             videos = 0
@@ -35,6 +35,7 @@ class VideoV1Provider(OpenAIVideoProvider):
             | ({"video_reference"} if videos else set()),
             max_reference_images=refs,
             max_reference_videos=videos,
+            reference_transports={"image": ["public_url"], "video": ["public_url"]},
             reference_unavailable_reason=reason,
             max_video_seconds=self.config.get("max_video_seconds", 30),
             param_schema=self.config.get("param_schema", {}),

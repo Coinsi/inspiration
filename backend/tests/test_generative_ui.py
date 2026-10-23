@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.config import settings
 from app.modules.agent import worker
 from app.modules.agent.schemas import ModelAction
 from app.modules.tools.generative_ui import COMPONENTS, PresentArgs
@@ -46,6 +47,8 @@ def test_all_35_component_fixtures_validate_against_shipped_schema():
 
 
 def test_present_survives_reload_and_enters_followup_context(studio, monkeypatch):  # noqa: F811
+    # This regression drives the legacy worker explicitly; the default route is now Harness.
+    monkeypatch.setattr(settings, "production_harness_enabled", False)
     client, sessions, ids, base, path = setup(studio, monkeypatch)
     sent = post_ok(client, path + "/messages", message("用表单展示人物"))
     run_id = uuid.UUID(sent["messages"][-1]["task_id"])

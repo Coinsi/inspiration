@@ -1,3 +1,4 @@
+import { EffectCover } from "./EffectCover";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { SearchField } from "@/components/ui/search-field";
 import Markdown from "react-markdown";
@@ -95,6 +96,7 @@ export function SkillReader({
     >
       {skill && (
         <>
+          {skill.cover_image && <EffectCover src={skill.cover_image} name={skill.name} detail />}
           <div className="knowledge-reader-intro">
             <p>{skill.description}</p>
             <span>{skill.source}</span>

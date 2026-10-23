@@ -12,7 +12,6 @@ from app.core.errors import CapabilityUnsupported, Conflict, ProviderError
 from app.models.generation import GenerationJob
 from app.modules.generation import model_catalog as catalog
 
-
 RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video"}
 
 
@@ -21,13 +20,19 @@ class SubmissionRejected(ProviderError):
 
 
 def retry_allowed(job):
+    if (job.input_snapshot or {}).get("harness_origin"):
+        # Production recovery must retain the same job, budget, and frozen
+        # receipt. Generic retry creates a new job and cannot satisfy that.
+        return False
     state = job.routing_state or {}
     if state.get("phase") in ("dispatching", "submission_unknown"):
         return False
     if state.get("phase") in ("accepted", "generated"):
         if job.provider.startswith("personal_"):
-            return bool(job.input_snapshot.get("model_profile", {}).get("protocol") in RESUMABLE_PROTOCOLS
-                        and state.get("external_job_id"))
+            return bool(
+                job.input_snapshot.get("model_profile", {}).get("protocol") in RESUMABLE_PROTOCOLS
+                and state.get("external_job_id")
+            )
         route = next(
             (
                 r
@@ -77,6 +82,9 @@ class RoutedProvider(GenerationProvider):
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+        from app.modules.engineering.delivery import fence
+
+        fence(self.db, self.job_id)
         state = copy.deepcopy(job.routing_state or {})
         # Recording a returned handle must still work after a concurrent local cancel.
         if phase == "dispatching" and job.status == "canceled":
@@ -133,6 +141,10 @@ class RoutedProvider(GenerationProvider):
         job = self.db.get(GenerationJob, self.job_id)
         resume = (job.routing_state or {}).get("resume")
         self.db.commit()
+        if (job.routing_state or {}).get("harness_receipt_recovery"):
+            from app.modules.harness.recovery_tools import validate_resume_guard
+
+            validate_resume_guard(self.db, job)
         if resume:
             route = next(
                 (
