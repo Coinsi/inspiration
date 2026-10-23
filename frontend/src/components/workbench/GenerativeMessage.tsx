@@ -31,7 +31,7 @@ export function GenerativeMessage({ block, disabled, onReply }: {
           <Content tree={block.tree} dispatch={action => {
             if (disabled) return;
             try {
-              onReply(actionReply(action));
+              onReply(actionReply(action, block.tree));
               setNotice("已填入输入框，发送后继续。");
             } catch (error) { setNotice(error instanceof Error ? error.message : "操作未完成"); }
           }} />

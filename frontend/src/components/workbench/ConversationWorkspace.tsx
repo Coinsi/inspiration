@@ -3,7 +3,8 @@ import { AssistantConversation } from "./AssistantConversation";
 import { useConversationStream } from "./useConversationStream";
 import type { ComposerReference } from "./ComposerReferences";
 import { referenceDetailPath, type ReferenceInput } from "./referenceInput";
-import { GenerativeMessage, type UIBlock } from "./GenerativeMessage";
+import type { UIBlock } from "./GenerativeMessage";
+import { ConversationAnswer } from "./ConversationAnswer";
 import { SelectField } from "@/components/ui/select-field";
 import {
   ConversationMediaControls,
@@ -856,6 +857,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           <ThreadPrimitive.Messages>{({ message }) => {
             const m = messageById.get(message.id);
             if (!m) return null;
+            const ExecutionSurface = m.status === "completed" ? "details" : "div";
             return <MessagePrimitive.Root asChild><article
               key={m.id}
               id={`conversation-message-${m.id}`}
@@ -872,44 +874,34 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 {m.role === "user" ? "你" : "创作助理"}
                 {m.context.mode === "test" && <span>离线机制测试</span>}
               </div>
-              {m.context.ui_blocks?.map(block => <GenerativeMessage
-                key={block.id} block={block} disabled={busy || blocked || !!detail.data?.archived}
-                onReply={text => {
-                  const next = draft.trim() ? `${draft}\n\n${text}` : text;
-                  if (next.length > 8000) throw new Error("输入框内容较长，请整理后再加入这份选择。");
-                  setMode("text"); setDraft(next); input.current?.focus();
-                }}
-              />)}
-              {m.content &&
-                !(
-                  m.execution_kind === "generation" &&
-                  m.context.outputs?.length &&
-                  /^(模拟测试：)?已生成(图片|视频)，可以预览、继续讨论或作为下一次创作的参考。$/.test(
-                    m.content,
-                  )
-                ) && (
-                  <ConversationText
-                    content={m.content}
-                    user={m.role === "user"}
-                  />
-                )}
+              {m.role === "user" ? (
+                <ConversationText content={m.content} user />
+              ) : (
+                <ConversationAnswer
+                  content={m.execution_kind === "generation" && m.context.outputs?.length &&
+                    /^(模拟测试：)?已生成(图片|视频)，可以预览、继续讨论或作为下一次创作的参考。$/.test(m.content) ? undefined : m.content}
+                  blocks={m.context.ui_blocks}
+                  disabled={busy || blocked || !!detail.data?.archived}
+                  onReply={text => {
+                    const next = draft.trim() ? `${draft}\n\n${text}` : text;
+                    if (next.length > 8000) throw new Error("输入框内容较长，请整理后再加入这份选择。");
+                    setMode("text"); setDraft(next); input.current?.focus();
+                  }}
+                >
+                  {!!m.context.outputs?.length && <ConversationMediaResults
+                    projectId={projectId}
+                    outputs={m.context.outputs}
+                    returnTo={returnLink(m)}
+                    taskHref={m.task_id && m.execution_kind !== "production"
+                      ? `${root}/tasks?kind=generation&task=${m.task_id}&return=${encodeURIComponent(returnLink(m))}` : undefined}
+                    simulated={m.content.startsWith("模拟测试：")}
+                    disabled={busy || !!detail.data?.archived}
+                    reuse={useOutput}
+                  />}
+                </ConversationAnswer>
+              )}
               {m.role === "assistant" && (
                 <>
-                  {!!m.context.outputs?.length && (
-                    <ConversationMediaResults
-                      projectId={projectId}
-                      outputs={m.context.outputs}
-                      returnTo={returnLink(m)}
-                      taskHref={
-                        m.task_id && m.execution_kind !== "production"
-                          ? `${root}/tasks?kind=generation&task=${m.task_id}&return=${encodeURIComponent(returnLink(m))}`
-                          : undefined
-                      }
-                      simulated={m.content.startsWith("模拟测试：")}
-                      disabled={busy || !!detail.data?.archived}
-                      reuse={useOutput}
-                    />
-                  )}
                   {m.execution_kind === "production" && m.task_id && m.context.production?.is_current !== false ? (
                     <ProductionTask projectId={projectId} runId={m.task_id} onUpdated={() => void refresh()} />
                   ) : m.execution_kind !== "production" ? <ConversationTaskState
@@ -931,15 +923,16 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                     retry={() => retryTurn.mutate(m)}
                     edit={() => editRetry.mutate(m)}
                   /> : null}
-                  {m.execution_kind !== "production" && !(
+                  {m.execution_kind !== "production" && (m.status !== "completed" || m.task_id || m.progress.length > 0) && !(
                     m.execution_kind === "generation" &&
                     m.status === "completed" &&
                     m.context.outputs?.length
                   ) && (
-                    <div
+                    <ExecutionSurface
                       className="conversation-execution"
                       data-state={m.status}
                     >
+                      {m.status === "completed" && <summary>执行记录</summary>}
                       <span>
                         {m.status === "completed" ? <Check size={13} /> : null}
                         {statuses[m.status] || m.status}
@@ -992,7 +985,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                           停止任务
                         </button>
                       )}
-                    </div>
+                    </ExecutionSurface>
                   )}
                 </>
               )}

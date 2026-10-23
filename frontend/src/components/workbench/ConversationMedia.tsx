@@ -4,9 +4,7 @@ import { Link } from "react-router-dom";
 import {
   ImagePlus,
   X,
-  Image,
   Film,
-  Check,
   WandSparkles,
   ArrowUpRight,
   Maximize2,
@@ -254,7 +252,7 @@ export function ConversationMediaResults({
   simulated?: boolean;
 }) {
   return (
-    <div className="conversation-media-results">
+    <div className="conversation-media-results" data-multiple={outputs.length > 1 || undefined}>
       {outputs.map((output, index) => (
         <ConversationMediaCard
           key={output.id}
@@ -267,13 +265,15 @@ export function ConversationMediaResults({
           taskHref={taskHref}
           returnTo={returnTo}
           simulated={simulated}
+          src={blobUrl(projectId, output.blob_hash)}
+          poster={output.thumbnail_hash ? blobUrl(projectId, output.thumbnail_hash) : undefined}
         />
       ))}
     </div>
   );
 }
 
-function ConversationMediaCard({
+export function ConversationMediaCard({
   projectId,
   output,
   index,
@@ -283,8 +283,10 @@ function ConversationMediaCard({
   taskHref,
   returnTo,
   simulated,
+  src,
+  poster,
 }: {
-  projectId: string;
+  projectId?: string;
   output: MediaOutput;
   index: number;
   multiple: boolean;
@@ -293,35 +295,25 @@ function ConversationMediaCard({
   taskHref?: string;
   returnTo?: string;
   simulated?: boolean;
+  src: string;
+  poster?: string;
 }) {
   const [ratio, setRatio] = useState(16 / 9);
   const [preview, setPreview] = useState(false);
   const isImage = output.type === "image";
-  const src = blobUrl(projectId, output.blob_hash);
   const dimensions = (width: number, height: number) => {
     if (width > 0 && height > 0) setRatio(width / height);
   };
   return (
-    <div
+    <figure
       className="conversation-media-result"
       style={
         {
           "--result-ratio": ratio,
-          "--result-width": `${Math.min(640, Math.max(260, 380 * ratio))}px`,
+          "--result-width": `${Math.min(800, Math.max(280, 460 * ratio))}px`,
         } as CSSProperties
       }
     >
-      <div className="conversation-result-heading">
-        <span>
-          {isImage ? <Image size={15} /> : <Film size={15} />}
-          {isImage ? "图片" : "视频"}
-          {multiple ? ` · ${index + 1}` : ""}
-        </span>
-        <span className="conversation-result-ready">
-          <Check size={12} />
-          {simulated ? "模拟结果" : "已生成"}
-        </span>
-      </div>
       {isImage ? (
         <button
           className="conversation-image-preview"
@@ -341,17 +333,14 @@ function ConversationMediaCard({
       ) : (
         <MediaVideo
           src={src}
-          poster={
-            output.thumbnail_hash
-              ? blobUrl(projectId, output.thumbnail_hash)
-              : undefined
-          }
+          poster={poster}
           label="本轮生成的视频"
           presentation="studio"
           onDimensions={dimensions}
         />
       )}
-      <div className="conversation-media-actions">
+      <figcaption className="conversation-media-actions">
+        {(multiple || simulated) && <span className="conversation-result-caption">{simulated ? "模拟结果" : `方案 ${index + 1}`}</span>}
         {isImage ? (
           <div className="conversation-media-next">
             <button disabled={disabled} onClick={() => reuse(output, "image")}>
@@ -365,19 +354,19 @@ function ConversationMediaCard({
           </div>
         ) : <button disabled={disabled} onClick={() => reuse(output, "video")}><Film size={14} />用作视频参考</button>}
         <div className="conversation-media-links">
-          <Link
+          {projectId && <Link
             to={`/projects/${projectId}/materials?generation=${output.id}${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`}
           >
             素材详情
             <ArrowUpRight size={14} />
-          </Link>
+          </Link>}
           {taskHref && (
             <Link to={taskHref} aria-label="查看生成任务" title="查看生成任务">
               <History size={15} />
             </Link>
           )}
         </div>
-      </div>
+      </figcaption>
       {preview && (
         <Lightbox
           src={src}
@@ -386,6 +375,6 @@ function ConversationMediaCard({
           onClose={() => setPreview(false)}
         />
       )}
-    </div>
+    </figure>
   );
 }

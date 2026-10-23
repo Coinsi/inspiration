@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { ResponseMarkdown } from "../ui/response-markdown";
 
 export function ConversationText({
   content,
@@ -17,7 +17,7 @@ export function ConversationText({
       <div
         className={`conversation-markdown ${collapsible && !expanded ? "is-collapsed" : ""}`}
       >
-        {user ? <p>{content}</p> : <ReactMarkdown>{content}</ReactMarkdown>}
+        {user ? <p>{content}</p> : <ResponseMarkdown>{content}</ResponseMarkdown>}
       </div>
       {collapsible && (
         <button

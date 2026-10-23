@@ -9,8 +9,11 @@ import { cn } from "@/lib/utils";
 
 // 拉取图片(blob 端点带 token,同源)→ 触发浏览器下载,文件名可控
 async function downloadImage(src: string, filename: string) {
+  const urlToFetch = new URL(src, window.location.href);
+  const token = getToken();
+  const authenticated = urlToFetch.origin === window.location.origin && urlToFetch.pathname.startsWith("/api/");
   const res = await fetch(src, {
-    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    headers: authenticated && token ? { Authorization: `Bearer ${token}` } : {},
   });
   const blob = await res.blob();
   const ext = blob.type.includes("png")

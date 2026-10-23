@@ -3,45 +3,30 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 20px;
-  margin: 12px 0 4px;
+  gap: 24px;
+  margin: 22px 0 6px;
+}
+.conversation-media-results[data-multiple] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  align-items: start;
 }
 .conversation-media-result {
-  width: min(100%, var(--result-width, 640px));
-  overflow: hidden;
-  border: 1px solid hsl(var(--border) / 0.75);
-  border-radius: 16px;
-  background: hsl(var(--card));
-  box-shadow: 0 4px 20px hsl(var(--fg) / 0.025);
+  width: min(100%, var(--result-width, 800px));
+  min-width: 0;
+  margin: 0;
 }
-.conversation-result-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  font-size: 12px;
-  color: hsl(var(--muted));
-}
-.conversation-result-heading > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-.conversation-result-ready {
-  font-size: 11px;
-}
-.conversation-result-ready svg {
-  color: hsl(var(--primary));
-}
+.conversation-media-results[data-multiple] .conversation-media-result { width: 100%; }
+.conversation-result-caption { color: hsl(var(--muted)); font-size: 12px; padding-right: 8px; }
 .conversation-image-preview {
   position: relative;
   display: block;
   width: 100%;
   aspect-ratio: var(--result-ratio, 16 / 9);
-  max-height: 440px;
+  max-height: 520px;
   overflow: hidden;
   cursor: zoom-in;
+  border-radius: 14px;
   background: hsl(var(--surface));
 }
 .conversation-image-preview > div {
@@ -75,11 +60,12 @@
 }
 .conversation-media-result .media-player {
   border: 0;
-  border-radius: 0;
+  border-radius: 14px;
+  overflow: hidden;
 }
 .conversation-media-result .media-player-screen {
   aspect-ratio: var(--result-ratio, 16 / 9);
-  max-height: 440px;
+  max-height: 520px;
   background: #111;
 }
 .conversation-media-result .media-player:fullscreen .media-player-screen {
@@ -101,8 +87,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid hsl(var(--border) / 0.6);
+  padding: 8px 0 0;
 }
 .conversation-media-next,
 .conversation-media-links {
@@ -121,7 +106,7 @@
   gap: 6px;
   padding: 7px 8px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: 13px;
   color: hsl(var(--muted));
   transition:
     background 0.15s,
@@ -129,7 +114,7 @@
 }
 .conversation-media-next button:first-child {
   color: hsl(var(--fg));
-  background: hsl(var(--surface));
+  background: transparent;
 }
 .conversation-media-actions button:hover:not(:disabled),
 .conversation-media-actions a:hover {
@@ -791,7 +776,7 @@
   gap: 8px;
 }
 .conversation-message {
-  margin: 0 0 32px;
+  margin: 0 0 40px;
   max-width: 100%;
 }
 .conversation-message-user {
@@ -806,7 +791,7 @@
   display: flex;
   gap: 12px;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 18px;
   font-size: 12px;
   color: hsl(var(--muted));
 }
@@ -814,30 +799,12 @@
   font-size: 11px;
   color: hsl(var(--primary));
 }
-.conversation-markdown {
-  font-size: 14px;
-  line-height: 1.85;
-  overflow-wrap: anywhere;
-}
-.conversation-markdown p {
-  margin: 8px 0;
-  white-space: pre-wrap;
-}
-.conversation-markdown ul,
-.conversation-markdown ol {
-  padding-left: 24px;
-  list-style: revert;
-}
-.conversation-markdown pre {
-  overflow: auto;
-  padding: 12px;
-  border-radius: 8px;
-  background: hsl(var(--surface));
-}
-.conversation-markdown a {
-  text-decoration: underline;
-  color: hsl(var(--primary));
-}
+.conversation-markdown { min-width: 0; font-size: 16px; line-height: 1.9; overflow-wrap: anywhere; }
+.conversation-markdown > p { margin: 8px 0; white-space: pre-wrap; }
+.conversation-answer { min-width: 0; }
+.conversation-answer > :first-child { margin-top: 0; }
+.conversation-answer > .conversation-markdown { max-width: 80ch; }
+.conversation-answer > .generative-ui:last-child { margin-bottom: 0; }
 .conversation-execution {
   display: flex;
   gap: 14px;
@@ -1056,6 +1023,13 @@
   line-height: 1.8;
   color: hsl(var(--muted));
 }
+.conversation-task-state:not(.is-failed) { padding: 10px 0; border: 0; border-radius: 0; background: transparent; }
+.conversation-task-progress { margin: 10px 0 0 29px; font-size: 13px; color: hsl(var(--muted)); }
+.conversation-task-progress summary { width: fit-content; cursor: pointer; }
+.conversation-task-progress p { color: hsl(var(--muted)); }
+.conversation-execution[data-state="completed"] { display: block; margin-top: 20px; }
+.conversation-execution summary { cursor: pointer; width: fit-content; color: hsl(var(--muted)); }
+.conversation-execution[data-state="completed"] > :not(summary) { margin: 10px 14px 0 0; }
 .conversation-task-state.is-failed {
   border-color: hsl(var(--danger) / 0.22);
 }
@@ -1083,20 +1057,6 @@
   color: hsl(var(--bg));
   border-color: transparent;
 }
-.conversation-task-pulse {
-  height: 3px;
-  background: hsl(var(--primary) / 0.1);
-  border-radius: 3px;
-  overflow: hidden;
-  margin: 16px 0 10px;
-}
-.conversation-task-pulse span {
-  display: block;
-  width: 35%;
-  height: 100%;
-  background: hsl(var(--primary) / 0.5);
-  animation: conversation-pulse 2s ease-in-out infinite alternate;
-}
 .conversation-spinner {
   animation: conversation-spin 1.5s linear infinite;
   color: hsl(var(--primary));
@@ -1106,17 +1066,8 @@
     transform: rotate(360deg);
   }
 }
-@keyframes conversation-pulse {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(285%);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .conversation-spinner,
-  .conversation-task-pulse span {
+  .conversation-spinner {
     animation: none;
   }
 }
@@ -1163,32 +1114,19 @@
 .conversation-expand-text:hover {
   color: hsl(var(--fg));
 }
-.conversation-markdown h1,
-.conversation-markdown h2,
-.conversation-markdown h3 {
-  margin: 20px 0 8px;
-  font-size: 1.1em;
-  font-weight: 600;
-  line-height: 1.5;
-}
-.conversation-markdown blockquote {
-  border-left: 2px solid hsl(var(--primary) / 0.35);
-  padding-left: 16px;
-  margin: 14px 0;
-  color: hsl(var(--muted));
-}
 @media (max-width: 760px) {
   .conversation-message-user {
     max-width: 92%;
     padding: 12px 15px;
   }
   .conversation-media-actions {
-    padding: 8px;
+    padding: 8px 0;
     gap: 4px;
   }
   .conversation-media-actions button,
   .conversation-media-actions a {
-    font-size: 11px;
-    padding: 7px 6px;
+    font-size: 13px;
+    min-height: 44px;
+    padding: 8px 6px;
   }
 }

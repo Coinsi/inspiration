@@ -48,16 +48,13 @@ export function ConversationTaskState({
             {String(seconds % 60).padStart(2, "0")}
           </span>
         </div>
-        <p>
-          {progress ||
-            (kind === "视频" || kind === "图片"
-              ? "正在等待生成服务返回结果，完成后会显示在这里。"
-              : "正在整理上下文并执行任务，有进展会在这里更新。")}
-        </p>
-        <div className="conversation-task-pulse" aria-hidden="true">
-          <span />
-        </div>
-        <small>可以离开此页，任务会继续执行。</small>
+        <details className="conversation-task-progress">
+          <summary>查看进度</summary>
+          <p>{progress || (kind === "视频" || kind === "图片"
+            ? "正在等待生成服务返回结果，完成后会显示在这里。"
+            : "正在整理上下文并执行任务，有进展会在这里更新。")}</p>
+          <small>可以离开此页，任务会继续执行。</small>
+        </details>
       </div>
     );
   }

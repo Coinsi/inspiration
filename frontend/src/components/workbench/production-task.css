@@ -2,10 +2,11 @@
   width: 100%;
   min-width: 0;
   margin: 14px 0;
-  padding: 22px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 16px;
-  background: hsl(var(--surface) / 0.3);
+  padding: 20px 0;
+  border: 0;
+  border-top: 1px solid hsl(var(--border) / .65);
+  border-radius: 0;
+  background: transparent;
   color: hsl(var(--fg));
   font-size: 14px;
   line-height: 1.6;

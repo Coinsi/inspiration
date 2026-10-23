@@ -519,7 +519,8 @@ export function ProductionTask({
             : 2;
     return rank(a) - rank(b);
   });
-  const displayed = ordered.slice(0, expanded ? visibleCount : 5);
+  // Routine work stays behind the progress summary; decisions and failures stay visible.
+  const displayed = expanded ? ordered.slice(0, visibleCount) : actionable.slice(0, 5);
   const completed = tasks.filter((t) => t.status === "succeeded").length;
   const running = tasks.filter((t) => t.status === "running").length;
   const ended = run?.status === "succeeded" || run?.status === "canceled";
@@ -953,7 +954,7 @@ export function ProductionTask({
               </li>
             ))}
           </ul>
-          {ordered.length > displayed.length && (
+          {(expanded ? ordered.length : actionable.length) > displayed.length && (
             <button
               type="button"
               className="production-text-button production-more"
@@ -962,7 +963,7 @@ export function ProductionTask({
                 setVisibleCount((count) => (expanded ? count + 24 : count));
               }}
             >
-              还有 {ordered.length - displayed.length} 个步骤，展开查看
+              还有 {(expanded ? ordered.length : actionable.length) - displayed.length} 个步骤，展开查看
             </button>
           )}
         </>

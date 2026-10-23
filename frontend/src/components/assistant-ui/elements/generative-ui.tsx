@@ -1,8 +1,7 @@
 // Source: https://www.assistant-ui.com — MIT
 "use client";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { ResponseMarkdown } from "../../ui/response-markdown";
 import type { GenerativeUILibrary } from "@assistant-ui/generative-ui/react";
 import { defaultGenerativeUILibrary } from "@assistant-ui/generative-ui/react";
 import { GeoMap, type GeoMapPlace } from "./geo-map";
@@ -38,7 +37,7 @@ export const styledGenerativeUILibrary: GenerativeUILibrary = {
     description: "A markdown string, rendered with GitHub-flavored markdown.",
     render: ({ value, children }) => (
       <div data-aui="markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{value ?? ""}</ReactMarkdown>
+        <ResponseMarkdown>{value ?? ""}</ResponseMarkdown>
         {children}
       </div>
     ),
