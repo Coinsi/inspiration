@@ -322,8 +322,8 @@ def validate_plan(db, ctx, run, plan, parent=None):
                             db,
                             ctx,
                             {
-                                "kind": "generation",
-                                "id": str(ref.generation_id),
+                                "kind": ref.source_type,
+                                "id": str(ref.source_id),
                                 "purpose": ref.role,
                                 "required": True,
                             },

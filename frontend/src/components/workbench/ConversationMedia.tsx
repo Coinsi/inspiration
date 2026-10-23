@@ -21,6 +21,7 @@ import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
 import { ComposerParameters } from "./ComposerParameters";
 import { referenceProblem } from "./referenceProblem";
+import { referenceInput } from "./referenceInput";
 import {
   ComposerReferences,
   ReferencePreview,
@@ -95,10 +96,9 @@ export function useConversationMedia(
           : spec.enum![0],
       ]),
   );
-  const references = refs.map((r) => ({
-    generation_id: r.id,
-    role: mode === "image" ? "reference" : r.role,
-  }));
+  const references = refs.map((r) =>
+    referenceInput(r, mode === "image" ? "reference" : r.role),
+  );
   const problem = unavailable
     ? "原来选择的模型已不可用，请重新选择模型后发送。"
     : referenceProblem(caps.data, mode === "text" ? [] : refs.map(r => ({ ...r, role: mode === "image" ? "reference" : r.role })));

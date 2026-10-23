@@ -213,7 +213,10 @@ def validate_job(db, job, snapshot=None, *, phase="submit"):
         if len(sources) != len(refs) or snapshot.get("mask"):
             raise Forbidden("生成参考素材缺少可核对的固定来源")
         for source, ref in zip(sources, refs, strict=True):
+            from app.modules.generation.references import Reference
+
+            selected = Reference.model_validate(source)
             if source.get("role", "reference") != ref.get("role", "reference"):
                 raise Conflict("参考素材用途与固定提交不一致")
-            _reference(db, ctx, "generation", source["generation_id"], ref["blob_hash"])
+            _reference(db, ctx, selected.source_type, selected.source_id, ref["blob_hash"])
     return ctx

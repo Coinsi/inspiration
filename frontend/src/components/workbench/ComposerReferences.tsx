@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
 import { MediaImage } from "@/components/MediaImage";
 import { Button } from "@/components/ui/button";
+import type { ReferenceSource } from "./referenceInput";
 export type ComposerReference = {
   id: string;
+  source_type?: ReferenceSource;
   blob_hash: string;
   title: string;
   role: "reference" | "first_frame" | "last_frame";
@@ -44,7 +46,7 @@ export function ComposerReferences({
       <SearchField
         className="w-full"
         label="搜索参考素材"
-        placeholder="按提示词查找素材"
+        placeholder="搜索素材名称、描述或提示词"
         value={query}
         onValueChange={(value) => {
           setQuery(value);

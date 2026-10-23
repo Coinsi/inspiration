@@ -2,6 +2,7 @@ import { ComposerPrimitive, ThreadPrimitive, MessagePrimitive } from "@assistant
 import { AssistantConversation } from "./AssistantConversation";
 import { useConversationStream } from "./useConversationStream";
 import type { ComposerReference } from "./ComposerReferences";
+import { referenceDetailPath, type ReferenceInput } from "./referenceInput";
 import { GenerativeMessage, type UIBlock } from "./GenerativeMessage";
 import { SelectField } from "@/components/ui/select-field";
 import {
@@ -112,10 +113,7 @@ type RetryInput = {
     provider: string;
     request_type: "image" | "video";
     provider_params: Record<string, string | number>;
-    references: {
-      generation_id: string;
-      role: "reference" | "first_frame" | "last_frame";
-    }[];
+    references: ReferenceInput[];
   } | null;
 };
 type Detail = Conversation & { messages: Message[]; has_older: boolean };
@@ -480,10 +478,11 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       const refs = await Promise.all(
         (original.media?.references || []).map(async (r) => {
           const item = await api.get<ComposerReference>(
-            `${root}/workbench/references/${r.generation_id}`,
+            `${root}${referenceDetailPath(r)}`,
           );
           return {
             id: item.id,
+            source_type: item.source_type,
             title: item.title,
             blob_hash: item.blob_hash,
             kind: item.kind,

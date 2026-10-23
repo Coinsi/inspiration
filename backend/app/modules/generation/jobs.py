@@ -358,6 +358,9 @@ def retry(db, ctx, job_id):
     validate_target(db, ctx.project.id, job.target_type, job.target_id)
     reserve_check(db, ctx.project.id, float(job.estimated_cost or 0))
     snapshot = copy.deepcopy(job.input_snapshot)
+    from app.modules.generation.references import validate_snapshot as validate_references
+
+    validate_references(db, ctx.project.id, snapshot)
     from app.modules.media.generation_reference import public_base
 
     # A user-triggered retry is a new submission; do not keep a retired domain.
@@ -522,6 +525,9 @@ def execute(db, job_id):
         from app.modules.generation.service import _materialize_references, _provider_instance
 
         validate_target(db, project_id, job.target_type, job.target_id)
+        from app.modules.generation.references import validate_snapshot as validate_references
+
+        validate_references(db, project_id, snap)
         db.commit()
         operation = snap.get("operation", "generate")
         materialized = []

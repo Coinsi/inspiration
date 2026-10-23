@@ -39,6 +39,7 @@ import { JobStatus, ACTIVE_JOBS, JOB_LABEL } from "@/components/JobStatus";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerParameters } from "./ComposerParameters";
 import { referenceProblem } from "./referenceProblem";
+import { referenceInput } from "./referenceInput";
 import {
   ComposerReferences,
   ReferencePreview,
@@ -259,7 +260,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     provider_params: controls,
     count: 1,
     use_references: false,
-    references: activeRefs.map((r) => ({ generation_id: r.id, role: r.role })),
+    references: activeRefs.map((r) => referenceInput(r)),
   };
   const fingerprint = JSON.stringify(payload);
   const [quote, setQuote] = useState<{

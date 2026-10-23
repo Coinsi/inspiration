@@ -267,8 +267,8 @@ def start(db, ctx, conversation, message, data, history):
                 # for this request; prior history does not silently alter input.
                 references = [
                     {
-                        "kind": "generation",
-                        "id": str(ref.generation_id),
+                        "kind": ref.source_type,
+                        "id": str(ref.source_id),
                         "purpose": ref.role,
                         "required": True,
                     }

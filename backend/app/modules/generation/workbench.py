@@ -4,29 +4,25 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.contracts import ReferenceImage, reference_error
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
-from app.core.errors import AppError, CapabilityUnsupported, Conflict
+from app.core.errors import CapabilityUnsupported, Conflict
 from app.models.creation import Creation
-from app.models.generation import Generation, GenerationJob
+from app.models.generation import GenerationJob
 from app.models.identity import Project
 from app.modules.generation import jobs, schemas, service
+from app.modules.generation import references as reference_media
+from app.modules.generation.references import Reference
 
 router = APIRouter(prefix="/projects/{project_id}/workbench", tags=["workbench"])
 DB = Depends(get_db, scope="function")
 READ = Depends(get_project_context)
 RUN = Depends(require_action("generation.trigger"))
-
-
-class Reference(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    generation_id: uuid.UUID
-    role: Literal["reference", "first_frame", "last_frame"] = "reference"
 
 
 class Create(schemas.GenerateIn):
@@ -60,14 +56,12 @@ def prepare(db, ctx, data):
     refs = []
     unique = set()
     for ref in data.references:
-        if ref.generation_id in unique:
+        key = (ref.source_type, ref.source_id)
+        if key in unique:
             raise CapabilityUnsupported("同一素材不能重复引用")
-        unique.add(ref.generation_id)
-        g = jobs.source(db, ctx.project.id, ref.generation_id)
-        jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
-        if g.output_type not in ("image", "video"):
-            raise CapabilityUnsupported("请选择图片或视频素材")
-        if g.output_type == "video" and data.request_type.value != "video":
+        unique.add(key)
+        item = reference_media.resolve(db, ctx.project.id, ref)
+        if item["kind"] == "video" and data.request_type.value != "video":
             raise CapabilityUnsupported("参考视频只能用于生成视频")
         if ref.role != "reference" and (
             data.request_type.value != "video" or ref.role not in caps.features
@@ -75,7 +69,7 @@ def prepare(db, ctx, data):
             raise CapabilityUnsupported("所选模型不支持此首尾帧输入")
         if ref.role != "reference" and sum(r.role == ref.role for r in data.references) > 1:
             raise CapabilityUnsupported("首帧和尾帧各只能选一张")
-        refs.append(ReferenceImage(blob_hash=g.output_blob_hash, role=ref.role, kind=g.output_type))
+        refs.append(ReferenceImage(blob_hash=item["blob_hash"], role=ref.role, kind=item["kind"]))
     if problem := reference_error(refs, caps):
         raise CapabilityUnsupported(problem)
     gen = schemas.GenerateIn.model_validate(
@@ -204,14 +198,13 @@ def history(
     ]
 
 
-@router.get("/references/{generation_id}")
-def reference_detail(generation_id: uuid.UUID, ctx: ProjectContext = READ, db: Session = DB):
-    g = jobs.source(db, ctx.project.id, generation_id)
-    jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
-    if g.output_type not in ("image", "video"):
-        raise CapabilityUnsupported("请选择图片或视频素材")
-    return {"id": g.id, "blob_hash": g.output_blob_hash, "kind": g.output_type,
-            "thumbnail_hash": g.thumbnail_hash, "title": (g.prompt_snapshot or "项目素材")[:100]}
+@router.get("/references/{reference_id}")
+def reference_detail(
+    reference_id: uuid.UUID, ctx: ProjectContext = READ, db: Session = DB,
+    source_type: Literal["generation", "media_version"] = "generation",
+):
+    field = "media_version_id" if source_type == "media_version" else "generation_id"
+    return reference_media.resolve(db, ctx.project.id, Reference(**{field: reference_id}))
 
 
 @router.get("/references")
@@ -222,31 +215,6 @@ def references(
     query: str = Query("", max_length=100),
     media_type: Literal["image", "video", "all"] = "image",
 ):
-    stmt = select(Generation).where(
-        Generation.project_id == ctx.project.id,
-        Generation.output_type.in_(("image", "video") if media_type == "all" else (media_type,)),
-        Generation.output_blob_hash.is_not(None),
+    return reference_media.catalog(
+        db, ctx.project.id, query=query, media_type=media_type, offset=offset
     )
-    if query.strip():
-        stmt = stmt.where(Generation.prompt_snapshot.icontains(query.strip(), autoescape=True))
-    rows = list(
-        db.scalars(
-            stmt.order_by(Generation.created_at.desc(), Generation.id).offset(offset).limit(24)
-        )
-    )
-    result = []
-    for g in rows:
-        try:
-            jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
-        except AppError:
-            continue
-        result.append(
-            {
-                "id": g.id,
-                "blob_hash": g.output_blob_hash,
-                "kind": g.output_type,
-                "thumbnail_hash": g.thumbnail_hash,
-                "title": (g.prompt_snapshot or "项目素材")[:100],
-            }
-        )
-    return {"items": result, "has_more": len(rows) == 24}

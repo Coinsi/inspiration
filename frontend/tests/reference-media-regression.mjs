@@ -18,6 +18,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComposerReferences, ReferencePreview } from './src/components/workbench/ComposerReferences';
 import { referenceProblem } from './src/components/workbench/referenceProblem';
+import { referenceInput, referenceDetailPath } from './src/components/workbench/referenceInput';
 import { I18nProvider } from './src/lib/i18n';
 import './src/components/workbench/composer.css';
 const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
@@ -28,7 +29,9 @@ function App(){
  <p role="status">{referenceProblem(caps,refs)||'参考素材可提交'}</p>
  <div className="composer-references">{refs.map(r=><div className="composer-reference" key={r.id}><ReferencePreview projectId="fixture" item={r}/></div>)}</div>
  <ComposerReferences projectId="fixture" includeVideos={video} selected={refs} pick={item=>setRefs(v=>v.some(r=>r.id===item.id)?v.filter(r=>r.id!==item.id):[...v,item])}/>
- <output aria-label="选择结果">{JSON.stringify(refs.map(r=>({id:r.id,kind:r.kind})))}</output></main>
+ <output aria-label="选择结果">{JSON.stringify(refs.map(r=>({id:r.id,kind:r.kind})))}</output>
+ <output aria-label="引用请求">{JSON.stringify(refs.map(r=>referenceInput(r)))}</output>
+ <output aria-label="恢复引用">{JSON.stringify(refs.map(r=>referenceDetailPath(referenceInput(r))))}</output></main>
 }
 createRoot(document.getElementById('root')).render(<I18nProvider><QueryClientProvider client={client}><App/></QueryClientProvider></I18nProvider>);
 `, resolveDir: process.cwd(), loader: "tsx" }, bundle:true, outfile:resolve(out,"fixture.js"), format:"esm", jsx:"automatic", alias:{"@":resolve("src")}, define:{"process.env.NODE_ENV":'"development"'} });
@@ -45,7 +48,7 @@ try {
   assert.equal(route.request().method(),'GET');
   const url=new URL(route.request().url());
   if(url.pathname.endsWith('/workbench/references')){
-   const items=[{id:'image',kind:'image',blob_hash:'image',title:'人物外观'},{id:'video',kind:'video',blob_hash:'video',thumbnail_hash:'poster',title:'动作与运镜'}].filter(x=>url.searchParams.get('media_type')==='all'||x.kind==='image');
+   const items=[{id:'image',source_type:'media_version',kind:'image',blob_hash:'image',title:'人物外观'},{id:'video',kind:'video',blob_hash:'video',thumbnail_hash:'poster',title:'动作与运镜'}].filter(x=>url.searchParams.get('media_type')==='all'||x.kind==='image');
    return route.fulfill({json:{items,has_more:false}});
   }
   return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="180"><rect width="300" height="180" fill="#7b98ba"/><circle cx="150" cy="72" r="32" fill="#e8eef7"/></svg>'});
@@ -55,6 +58,10 @@ try {
  await page.getByRole('button',{name:'引用 动作与运镜',exact:true}).click();
  const selection=JSON.parse(await page.getByLabel('选择结果').textContent());
  assert.deepEqual(selection,[{id:'image',kind:'image'},{id:'video',kind:'video'}]);
+ assert.deepEqual(JSON.parse(await page.getByLabel('引用请求').textContent()),[
+  {media_version_id:'image',role:'reference'},{generation_id:'video',role:'reference'}]);
+ assert.deepEqual(JSON.parse(await page.getByLabel('恢复引用').textContent()),[
+  '/workbench/references/image?source_type=media_version','/workbench/references/video']);
  await page.getByRole('status').filter({hasText:'参考素材可提交'}).waitFor();
  await page.screenshot({path:resolve(out,'mixed-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'切换模型能力'}).click();
