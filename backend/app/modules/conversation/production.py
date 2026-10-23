@@ -319,9 +319,21 @@ def start(db, ctx, conversation, message, data, history):
                         message="用户在对话中明确提交了本次生成请求。",
                     ),
                 )
+    work_context = None
+    if run.work_id:
+        from app.modules.conversation.works import get as get_work
+
+        work = get_work(db, ctx.project.id, run.work_id)
+        work_context = {
+            "id": str(work.id),
+            "title": work.title,
+            "script_id": str(work.script_id) if work.script_id else None,
+            "engineering_revision": work.engineering_revision,
+        }
     message.execution_kind = KIND
     message.execution_id = run.id
     message.context = {
+        "work": work_context,
         "mode": data.mode,
         "model_provider": data.model_provider,
         "scope": [s.model_dump(mode="json") for s in data.scope],

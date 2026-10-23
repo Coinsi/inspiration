@@ -70,7 +70,10 @@ def test_discovery_cannot_expose_a_forbidden_worker_tool(studio):
         )
         db.commit()
         task = db.get(ProductionTask, uuid.UUID(ticket["task_id"]))
-        assert task.state["loaded_tools"] == ["project.overview"]
+        assert task.state["loaded_tools"] == []  # Index discovery does not load schemas.
+        assert [t["name"] for t in task.state["steps"][-1]["receipt"]["data"]] == [
+            "project.overview"
+        ]
         next_ticket = service.claim(db, rid)
         with pytest.raises(Forbidden):
             runtime.apply_action(
