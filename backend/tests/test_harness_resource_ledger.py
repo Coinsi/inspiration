@@ -289,7 +289,9 @@ def test_cloud_usage_envelope_keeps_legacy_chat_call_compatible(monkeypatch):
 
     def response(request, timeout):
         seen.append(json.loads(request.data))
-        return io.BytesIO(body)
+        result = io.BytesIO(body)
+        result.headers = {"Content-Type": "application/json"}
+        return result
 
     monkeypatch.setattr(cloud_llm.urllib.request, "urlopen", response)
     assert cloud_llm._chat("system", "user", "https://fixture.invalid/v1", "test", "mock") == text
