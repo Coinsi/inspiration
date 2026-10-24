@@ -12,7 +12,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { api, blobUrl, type Project } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -27,6 +27,9 @@ import { CreativeLaunch } from "@/components/CreativeLaunch";
 
 export default function Projects() {
   const qc = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const requested = searchParams.get("launch") || "workbench";
+  const launchRoute = ["workbench", "canvas", "director", "scripts", "bible", "storyboard", "assets", "cuts"].includes(requested) ? requested : "workbench";
   const { me } = useAuth();
   const { t: tr, lang } = useI18n();
   const toast = useToast();
@@ -147,7 +150,7 @@ export default function Projects() {
             .map((p) => (
               <Link
                 key={p.id}
-                to={`/projects/${p.id}/workbench`}
+                to={`/projects/${p.id}/${launchRoute}`}
                 className="home-recent"
               >
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint/50" />
@@ -292,7 +295,7 @@ export default function Projects() {
                     data-project-id={p.id}
                   >
                     <Link
-                      to={`/projects/${p.id}/workbench`}
+                      to={`/projects/${p.id}/${launchRoute}`}
                       className="block"
                       aria-label={p.name}
                     >

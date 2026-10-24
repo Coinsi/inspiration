@@ -59,8 +59,8 @@ def out(row, db):
     return {
         "version": row.version,
         "published_revision": row.published_revision,
-        "draft": row.draft,
-        "published": row.published,
+        "draft": Content.model_validate(row.draft).model_dump(mode="json"),
+        "published": Content.model_validate(row.published).model_dump(mode="json"),
         "updated_at": row.updated_at,
         "media_types": types(db, row.draft),
     }
@@ -68,6 +68,11 @@ def out(row, db):
 
 def media_ids(content, active_only=False):
     ids = set()
+    ids.update(
+        b["media_id"]
+        for b in content.get("banners", [])
+        if b.get("media_id") and (not active_only or b.get("enabled", True))
+    )
     enabled = {s["key"] for s in content["sections"] if s["enabled"]}
     if content.get("hero_media_id"):
         ids.add(content["hero_media_id"])
@@ -121,7 +126,9 @@ def public_site(response: Response, db: Session = DB):
     response.headers["Cache-Control"] = "no-cache"
     return {
         "revision": row.published_revision if row else 0,
-        "content": row.published if row else defaults(),
+        "content": Content.model_validate(row.published).model_dump(mode="json")
+        if row
+        else defaults(),
         "media_types": types(db, row.published) if row else {},
     }
 
@@ -328,10 +335,15 @@ def public_media(
 ):
     row = db.get(Website, 1)
     website_uses = row and str(media_id) in media_ids(row.published, True)
-    blog_uses = db.scalar(select(BlogPost.id).where(
-        BlogPost.archived.is_(False), BlogPost.published.is_not(None),
-        BlogPost.published["cover_media_id"].astext == str(media_id),
-    ).limit(1))
+    blog_uses = db.scalar(
+        select(BlogPost.id)
+        .where(
+            BlogPost.archived.is_(False),
+            BlogPost.published.is_not(None),
+            BlogPost.published["cover_media_id"].astext == str(media_id),
+        )
+        .limit(1)
+    )
     if not website_uses and not blog_uses:
         raise NotFound("展示素材未发布")
     return stream_media(db, media_id, range_value)

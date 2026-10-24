@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ArrowUpRight, BookOpen } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, Clapperboard } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { SiteMedia } from "./SiteMedia";
@@ -125,11 +125,7 @@ export function BlogFrame({ children }: { children: ReactNode }) {
       <header className="site-nav">
         <div className="site-nav-inner">
           <Link to="/" className="site-brand">
-            <span className="site-mark">
-              <i />
-              <i />
-              <i />
-            </span>
+            <Clapperboard size={26} />
             {brand}
           </Link>
           <div className="journal-nav">

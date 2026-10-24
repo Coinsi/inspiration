@@ -1,6 +1,17 @@
 export type FeatureKey = "story" | "canvas" | "library" | "edit";
 export type SectionKey = "workflow" | "features" | "case" | "faq";
+export interface SiteBanner {
+  id: string;
+  title: string;
+  description: string;
+  media_id: string | null;
+  href: string;
+  enabled: boolean;
+}
 export interface SiteContent {
+  banners?: SiteBanner[];
+  banner_autoplay?: boolean;
+  banner_interval?: number;
   brand: string;
   announcement: string;
   eyebrow: string;

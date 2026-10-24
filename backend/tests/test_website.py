@@ -189,3 +189,74 @@ def test_revoking_platform_access_takes_effect_for_existing_token(studio):
         db.commit()
     assert client.get("/api/v1/admin/website").status_code == 403
     assert client.get("/api/v1/me").json()["user"]["is_platform_admin"] is False
+
+
+def test_banner_edit_publish_hide_restore_and_validation(studio):
+    client = administrator(studio)
+    image = io.BytesIO()
+    Image.new("RGB", (32, 18), "navy").save(image, "PNG")
+    media = client.post(
+        "/api/v1/admin/website/media", files={"file": ("banner.png", image.getvalue(), "image/png")}
+    ).json()["id"]
+    url = f"/api/v1/website/media/{media}"
+    state = client.get("/api/v1/admin/website").json()
+    content = state["draft"]
+    content["banners"] = [
+        {
+            "id": "test",
+            "title": "轮播测试",
+            "description": "",
+            "media_id": media,
+            "href": "/blog",
+            "enabled": True,
+        }
+    ]
+    saved = save(client, content, state["version"])
+    assert client.get("/api/v1/admin/website").json()["draft"]["banners"] == content["banners"]
+    assert client.get(url).status_code == 404
+    published = publish(client, saved["version"])
+    token = client.headers.pop("Authorization")
+    assert client.get(url).content == image.getvalue()
+    assert client.get("/api/v1/website").json()["content"]["banners"] == content["banners"]
+    client.headers["Authorization"] = token
+    for href in [
+        "javascript:alert(1)",
+        "//example.com",
+        "/\\example.com",
+        "https://user:pw@example.com",
+    ]:
+        content["banners"][0]["href"] = href
+        assert (
+            client.put(
+                "/api/v1/admin/website/draft",
+                json={"version": published["version"], "content": content},
+            ).status_code
+            == 422
+        )
+    content["banners"][0]["href"] = "https://example.com/event"
+    content["banners"][0]["enabled"] = False
+    hidden = publish(client, save(client, content, published["version"])["version"])
+    assert client.get(url).status_code == 404
+    restored = client.post(
+        "/api/v1/admin/website/history/1/restore", json={"version": hidden["version"]}
+    ).json()
+    assert client.get(url).status_code == 404
+    publish(client, restored["version"])
+    assert client.get(url).status_code == 200
+
+
+def test_legacy_content_gets_editable_banners_without_overwriting_fields():
+    import json
+    from pathlib import Path
+
+    from app.modules.website.schemas import Content
+
+    legacy = json.loads(
+        (Path(__file__).parents[1] / "app/modules/website/defaults.json").read_text(
+            encoding="utf-8-sig"
+        )
+    )
+    parsed = Content.model_validate(legacy)
+    assert len(parsed.banners) == 4
+    assert parsed.title == legacy["title"]
+    assert Content.model_validate({**legacy, "banners": []}).banners == []

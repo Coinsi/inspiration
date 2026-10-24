@@ -875,3 +875,14 @@
   --primary: 136 26% 28%;
   --elevated: 115 15% 95%;
 }
+
+/* Public reading pages share the workspace palette and brand; article content is unchanged. */
+.journal-root.site-root { --site-ink:hsl(var(--fg)); --site-green:hsl(var(--fg)); --site-line:hsl(var(--border)); --site-paper:hsl(var(--bg)); --site-muted:hsl(var(--muted)); color-scheme:inherit; font-family:"Noto Sans SC","Microsoft YaHei UI",sans-serif; }
+.journal-root .site-nav { background:hsl(var(--bg)/.95); }
+.journal-root .site-button { background:hsl(var(--primary)); color:hsl(var(--primary-fg)); border-color:hsl(var(--border)); box-shadow:none; }
+.journal-root :is(.journal-heading,.journal-reader-next) { background:hsl(var(--surface)); }
+.journal-root :is(.journal-heading h1,.journal-heading h1 em,.journal-card h2,.journal-article-heading h1,.journal-prose h1,.journal-prose h2,.journal-prose h3,.journal-reader-next h2) { color:hsl(var(--fg)); font-family:inherit; letter-spacing:normal; }
+.journal-root :is(.journal-nav,.journal-heading p,.journal-heading>div>span,.journal-meta,.journal-meta>span:first-child,.journal-card-copy>p,.journal-card-bottom,.journal-card-bottom>span:last-child,.journal-footer>p,.journal-footer>div,.journal-article-heading>p,.journal-byline,.journal-byline small,.journal-breadcrumb,.journal-toc a,.journal-toc>p,.journal-toc>span,.journal-image-note,.journal-reader-next>a:last-child,.journal-endmark,.journal-pagination,.journal-loading) { color:hsl(var(--muted)); }
+.journal-root .journal-prose { color:hsl(var(--fg)); }
+.journal-root :is(.journal-toolbar nav button,.journal-prose a,.journal-nav [aria-current]) { color:hsl(var(--fg)); }
+.journal-root :is(.journal-toolbar nav button[aria-pressed=true],.journal-toolbar nav button:hover,.journal-author-mark,.journal-prose blockquote,.journal-prose pre,.journal-prose :not(pre)>code,.journal-prose th) { background:hsl(var(--surface)); color:hsl(var(--fg)); }

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { LandingView } from "@/components/website/LandingView";
+import { PortalHome } from "@/components/website/PortalHome";
 import type { SiteContent } from "@/components/website/types";
 
 export default function Landing() {
@@ -47,7 +47,7 @@ export default function Landing() {
       </div>
     );
   return (
-    <LandingView
+    <PortalHome
       content={site.data.content}
       mediaTypes={site.data.media_types}
       authenticated={!!me}

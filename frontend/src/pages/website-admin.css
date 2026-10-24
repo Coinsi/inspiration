@@ -521,3 +521,5 @@
     width: 12px;
   }
 }
+.website-field input[type="checkbox"]{width:auto;min-height:auto;display:inline-block;margin:0 8px 0 0}
+.website-field>span:has(input[type="checkbox"]){display:flex;align-items:center;gap:8px}

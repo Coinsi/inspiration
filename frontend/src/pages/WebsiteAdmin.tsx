@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   Check,
   ExternalLink,
   Eye,
@@ -24,22 +22,18 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
-import { LandingView } from "@/components/website/LandingView";
+import { PortalHome, defaultBanners } from "@/components/website/PortalHome";
+import { BannerEditor } from "@/components/website/BannerEditor";
 import type {
   SiteAsset,
   SiteContent,
   SiteState,
 } from "@/components/website/types";
 import "./website-admin.css";
-const sectionNames = {
-  workflow: "创作流程",
-  features: "产品能力",
-  case: "创作示例",
-  faq: "常见问题",
-};
 const groups = [
   { key: "hero", label: "首页与品牌", icon: LayoutTemplate },
-  { key: "sections", label: "板块与内容", icon: FileText },
+  { key: "banners", label: "活动轮播", icon: ImagePlus },
+  { key: "sections", label: "创作能力", icon: FileText },
   { key: "media", label: "展示素材", icon: ImagePlus },
   { key: "history", label: "发布历史", icon: History },
 ] as const;
@@ -99,7 +93,7 @@ function Editor() {
   });
   function adopt(next: SiteState) {
     setState(next);
-    setContent(next.draft);
+    setContent({ ...next.draft, banners: next.draft.banners ?? defaultBanners });
     setTypes((v) => ({ ...v, ...next.media_types }));
     setDirty(false);
     qc.setQueryData(["website-admin"], next);
@@ -228,7 +222,7 @@ function Editor() {
       <div className="website-media-field">
         <div>
           <strong>{label}</strong>
-          <small>{id ? "已选择展示素材" : "使用内置交互演示或原创插画"}</small>
+          <small>{id ? "已选择展示素材" : "使用内置背景或图形"}</small>
         </div>
         <Button
           variant="outline"
@@ -364,14 +358,14 @@ function Editor() {
           <div
             onClickCapture={(event) => {
               const link = (event.target as HTMLElement).closest("a");
-              if (link?.getAttribute("href")?.startsWith("/")) {
+              if (link) {
                 event.preventDefault();
                 event.stopPropagation();
                 setNotice("这是草稿预览。请使用顶部入口访问官网或工作台。");
               }
             }}
           >
-            <LandingView content={c} mediaTypes={types} preview authenticated />
+            <PortalHome content={c} mediaTypes={types} preview authenticated />
           </div>
         </>
       ) : (
@@ -403,6 +397,8 @@ function Editor() {
               <span>
                 {group === "hero"
                   ? "把产品的第一印象，打磨成你想要的样子。"
+                  : group === "banners"
+                    ? "更换活动图片、调整顺序，预览后再发布。"
                   : group === "sections"
                     ? "固定的精致布局，内容由你掌握。"
                     : group === "media"
@@ -416,21 +412,21 @@ function Editor() {
                   <h2>品牌与首屏</h2>
                   <div className="website-fields two">
                     {text("brand", "品牌名称", 40)}
-                    {text("eyebrow", "首屏引导文字", 100)}
+
                   </div>
                   {text("announcement", "顶部公告（可留空）", 120)}
                   {text("title", "主标题（换行会保留）", 140, true)}
                   {text("subtitle", "产品介绍", 350, true)}
-                  {text("cta", "开始创作按钮文字", 30)}
+
                   {mediaField(
                     c.hero_media_id,
                     (id) => edit({ ...c, hero_media_id: id }),
-                    "首屏产品演示",
+                    "首屏背景图片 / 视频",
                   )}
                 </section>
                 <section className="website-editor-card">
-                  <h2>结束语与页脚</h2>
-                  {text("closing_title", "结束语", 120, true)}
+                  <h2>页脚与发布说明</h2>
+
                   {text("footer", "页脚介绍", 200, true)}
                   <label className="website-field">
                     本次发布说明
@@ -444,63 +440,9 @@ function Editor() {
                 </section>
               </>
             )}
-            {group === "sections" && (
-              <>
-                <section className="website-editor-card">
-                  <h2>板块顺序与可见性</h2>
-                  <p className="website-editor-hint">
-                    首屏始终展示，下方板块可以调整顺序或隐藏。
-                  </p>
-                  {c.sections.map((s, i) => (
-                    <div className="website-order-row" key={s.key}>
-                      <span>0{i + 1}</span>
-                      <strong>{sectionNames[s.key]}</strong>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={s.enabled}
-                          disabled={busy}
-                          onChange={(e) =>
-                            edit({
-                              ...c,
-                              sections: c.sections.map((x) =>
-                                x.key === s.key
-                                  ? { ...x, enabled: e.target.checked }
-                                  : x,
-                              ),
-                            })
-                          }
-                        />
-                        展示
-                      </label>
-                      {[-1, 1].map((d) => (
-                        <button
-                          key={d}
-                          disabled={
-                            busy || i + d < 0 || i + d >= c.sections.length
-                          }
-                          aria-label={`${d < 0 ? "上移" : "下移"}${sectionNames[s.key]}`}
-                          onClick={() => {
-                            const next = [...c.sections];
-                            [next[i], next[i + d]] = [next[i + d], next[i]];
-                            edit({ ...c, sections: next });
-                          }}
-                        >
-                          {d < 0 ? (
-                            <ArrowUp size={15} />
-                          ) : (
-                            <ArrowDown size={15} />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </section>
-                <section className="website-editor-card">
-                  <h2>创作流程</h2>
-                  {text("workflow_title", "流程标题", 100)}
-                  {text("workflow_description", "流程介绍", 350, true)}
-                </section>
+            {group === "banners" && <BannerEditor content={c} edit={edit} busy={busy} mediaField={mediaField} />}
+            {group === "sections" && (<>
+              <section className="website-editor-card"><h2>创作能力展示</h2><label className="website-field"><span><input type="checkbox" disabled={busy} checked={c.sections.some(s => s.key === "features" && s.enabled)} onChange={e => edit({ ...c, sections: c.sections.map(s => s.key === "features" ? { ...s, enabled: e.target.checked } : s) })} /> 在首页展示创作能力</span></label><p className="website-editor-hint">博客入口和文章保留。旧版介绍区的数据仍保留在草稿与发布历史中。</p></section>
                 <section className="website-editor-card">
                   <h2>产品能力</h2>
                   {text("features_title", "板块标题", 100)}
@@ -558,84 +500,7 @@ function Editor() {
                     </div>
                   ))}
                 </section>
-                <section className="website-editor-card">
-                  <h2>创作示例</h2>
-                  {text("case_title", "案例标题", 100)}
-                  {text("case_description", "案例介绍", 700, true)}
-                  {mediaField(
-                    c.case_media_id,
-                    (id) => edit({ ...c, case_media_id: id }),
-                    "案例图片 / 视频",
-                  )}
-                </section>
-                <section className="website-editor-card">
-                  <h2>常见问题</h2>
-                  {c.faq.map((f, i) => (
-                    <div className="website-faq-editor" key={i}>
-                      <label className="website-field">
-                        问题 {i + 1}
-                        <input
-                          value={f.question}
-                          disabled={busy}
-                          maxLength={150}
-                          onChange={(e) =>
-                            edit({
-                              ...c,
-                              faq: c.faq.map((x, n) =>
-                                n === i
-                                  ? { ...x, question: e.target.value }
-                                  : x,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="website-field">
-                        回答
-                        <textarea
-                          value={f.answer}
-                          disabled={busy}
-                          rows={3}
-                          maxLength={700}
-                          onChange={(e) =>
-                            edit({
-                              ...c,
-                              faq: c.faq.map((x, n) =>
-                                n === i ? { ...x, answer: e.target.value } : x,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                      <button
-                        disabled={busy || c.faq.length <= 1}
-                        onClick={() =>
-                          edit({ ...c, faq: c.faq.filter((_, n) => n !== i) })
-                        }
-                      >
-                        移除此问题
-                      </button>
-                    </div>
-                  ))}
-                  <Button
-                    variant="outline"
-                    disabled={busy || c.faq.length >= 12}
-                    onClick={() =>
-                      edit({
-                        ...c,
-                        faq: [
-                          ...c.faq,
-                          { question: "新的问题", answer: "请填写回答。" },
-                        ],
-                      })
-                    }
-                  >
-                    <Plus size={15} />
-                    添加问题
-                  </Button>
-                </section>
-              </>
-            )}
+            </>)}
             {group === "media" && (
               <section className="website-editor-card">
                 <h2>展示素材库</h2>
@@ -667,7 +532,8 @@ function Editor() {
                       </div>
                       <small>
                         {Object.values(c).includes(a.id) ||
-                        c.features.some((f) => f.media_id === a.id)
+                        c.features.some((f) => f.media_id === a.id) ||
+                        c.banners?.some((b) => b.media_id === a.id)
                           ? "草稿已引用"
                           : "可用于展示"}
                       </small>

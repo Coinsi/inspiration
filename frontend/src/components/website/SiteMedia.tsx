@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getToken } from "@/lib/api";
 
 export function SiteMedia({
@@ -6,17 +6,35 @@ export function SiteMedia({
   mime,
   preview = false,
   alt,
+  background = false,
+  playing = false,
+  localSource,
+  poster,
 }: {
-  id: string;
+  id?: string;
   mime?: string;
   preview?: boolean;
   alt: string;
+  background?: boolean;
+  playing?: boolean;
+  localSource?: string;
+  poster?: string;
 }) {
+  const video = useRef<HTMLVideoElement>(null);
   const [source, setSource] = useState(""),
     [error, setError] = useState(false);
   useEffect(() => {
+    if (!background || !video.current) return;
+    if (playing) void video.current.play().catch(() => {});
+    else video.current.pause();
+  }, [source, background, playing]);
+  useEffect(() => {
     setError(false);
     setSource("");
+    if (localSource) {
+      setSource(localSource);
+      return;
+    }
     if (!preview) {
       setSource(`/api/v1/website/media/${id}`);
       return;
@@ -43,7 +61,8 @@ export function SiteMedia({
       controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [id, preview]);
+  }, [id, preview, localSource]);
+  if (error && background && poster) return <img src={poster} alt={alt} />;
   if (error)
     return (
       <div className="site-media-error" role="status">
@@ -53,8 +72,13 @@ export function SiteMedia({
   if (!source) return <div className="site-media-error">正在载入展示素材…</div>;
   return mime?.startsWith("video/") ? (
     <video
+      ref={video}
       src={source}
-      controls
+      poster={poster}
+      controls={!background}
+      autoPlay={background && playing}
+      muted={background}
+      loop={background}
       playsInline
       preload="metadata"
       aria-label={alt}
