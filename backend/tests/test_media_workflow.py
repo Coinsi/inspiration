@@ -639,7 +639,8 @@ def test_optimizer_requires_config_and_valid_json_without_changing_source(studio
         db.commit()
     sent = []
 
-    def reply(system, user, *args):
+    def reply(system, user, *args, sdk_provider):
+        assert sdk_provider == "openai"
         sent.append(json.loads(user))
         return json.dumps(
             {
@@ -654,7 +655,7 @@ def test_optimizer_requires_config_and_valid_json_without_changing_source(studio
     result = post_ok(client, path, body)
     assert result["prompt"] == "红色茶壶，灰色背景" and sent[0]["prompt"] == body["prompt"]
     assert client.post(path, json={**body, "mode": "style"}).status_code == 422
-    monkeypatch.setattr(editing, "_chat", lambda *args: "not json")
+    monkeypatch.setattr(editing, "_chat", lambda *args, **kwargs: "not json")
     assert client.post(path, json=body).status_code == 502
     with sessions() as db:
         assert db.get(Shot, uuid.UUID(ids["shot"])).title == "Test shot"
@@ -689,7 +690,7 @@ def test_visual_optimizer_resolves_project_images_and_preserves_provenance(studi
                 enabled=True,
                 endpoint="https://example.invalid/v1",
                 credentials_encrypted=encrypt("test"),
-                config={"model": "vision-test"},
+                config={"model": "vision-test", "sdk_provider": "anthropic"},
             )
         )
         asset = Asset(
@@ -713,7 +714,8 @@ def test_visual_optimizer_resolves_project_images_and_preserves_provenance(studi
         db.commit()
     sent = []
 
-    def reply(system, content, *args):
+    def reply(system, content, *args, sdk_provider):
+        assert sdk_provider == "anthropic"
         sent.append(content)
         return json.dumps(
             {
