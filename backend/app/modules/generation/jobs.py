@@ -375,6 +375,8 @@ def retry(db, ctx, job_id):
     snapshot["retry_of"] = str(job.id)
     routing_state = {}
     state = job.routing_state or {}
+    from app.modules.generation.model_routing import resumable_profile
+
     if state.get("resume") or state.get("phase") in ("accepted", "generated"):
         resume = state.get("resume") or state
         route = next(
@@ -389,8 +391,7 @@ def retry(db, ctx, job_id):
             route = {"model_profile": snapshot.get("model_profile", {})}
         if (
             not route
-            or route["model_profile"].get("protocol")
-            not in {"openai_video", "video_v1", "ark_video", "minimax_video"}
+            or not resumable_profile(route["model_profile"])
             or not resume.get("external_job_id")
         ):
             raise Conflict(

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Inspiration —— 影视/动漫 AIGC 资产管理与生产平台 (后端)"
 requires-python = ">=3.11"
 dependencies = [
+  "litellm-core==1.106.3",
     "fastapi>=0.136.3,<0.137",
     "uvicorn[standard]>=0.29",
     "sqlalchemy>=2.0.29",

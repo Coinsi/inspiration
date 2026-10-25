@@ -19,7 +19,7 @@ from app.models.generation import Generation, GenerationJob, ModelChannel, Provi
 from app.models.harness import ProductionRun, ProductionTask
 from app.models.identity import Project
 from app.modules.generation import jobs, model_catalog, personal
-from app.modules.generation.model_routing import RESUMABLE_PROTOCOLS
+from app.modules.generation.model_routing import resumable_profile
 from app.modules.harness.context import revalidate_context
 from app.modules.harness.media_tools import JobArgs, _execution, observe_job
 from app.modules.tools import capabilities, registry
@@ -60,7 +60,7 @@ def resume_problem(job):
     if state.get("phase") not in {"accepted", "generated"}:
         return "尚未确认上游已接受且可继续查询；不会重发未知提交或上游失败的任务"
     route = _route(job)
-    if not route or route.get("model_profile", {}).get("protocol") not in RESUMABLE_PROTOCOLS:
+    if not route or not resumable_profile(route.get("model_profile", {})):
         return "原服务协议不支持安全恢复查询"
     handle = state.get("external_job_id")
     if not isinstance(handle, str) or not handle or handle != job.external_job_id:

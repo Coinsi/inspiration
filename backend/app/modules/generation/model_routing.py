@@ -15,6 +15,12 @@ from app.modules.generation import model_catalog as catalog
 RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video"}
 
 
+def resumable_profile(profile):
+    return profile.get("protocol") in RESUMABLE_PROTOCOLS or (
+        profile.get("protocol") == "litellm" and profile.get("modality") == "video"
+    )
+
+
 class SubmissionRejected(ProviderError):
     """Only raised by adapters for an explicit rejection before any upstream job exists."""
 
@@ -30,7 +36,7 @@ def retry_allowed(job):
     if state.get("phase") in ("accepted", "generated"):
         if job.provider.startswith("personal_"):
             return bool(
-                job.input_snapshot.get("model_profile", {}).get("protocol") in RESUMABLE_PROTOCOLS
+                resumable_profile(job.input_snapshot.get("model_profile", {}))
                 and state.get("external_job_id")
             )
         route = next(
@@ -43,7 +49,7 @@ def retry_allowed(job):
         )
         return bool(
             route
-            and route["model_profile"].get("protocol") in RESUMABLE_PROTOCOLS
+            and resumable_profile(route["model_profile"])
             and state.get("external_job_id")
         )
     return True
@@ -154,7 +160,7 @@ class RoutedProvider(GenerationProvider):
                 ),
                 None,
             )
-            if not route or route["model_profile"]["protocol"] not in RESUMABLE_PROTOCOLS:
+            if not route or not resumable_profile(route["model_profile"]):
                 raise Conflict("此协议暂不支持恢复查询，请检查上游记录")
             self.active, self.actual_route = self._instance(route, True), route
             self._record(

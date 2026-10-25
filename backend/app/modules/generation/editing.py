@@ -187,6 +187,7 @@ def optimize_prompt(db, ctx, data):
         pc.endpoint,
         decrypt(pc.credentials_encrypted),
         pc.config["model"],
+        sdk_provider=pc.config.get("sdk_provider", "openai"),
     )
     try:
         result = schemas.OptimizedPrompt.model_validate_json(raw)

@@ -40,6 +40,7 @@ def _engine(db: Session, project_id: uuid.UUID, name: str | None, model_provider
             "base_url": pc.endpoint,
             "api_key": decrypt(pc.credentials_encrypted),
             "model": (pc.config or {}).get("model"),
+            "sdk_provider": (pc.config or {}).get("sdk_provider", "openai"),
         }
     return assist_registry.create(chosen, **kwargs)
 

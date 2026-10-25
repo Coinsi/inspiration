@@ -91,7 +91,7 @@ class GenerationJob(Base, TimestampMixin):
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     request_type: Mapped[RequestType] = mapped_column(String(16), default=RequestType.image)
     status: Mapped[JobStatus] = mapped_column(String(16), default=JobStatus.pending)
-    external_job_id: Mapped[str | None] = mapped_column(String(255))
+    external_job_id: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     input_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)

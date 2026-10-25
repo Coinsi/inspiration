@@ -121,6 +121,7 @@ def cloud(config, packet, media_parts):
         config["model"],
         max_output_tokens=packet["policy"].get("max_model_output_tokens", 8192),
         capture_usage=True,
+        sdk_provider=config.get("sdk_provider", "openai"),
     )
     if len(raw) > 64000:
         raise ProviderError("模型返回内容过大，未执行任何动作")

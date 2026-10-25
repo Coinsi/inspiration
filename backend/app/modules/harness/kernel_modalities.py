@@ -128,6 +128,7 @@ def resolve_cloud_input(db, ctx, provider=None, *, preferred_profile=None) -> di
             "base_url": pc.endpoint,
             "api_key": decrypt(pc.credentials_encrypted),
             "model": (pc.config or {}).get("model"),
+            "sdk_provider": (pc.config or {}).get("sdk_provider", "openai"),
         }
         declaration = pc.config or {}
     if not all(isinstance(v, str) and v.strip() for v in config.values()):

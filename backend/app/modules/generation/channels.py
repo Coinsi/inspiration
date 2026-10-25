@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 
+from app.adapters.generation.litellm_media import SDK_PROVIDERS
 from app.core import audit
 from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
@@ -19,13 +20,22 @@ from app.modules.generation.model_catalog import Price
 from app.modules.harness.kernel_modalities import InputCapabilities
 
 PROTOCOLS = {
+    "litellm": {
+        "name": "LiteLLM 多供应商 SDK",
+        "types": ["image", "video"],
+        "sdk_providers": SDK_PROVIDERS,
+    },
     "gpt_image": {"name": "OpenAI Images 兼容", "types": ["image"]},
     "openai_video": {"name": "OpenAI Videos 兼容", "types": ["video"]},
     "video_v1": {"name": "Video v1 JSON（文字 / 参考图）", "types": ["video"]},
     "ark_image": {"name": "火山方舟图片", "types": ["image"]},
     "ark_video": {"name": "火山方舟视频", "types": ["video"]},
     "minimax_video": {"name": "MiniMax 海螺视频", "types": ["video"]},
-    "cloud_llm": {"name": "OpenAI Chat 兼容", "types": ["text"]},
+    "cloud_llm": {
+        "name": "文字模型 · LiteLLM（含 OpenAI 兼容）",
+        "types": ["text"],
+        "sdk_providers": SDK_PROVIDERS,
+    },
     "jimeng": {"name": "旧版自定义 /submit · /status", "types": ["image", "video"]},
     "mock": {"name": "离线测试", "types": ["image", "video"]},
 }
@@ -70,6 +80,7 @@ class ModelIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     model: str = Field(min_length=1, max_length=128)
     protocol: Literal[
+        "litellm",
         "gpt_image",
         "openai_video",
         "video_v1",
@@ -80,6 +91,7 @@ class ModelIn(BaseModel):
         "ark_video",
         "minimax_video",
     ]
+    sdk_provider: str = Field(default="openai", max_length=40)
     modality: Literal["image", "video", "text"]
     enabled: bool = True
     is_default: bool = False
@@ -95,6 +107,17 @@ class ModelIn(BaseModel):
 
     @model_validator(mode="after")
     def supported(self):
+        if self.protocol in ("litellm", "cloud_llm"):
+            if self.sdk_provider not in SDK_PROVIDERS[self.modality]:
+                raise ValueError("所选供应商不支持该 SDK 接入用途")
+        elif self.sdk_provider != "openai":
+            raise ValueError("只有 SDK 接入方式可以设置 SDK 供应商")
+        if self.protocol == "litellm":
+            if self.modality == "video" and self.max_reference_images > 1:
+                raise ValueError("当前 SDK 视频接入最多支持一张起始参考图")
+            if self.mask_editing and self.sdk_provider != "openai":
+                raise ValueError("当前仅开放 OpenAI SDK 图片蒙版编辑")
+
         if self.input_capabilities is not None and self.modality != "text":
             raise ValueError("输入理解能力仅用于文字模型")
         if self.max_reference_videos and (self.protocol != "video_v1" or self.modality != "video"):
@@ -107,7 +130,11 @@ class ModelIn(BaseModel):
             raise ValueError("目前默认模型用于文字创作；图片和视频在创作时选择")
         if self.modality not in PROTOCOLS[self.protocol]["types"]:
             raise ValueError("协议不支持所选模型类型")
-        if self.mask_editing and (self.protocol != "gpt_image" or not self.max_reference_images):
+        if self.mask_editing and (
+            self.protocol not in ("gpt_image", "litellm")
+            or self.modality != "image"
+            or not self.max_reference_images
+        ):
             raise ValueError("蒙版编辑需要支持参考图的 Images 协议")
         if self.protocol == "openai_video" and self.max_reference_images > 1:
             raise ValueError("Videos 协议最多接收一张起始参考图")
@@ -125,7 +152,9 @@ class ModelIn(BaseModel):
             if self.modality == "image"
             else {"duration", "size", "aspect_ratio", "resolution"}
         )
-        if self.protocol == "openai_video":
+        if self.protocol == "openai_video" or (
+            self.protocol == "litellm" and self.modality == "video"
+        ):
             allowed = {"duration", "size"}
         if self.protocol == "ark_image":
             allowed = {"size"}
@@ -181,6 +210,7 @@ def public_model(row):
         "name": c.get("display_name", row.provider_name),
         "model": c.get("model", ""),
         "protocol": c.get("protocol", row.provider_name),
+        "sdk_provider": c.get("sdk_provider", "openai"),
         "modality": c.get("modality", "text" if row.kind == "llm" else "image"),
         "enabled": row.enabled,
         "is_default": bool(c.get("is_default")),
@@ -315,7 +345,9 @@ def save_model(db, ctx, channel_id, data, model_id=None):
     old_name = row.config.get("display_name", row.provider_name)
     old_modality = row.config.get("modality")
     same_model = (
-        row.config.get("model") == data.model and row.config.get("protocol") == data.protocol
+        row.config.get("model") == data.model
+        and row.config.get("protocol") == data.protocol
+        and row.config.get("sdk_provider", "openai") == data.sdk_provider
     )
     row.kind = "llm" if data.modality == "text" else "generation"
     row.enabled = data.enabled
@@ -326,6 +358,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         "display_name": data.name,
         "model": data.model,
         "protocol": data.protocol,
+        "sdk_provider": data.sdk_provider,
         "modality": data.modality,
         "input_capabilities": (
             data.input_capabilities.model_dump(mode="json")
@@ -376,6 +409,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         detail={
             "channel_id": str(ch.id),
             "protocol": data.protocol,
+            "sdk_provider": data.sdk_provider,
             "model": data.model,
             "enabled": data.enabled,
         },

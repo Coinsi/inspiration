@@ -10,11 +10,9 @@
 """
 
 import json
-import urllib.request
 
 from app.adapters.contracts import AssistEngine, AssistProposal, assist_registry
 from app.core.config import settings
-from app.core.errors import ProviderError
 
 _SYSTEM = """你是「Inspiration」影视创作平台的 AI 编辑助手。用户在某个对象的侧边栏与你对话,要求你修改该对象。
 
@@ -38,37 +36,20 @@ def _chat(
     *,
     max_output_tokens=None,
     capture_usage=False,
+    sdk_provider="openai",
 ):
-    if not api_key:
-        raise ProviderError(
-            "未配置 LLM API Key,无法使用 AI 助手(请在项目设置中配置,或用 mock 引擎)"
-        )
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.4,
-        "response_format": {"type": "json_object"},
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-    if max_output_tokens is not None:
-        payload["max_completion_tokens"] = max_output_tokens
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:  # noqa: S310
-            from app.adapters.assist.streaming import read_completion
+    from app.adapters.model_sdk import chat
 
-            content, usage = read_completion(resp)
-        return (content, usage) if capture_usage else content
-    except Exception as exc:  # noqa: BLE001
-        raise ProviderError(f"云 LLM 调用失败:{exc}") from exc
+    content, usage = chat(
+        system,
+        user,
+        base_url,
+        api_key,
+        model,
+        provider=sdk_provider,
+        max_output_tokens=max_output_tokens,
+    )
+    return (content, usage) if capture_usage else content
 
 
 @assist_registry.register("cloud_llm")
@@ -76,11 +57,17 @@ class CloudLLMAssist(AssistEngine):
     name = "cloud_llm"
 
     def __init__(
-        self, base_url: str | None = None, api_key: str | None = None, model: str | None = None, **_
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        sdk_provider="openai",
+        **_,
     ):
         self.base_url = base_url or settings.llm_base_url
         self.api_key = api_key if api_key is not None else settings.llm_api_key
         self.model = model or settings.llm_model
+        self.sdk_provider = sdk_provider
 
     def propose(self, *, object_desc, ops_help, state, history, instruction, **_) -> AssistProposal:
         hist = "\n".join(f"{m.get('role')}: {m.get('content', '')}" for m in (history or [])[-8:])
@@ -91,7 +78,9 @@ class CloudLLMAssist(AssistEngine):
             f"【最近对话】\n{hist or '(无)'}\n\n"
             f"【用户本次指令】\n{instruction}"
         )
-        raw = _chat(_SYSTEM, user, self.base_url, self.api_key, self.model)
+        raw = _chat(
+            _SYSTEM, user, self.base_url, self.api_key, self.model, sdk_provider=self.sdk_provider
+        )
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:

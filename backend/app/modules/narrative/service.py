@@ -539,6 +539,7 @@ def _strategy(db: Session, project_id: uuid.UUID, name: str | None):
             "base_url": pc.endpoint,
             "api_key": decrypt(pc.credentials_encrypted),
             "model": (pc.config or {}).get("model"),
+            "sdk_provider": (pc.config or {}).get("sdk_provider", "openai"),
         }
     return decomposition_registry.create(chosen, **kwargs)
 

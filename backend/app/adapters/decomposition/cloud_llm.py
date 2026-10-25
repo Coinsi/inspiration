@@ -2,10 +2,10 @@
 
 决策 D2:AI 辅助拆解以云 API 为主。本适配器读取 settings.llm_*(或后续可由
 provider_config 注入)。未配置 API Key 时调用即报错,提示需要 Key。
-用 stdlib urllib 调用,避免引入额外运行时依赖。
+通过共享 LiteLLM SDK 流式调用，供应商与密钥按请求隔离。
 """
+
 import json
-import urllib.request
 
 from app.adapters.contracts import (
     SCRIPT_BLOCK_TYPES,
@@ -20,9 +20,16 @@ from app.adapters.contracts import (
     decomposition_registry,
 )
 from app.core.config import settings
-from app.core.errors import ProviderError
 
-_SHOT_SIZES = ["extreme_long", "long", "full", "medium", "medium_close", "close_up", "extreme_close_up"]
+_SHOT_SIZES = [
+    "extreme_long",
+    "long",
+    "full",
+    "medium",
+    "medium_close",
+    "close_up",
+    "extreme_close_up",
+]
 _CAMERA_ANGLES = ["eye_level", "high", "low", "birds_eye", "over_shoulder"]
 _CAMERA_MOVES = ["static", "push_in", "pull_out", "pan", "tilt", "tracking", "crane", "handheld"]
 _TRANSITIONS = ["cut", "fade_in", "fade_out", "dissolve", "wipe", "push"]
@@ -37,32 +44,10 @@ def _num(v) -> float | None:
         return None
 
 
-def _chat(system: str, user: str, base_url: str, api_key: str | None, model: str) -> str:
-    if not api_key:
-        raise ProviderError("未配置 LLM API Key,无法使用云拆解(请在项目设置中配置,或切换 mock 策略)")
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.3,
-        "response_format": {"type": "json_object"},
-    }
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-            data = json.loads(resp.read())
-        return data["choices"][0]["message"]["content"]
-    except Exception as exc:  # noqa: BLE001
-        raise ProviderError(f"云 LLM 调用失败:{exc}") from exc
+def _chat(system, user, base_url, api_key, model, *, sdk_provider="openai"):
+    from app.adapters.model_sdk import chat
+
+    return chat(system, user, base_url, api_key, model, provider=sdk_provider, temperature=0.3)[0]
 
 
 def _parse_json(text: str) -> dict:
@@ -76,14 +61,24 @@ def _parse_json(text: str) -> dict:
 class CloudLLMDecomposer(DecompositionStrategy):
     name = "cloud_llm"
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None, **_):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        sdk_provider="openai",
+        **_,
+    ):
         # 优先用项目设置注入的配置,缺省回落到环境变量
         self.base_url = base_url or settings.llm_base_url
         self.api_key = api_key if api_key is not None else settings.llm_api_key
         self.model = model or settings.llm_model
+        self.sdk_provider = sdk_provider
 
     def _ask(self, system: str, user: str) -> str:
-        return _chat(system, user, self.base_url, self.api_key, self.model)
+        return _chat(
+            system, user, self.base_url, self.api_key, self.model, sdk_provider=self.sdk_provider
+        )
 
     def suggest_scenes(self, chapter_text: str) -> list[SceneSuggestion]:
         out = self._ask(
@@ -152,8 +147,14 @@ class CloudLLMDecomposer(DecompositionStrategy):
 
     def extract_settings(self, chapter_text: str, existing: list[dict]) -> list[SettingDraft]:
         existing_brief = json.dumps(
-            [{"category": e.get("category"), "name": e.get("name"), "content": (e.get("content") or "")[:120]}
-             for e in existing][:120],
+            [
+                {
+                    "category": e.get("category"),
+                    "name": e.get("name"),
+                    "content": (e.get("content") or "")[:120],
+                }
+                for e in existing
+            ][:120],
             ensure_ascii=False,
         )
         out = self._ask(
@@ -164,7 +165,7 @@ class CloudLLMDecomposer(DecompositionStrategy):
             "下面给你「已有设定名录」:如果本章信息能补充某条已有设定,返回**同 category 同 name** 的条目,"
             "content 给出【合并已有信息与新信息后的完整版】(不是只写新增部分);全新设定则用新 name。"
             "无关紧要的琐碎信息不要收录;人物条目应包含外貌/性格/能力/目标等可累积的要点。"
-            "只输出 JSON:{\"settings\":[{\"category\":\"\",\"name\":\"\",\"content\":\"\"}]}\n\n"
+            '只输出 JSON:{"settings":[{"category":"","name":"","content":""}]}\n\n'
             f"【已有设定名录】\n{existing_brief}",
             chapter_text[:6000],
         )
@@ -185,8 +186,14 @@ class CloudLLMDecomposer(DecompositionStrategy):
         if not conflicts:
             return []
         payload = json.dumps(
-            [{"category": c["category"], "name": c["name"], "versions": (c.get("versions") or [])[:6]}
-             for c in conflicts][:40],
+            [
+                {
+                    "category": c["category"],
+                    "name": c["name"],
+                    "versions": (c.get("versions") or [])[:6],
+                }
+                for c in conflicts
+            ][:40],
             ensure_ascii=False,
         )
         out = self._ask(
@@ -196,8 +203,13 @@ class CloudLLMDecomposer(DecompositionStrategy):
             payload,
         )
         res: list[SettingDraft] = []
-        merged = {(str(it.get("category")), str(it.get("name", "")).strip()): str(it.get("content", "") or "")
-                  for it in _parse_json(out).get("settings", []) if isinstance(it, dict)}
+        merged = {
+            (str(it.get("category")), str(it.get("name", "")).strip()): str(
+                it.get("content", "") or ""
+            )
+            for it in _parse_json(out).get("settings", [])
+            if isinstance(it, dict)
+        }
         for c in conflicts:  # 兜底:LLM 漏了的条目退化为取最长版本
             key = (c["category"], c["name"])
             content = merged.get(key) or max((c.get("versions") or [""]), key=len)
@@ -206,7 +218,9 @@ class CloudLLMDecomposer(DecompositionStrategy):
 
     def adapt_chapter_to_script(self, chapter_text: str, context: str = "") -> list[ScriptBlock]:
         ctx_part = (
-            f"【已确立的故事设定(改编必须遵守,人物言行、世界规则不得违背)】\n{context}\n\n" if context else ""
+            f"【已确立的故事设定(改编必须遵守,人物言行、世界规则不得违背)】\n{context}\n\n"
+            if context
+            else ""
         )
         out = self._ask(
             f"{ctx_part}"

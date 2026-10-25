@@ -35,6 +35,7 @@ type Model = {
   name: string;
   model: string;
   protocol: string;
+  sdk_provider?: string;
   modality: string;
   enabled: boolean;
   is_default: boolean;
@@ -59,7 +60,7 @@ type Channel = {
 type Catalog = {
   channels: Channel[];
   legacy_count: number;
-  protocols: Record<string, { name: string; types: string[] }>;
+  protocols: Record<string, { name: string; types: string[]; sdk_providers?: Record<string, string[]> }>;
 };
 const kinds: Record<string, string> = {
   image: "图片",
@@ -696,6 +697,8 @@ function ModelEditor({
       ]),
     ),
   );
+  const [sdkProvider, setSdkProvider] = useState(model?.sdk_provider || "openai");
+  const [protocolChosen, setProtocolChosen] = useState(!!model);
   const [requestId] = useState(() => crypto.randomUUID());
   const keys =
     modality === "text"
@@ -704,7 +707,7 @@ function ModelEditor({
         ? protocol === "ark_image"
           ? ["size"]
           : ["size", "quality"]
-        : protocol === "openai_video"
+        : protocol === "openai_video" || protocol === "litellm"
           ? ["duration", "size"]
           : protocol === "minimax_video"
             ? ["duration", "resolution"]
@@ -729,6 +732,7 @@ function ModelEditor({
         name,
         model: code,
         protocol,
+        sdk_provider: protocol === "litellm" || protocol === "cloud_llm" ? sdkProvider : "openai",
         modality,
         enabled,
         is_default: modality === "text" && isDefault,
@@ -737,7 +741,7 @@ function ModelEditor({
         max_reference_images: modality === "text" ? 0 : refs,
         max_reference_videos:
           modality === "video" && protocol === "video_v1" ? videoRefs : 0,
-        mask_editing: protocol === "gpt_image" && mask,
+        mask_editing: (protocol === "gpt_image" || (protocol === "litellm" && modality === "image" && sdkProvider === "openai")) && mask,
         max_video_seconds: seconds,
         parameters: params,
         ...(modality === "text"
@@ -796,7 +800,7 @@ function ModelEditor({
                   const value = e.target.value;
                   setCode(value);
                   setInputCapabilities(textInputCapabilities);
-                  if (!model) {
+                  if (!model && !protocolChosen) {
                     if (!name || name === code.slice(0, 100))
                       setName(value.slice(0, 100));
                     const hint = modelSuggestion(value);
@@ -825,6 +829,8 @@ function ModelEditor({
             ]}
             onChange={(value) => {
               setModality(value);
+              setProtocolChosen(true);
+              setSdkProvider("openai");
               setInputCapabilities(textInputCapabilities);
               const hint = modelSuggestion(code);
               setProtocol(
@@ -854,6 +860,8 @@ function ModelEditor({
               ]}
               onChange={(value) => {
                 setProtocol(value);
+                setProtocolChosen(true);
+                setSdkProvider("openai");
                 setParameters({});
                 setRefs(0);
                 setMask(false);
@@ -861,7 +869,23 @@ function ModelEditor({
               }}
             />
           )}
-          {!model && modelSuggestion(code).modality && (
+          {(protocol === "litellm" || protocol === "cloud_llm") && (
+            <>
+              <SelectField
+                label="服务接口类型"
+                value={sdkProvider}
+                options={(protocols[protocol]?.sdk_providers?.[modality] || ["openai"]).map((value) => ({
+                  value, label: value === "openai" ? "OpenAI / OpenAI 兼容服务" : value,
+                }))}
+                onChange={(value) => { setSdkProvider(value); setMask(false); setDirty(true); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                选择服务实际使用的接口类型；第三方 OpenAI 兼容网关请选择 OpenAI。
+                SDK 视频支持文字或单张起始图片；需要参考视频、混合素材时请保留 Video v1 接入。
+              </p>
+            </>
+          )}
+          {!model && !protocolChosen && modelSuggestion(code).modality && (
             <p className="text-xs text-muted-foreground">
               已按模型名称建议用途与接入方式，请以服务说明为准；可在上方调整。
             </p>
@@ -912,7 +936,7 @@ function ModelEditor({
                   <Input
                     type="number"
                     min={0}
-                    max={
+                    max={protocol === "litellm" && modality === "video" ? 1 :
                       (
                         {
                           openai_video: 1,
@@ -947,7 +971,7 @@ function ModelEditor({
                     </small>
                   </label>
                 )}
-                {protocol === "gpt_image" && refs > 0 && (
+                {(protocol === "gpt_image" || (protocol === "litellm" && modality === "image" && sdkProvider === "openai")) && refs > 0 && (
                   <label className="model-check">
                     <input
                       type="checkbox"

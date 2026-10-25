@@ -79,3 +79,57 @@ def read_completion(response):
     if not finished or not chunks:
         raise ValueError("模型流中断，未收到完整回复")
     return "".join(chunks), usage
+
+
+def read_sdk_completion(response):
+    """Consume normalized SDK chunks while preserving strict completion/progress semantics."""
+    deadline = time.monotonic() + 240
+    chunks, usage, finished, total = [], None, False, 0
+    try:
+        for chunk in response:
+            if time.monotonic() >= deadline:
+                raise ValueError("模型流超过接收时限")
+            data = chunk.model_dump() if hasattr(chunk, "model_dump") else chunk
+            total += len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            if total > 2 * 1024 * 1024:
+                raise ValueError("模型响应超过接收限制")
+            if data.get("error"):
+                raise ValueError("模型流返回错误")
+            usage = data.get("usage") or usage
+            for choice in data.get("choices", []):
+                if choice.get("index", 0) != 0:
+                    continue
+                reason = choice.get("finish_reason")
+                if reason:
+                    if reason != "stop":
+                        raise ValueError("模型回复未完整结束")
+                    finished = True
+                delta = choice.get("delta", {}).get("content")
+                if isinstance(delta, str) and delta:
+                    chunks.append(delta)
+                    callback = _progress.get()
+                    if callback:
+                        callback("".join(chunks))
+        # The pinned SDK synthesizes a stop chunk on EOF. It must not authorize
+        # an Agent action unless the provider actually supplied a finish reason.
+        if hasattr(response, "received_finish_reason") and not (
+            response.received_finish_reason or response.intermittent_finish_reason
+        ):
+            raise ValueError("模型流中断，未收到上游结束标记")
+        if not finished or not chunks:
+            raise ValueError("模型流中断，未收到完整回复")
+        # The SDK can estimate tokens when the provider omits usage. Do not
+        # record an estimate as confirmed upstream usage in the resource ledger.
+        if hasattr(response, "chunks") and not any(
+            (c.get("usage") if isinstance(c, dict) else getattr(c, "usage", None))
+            for c in response.chunks
+        ):
+            usage = None
+        return "".join(chunks), usage
+    finally:
+        # CustomStreamWrapper in the pinned SDK only exposes asynchronous close;
+        # our synchronous callers must close its underlying HTTP stream directly.
+        source = getattr(response, "completion_stream", None)
+        close = getattr(source, "close", None) or getattr(response, "close", None)
+        if close:
+            close()

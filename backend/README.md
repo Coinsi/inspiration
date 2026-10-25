@@ -17,6 +17,39 @@
 | 对象存储 | MinIO(S3 兼容)/ 本地文件系统(`STORAGE_BACKEND=fs`)双后端,内容寻址(CAS) |
 | 鉴权 | JWT;项目级 RBAC(角色 → 动作权限矩阵) |
 | 凭据安全 | 供应商密钥用 Fernet 加密入库 |
+| 模型 SDK | `litellm-core==1.106.3`，Python 进程内调用，无需 Node 或额外网关服务 |
+
+### LiteLLM 接入与兼容边界
+
+文字调用（Agent、对象助手、小说拆解、提示词优化）共用 `adapters/model_sdk.py`，
+默认仍按 OpenAI 兼容接口处理原有渠道。在模型服务的项目渠道编辑模型时，可选择
+`服务接口类型`；图片或视频选择 `LiteLLM 多供应商 SDK` 接入方式。
+模型 ID、渠道地址和密钥分别保存，第三方 OpenAI 兼容网关选择 `openai`，不要按模型名称猜测原生接口。
+项目渠道可以沿用「用于个人账号」入口导入个人配置。
+
+- 文字开放 OpenAI、Anthropic、Gemini、DeepSeek、Mistral、Groq、xAI、OpenRouter 的 API Key 接口。
+- 图片开放 OpenAI、Gemini、fal.ai、Recraft、Black Forest Labs；生成和参考图编辑使用 SDK，
+  具体模型是否支持参数、编辑仍由 SDK 与模型配置共同校验。蒙版编辑当前仅开放 OpenAI。
+- SDK 视频开放 OpenAI、Gemini、Runway、fal.ai，统一提交、查询和下载；
+  当前公共输入契约是文字或一张起始参考图，参数为 `duration` 和 `size`。
+- **参考视频、首尾帧和多素材混用不会迁移到不支持它们的 SDK 接口。**
+  原有 `video_v1`、方舟、MiniMax 与流式 `gpt_image` 等适配器继续保留；
+  已有媒体模型配置和历史任务不会自动改协议。新增一个已支持供应商的模型通常只需配置，
+  新凭据类型或新媒体操作仍需要扩展应用契约。
+- SDK 按请求传入密钥，不修改全局密钥，不启用 SDK Router/fallback。
+  不允许静默丢弃参考素材或参数。504 等不确定提交不会自动重发付费任务。
+  SDK 1.106.3 的 OpenAI 图片重试覆盖问题由请求级传输拦截保护。
+- 流式文字必须收到上游真实结束标记；截断、过滤、异常 EOF 都不会作为完整 Agent 动作。
+  SDK 推算的 token 数不当作上游确认用量。模型价格仍以本系统保存的计价配置为准。
+
+升级后端依赖后，启动 API/worker 前运行 `alembic upgrade head`。
+`0054_sdk_video_handles` 将原视频任务 ID 字段扩展为 Text，以保存 SDK 编码的供应商/模型/操作标识。
+恢复操作继续查询原任务，不新建生成请求；部署时应让旧 worker 完成在途任务后再切换。
+
+验证入口：`tests/test_litellm_sdk.py` 使用真实已安装 SDK 访问本地 HTTP 服务，
+覆盖流式、用量、图生图/蒙版、图生视频、原任务恢复、参数拒绝和不重复提交；
+`tests/test_litellm_channels.py` 在隔离 PostgreSQL schema 中覆盖配置、生成入库和迁移。
+这些测试不消耗供应商额度，不代表所有线上供应商与账号均已完成实测。
 
 ## 二、架构总览
 

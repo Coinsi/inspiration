@@ -1,8 +1,8 @@
 """Durable resource accounting and real job output boundaries, without paid APIs."""
 
 # ruff: noqa: F811
-import io
 import json
+from types import SimpleNamespace
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -283,17 +283,16 @@ def test_cloud_usage_envelope_keeps_legacy_chat_call_compatible(monkeypatch):
 
     seen = []
     text = json.dumps({"kind": "finish", "message": "完成"})
-    body = json.dumps(
-        {"choices": [{"message": {"content": text}}], "usage": {"total_tokens": 77}}
-    ).encode()
+    from app.adapters import model_sdk
 
-    def response(request, timeout):
-        seen.append(json.loads(request.data))
-        result = io.BytesIO(body)
-        result.headers = {"Content-Type": "application/json"}
-        return result
+    def response(**kwargs):
+        seen.append(kwargs)
+        return iter([{
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": "stop"}],
+            "usage": {"total_tokens": 77},
+        }])
 
-    monkeypatch.setattr(cloud_llm.urllib.request, "urlopen", response)
+    monkeypatch.setattr(model_sdk, "sdk", lambda: SimpleNamespace(completion=response))
     assert cloud_llm._chat("system", "user", "https://fixture.invalid/v1", "test", "mock") == text
     action, usage = kernel.decide_with_usage(
         "cloud_llm",
