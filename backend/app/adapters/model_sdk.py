@@ -84,18 +84,21 @@ def chat(
     *,
     provider="openai",
     max_output_tokens=None,
-    temperature=0.4,
+    temperature=None,
 ):
     from app.adapters.assist.streaming import read_sdk_completion
 
     params = connection(endpoint, token, provider)
+    # Let each model use its supported default. Reasoning models can reject
+    # sampling overrides even before the SDK sends the upstream request.
+    if temperature is not None:
+        params["temperature"] = temperature
     if max_output_tokens is not None:
         params["max_completion_tokens"] = max_output_tokens
     try:
         response = sdk().completion(
             model=model,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=temperature,
             response_format={"type": "json_object"},
             stream=True,
             stream_options={"include_usage": True},

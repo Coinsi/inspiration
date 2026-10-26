@@ -61,7 +61,8 @@ def js(value):
     return 200, "application/json", json.dumps(value).encode()
 
 
-def test_real_sdk_stream_usage_and_per_request_credentials():
+@pytest.mark.parametrize("model", ["test", "gpt-6-astra", "o3"])
+def test_real_sdk_stream_usage_and_per_request_credentials(model):
     def reply(*_):
         events = [
             {
@@ -88,12 +89,13 @@ def test_real_sdk_stream_usage_and_per_request_credentials():
     updates = []
     with upstream(reply) as (endpoint, calls), progress(updates.append):
         for token in ("test-key-a", "test-key-b"):
-            content, usage = chat("system", "hi", endpoint, token, "test", max_output_tokens=40)
+            content, usage = chat("system", "hi", endpoint, token, model, max_output_tokens=40)
             assert content == '{"reply":"ok"}'
             assert usage["total_tokens"] == 7
         assert [c[2]["Authorization"] for c in calls] == ["Bearer test-key-a", "Bearer test-key-b"]
         assert all(c[1] == "/v1/chat/completions" for c in calls)
         assert json.loads(calls[0][3])["stream"] is True
+        assert "temperature" not in json.loads(calls[0][3])
     assert updates
 
 
