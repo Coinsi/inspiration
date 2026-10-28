@@ -326,7 +326,7 @@ def cancel(db, ctx, job_id):
     return job
 
 
-def retry(db, ctx, job_id):
+def retry(db, ctx, job_id, *, defer_dispatch=False):
     job = db.scalar(
         select(GenerationJob)
         .where(GenerationJob.id == job_id, GenerationJob.project_id == ctx.project.id)
@@ -360,7 +360,7 @@ def retry(db, ctx, job_id):
     snapshot = copy.deepcopy(job.input_snapshot)
     from app.modules.generation.references import validate_snapshot as validate_references
 
-    validate_references(db, ctx.project.id, snapshot)
+    validate_references(db, ctx.project.id, snapshot, user_id=ctx.user.id)
     from app.modules.media.generation_reference import public_base
 
     # A user-triggered retry is a new submission; do not keep a retired domain.
@@ -427,7 +427,7 @@ def retry(db, ctx, job_id):
         target_id=new.id,
         detail={"retry_of": str(job.id)},
     )
-    return dispatch(db, new)
+    return new if defer_dispatch else dispatch(db, new)
 
 
 def _harness_output_limit(snapshot):
@@ -528,7 +528,7 @@ def execute(db, job_id):
         validate_target(db, project_id, job.target_type, job.target_id)
         from app.modules.generation.references import validate_snapshot as validate_references
 
-        validate_references(db, project_id, snap)
+        validate_references(db, project_id, snap, user_id=job.created_by)
         db.commit()
         operation = snap.get("operation", "generate")
         materialized = []

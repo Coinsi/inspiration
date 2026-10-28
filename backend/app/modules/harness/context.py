@@ -37,7 +37,7 @@ class Region(Strict):
 
 
 class ContextReference(Strict):
-    kind: Literal["generation", "media_version", "document"]
+    kind: Literal["generation", "media_version", "attachment", "document"]
     id: uuid.UUID
     work_id: uuid.UUID | None = None
     revision: int | None = Field(default=None, ge=1)
@@ -287,6 +287,10 @@ def build_context(db, ctx, *, goal, references=(), facts=(), history=(), scopes=
             "content": str(message.get("content", "")),
             "trust": "quoted_history",
         }
+        if message.get("attachments"):
+            from app.modules.harness.attachment_context import history_attachments
+
+            item["attachments"] = history_attachments(message["attachments"])
         if _size(packet) + _size(item) + 1 <= content_limit:
             packet["history"].insert(0, item)
         else:

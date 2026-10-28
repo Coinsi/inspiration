@@ -2,7 +2,12 @@ import { ComposerPrimitive, ThreadPrimitive, MessagePrimitive } from "@assistant
 import { AssistantConversation } from "./AssistantConversation";
 import { useConversationStream } from "./useConversationStream";
 import type { ComposerReference } from "./ComposerReferences";
-import { referenceDetailPath, type ReferenceInput } from "./referenceInput";
+import { referenceDetailPath, retryAttachmentReferences, type ReferenceInput } from "./referenceInput";
+import { referenceInput } from "./referenceInput";
+import { referenceProblem } from "./referenceProblem";
+import { useConversationAttachments } from "./useConversationAttachments";
+import { ComposerAttachmentTray, ConversationAddMenu, ConversationAttachmentPicker, MessageAttachments } from "./ConversationAttachments";
+import type { ConversationAttachment } from "./attachmentUpload";
 import type { UIBlock } from "./GenerativeMessage";
 import { ConversationAnswer } from "./ConversationAnswer";
 import { SelectField } from "@/components/ui/select-field";
@@ -93,6 +98,8 @@ type Message = {
     scope?: Target[];
     skills?: SkillUse[];
     outputs?: MediaOutput[];
+    attachments?: ConversationAttachment[];
+    references?: ComposerReference[];
     media?: { request_type: string };
     production?: { run_id: string; is_current: boolean; revision: number; status: string };
   };
@@ -110,6 +117,8 @@ type RetryInput = {
   model_provider: string | null;
   scope: Target[];
   skills: SkillUse[];
+  attachments?: { attachment_id: string; role: ComposerReference["role"] }[];
+  references?: ReferenceInput[];
   media: {
     provider: string;
     request_type: "image" | "video";
@@ -168,6 +177,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     [],
   );
   const [contextOpen, setContextOpen] = useState(false);
+  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
+  const [fileDrag, setFileDrag] = useState(false);
+  const attachments = useConversationAttachments(projectId, scopeKey);
   const [skillOpen, setSkillOpen] = useState(false);
   const [workOpen, setWorkOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -300,6 +312,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     next.set("view", "chat");
     next.delete("message");
     next.delete("ordinal");
+    next.delete("attachment");
     setParams(next);
     setSidebarOpen(false);
   };
@@ -381,6 +394,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         mode: "standard",
         scope: mode === "text" ? targets : [],
         skills,
+        attachments: attachments.references.map(item => ({ ...item, role: mode !== "video" ? "reference" : item.role })),
+        references: mode === "text" ? media.refs.map(item => referenceInput(item, "reference")) : [],
         media: mode === "text" ? null : media.request,
       };
       const fingerprint = JSON.stringify(body);
@@ -413,7 +428,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           mode,
           mediaModels: media.choices,
           mediaParameters: media.parameters,
-          references: media.refs,
+          references: [],
           targets,
           skills,
         })) {
@@ -432,6 +447,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         /* local draft persistence is best effort */
       }
       setDraft("");
+      attachments.clear();
+      media.setRefs([]);
+      void qc.invalidateQueries({ queryKey: ["saved-conversation-attachments", projectId] });
       setPending(null);
       setNewId(crypto.randomUUID());
       qc.setQueryData(["conversation", projectId, id], data);
@@ -469,7 +487,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   });
   const editRetry = useMutation({
     mutationFn: async (message: Message) => {
-      if (draft.trim())
+      if (draft.trim() || attachments.items.length || media.refs.length)
         throw new Error(
           "输入框里还有草稿，请先发送或清空，再载入原来的创作要求。",
         );
@@ -477,7 +495,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         `${base}/${selected}/messages/${message.id}/retry-input`,
       );
       const refs = await Promise.all(
-        (original.media?.references || []).map(async (r) => {
+        (original.media?.references || original.references || []).filter(r => !r.attachment_id).map(async (r) => {
           const item = await api.get<ComposerReference>(
             `${root}${referenceDetailPath(r)}`,
           );
@@ -492,13 +510,17 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           };
         }),
       );
-      return { original, refs };
+      const attachmentRefs = retryAttachmentReferences(original);
+      const restored = await Promise.all(attachmentRefs.map(async r => ({ ...await api.get<ConversationAttachment>(`${root}/attachments/${r.attachment_id}`), role: r.role })));
+      return { original, refs, restored };
     },
-    onSuccess: ({ original, refs }) => {
+    onSuccess: ({ original, refs, restored }) => {
       setDraft(original.content);
       setTargets(original.scope);
       setSkills(original.skills);
       setPending(null);
+      attachments.restore(restored);
+      media.setRefs(refs);
       if (original.media) {
         setMode(original.media.request_type);
         media.restore(
@@ -558,16 +580,30 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     control.error ||
     loadOlder.error;
   const busy = send.isPending || retryTurn.isPending || editRetry.isPending;
+  const attachmentProblem = mode === "text" ? "" : referenceProblem(media.capabilities, [...media.refs, ...attachments.items].map(item => ({ ...item, role: mode === "image" ? "reference" : item.role })));
   const ready =
     !busy &&
     list.isSuccess &&
     !blocked &&
-    !!draft.trim() &&
+    (!!draft.trim() || (mode === "text" && (attachments.items.length > 0 || media.refs.length > 0))) &&
+    attachments.ready && !attachmentProblem &&
     !detail.data?.archived &&
     (!selected || detail.isSuccess) &&
     !providers.isFetching &&
     !providers.error &&
     (mode === "text" ? !!selectedProvider : media.ready);
+  const incomingAttachment = params.get("attachment");
+  useEffect(() => {
+    if (!incomingAttachment) return;
+    let alive = true;
+    void api.get<ConversationAttachment>(`${root}/attachments/${incomingAttachment}`).then(item => {
+      if (!alive) return;
+      if (item.status !== "ready") { attachments.setError("该附件尚未准备好，请稍后重试。"); return; }
+      attachments.addSaved(item, media.refs.length);
+      const next = new URLSearchParams(params); next.delete("attachment"); next.set("view", "chat"); setParams(next, { replace: true });
+    }).catch(error => { if (alive) attachments.setError(error.message); });
+    return () => { alive = false; };
+  }, [incomingAttachment, projectId, scopeKey]);
   const importId = params.get("reference") || params.get("reuse");
   const imported = useQuery({
     queryKey: ["generated-material", projectId, importId],
@@ -875,7 +911,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 {m.context.mode === "test" && <span>离线机制测试</span>}
               </div>
               {m.role === "user" ? (
-                <ConversationText content={m.content} user />
+                <><MessageAttachments projectId={projectId} attachments={m.context.attachments} references={m.context.references} /><ConversationText content={m.content} user /></>
               ) : (
                 <ConversationAnswer
                   content={m.execution_kind === "generation" && m.context.outputs?.length &&
@@ -998,7 +1034,12 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             {error.message}
           </p>
         )}
-        <ComposerPrimitive.Root asChild><div className="conversation-compose">
+        <ComposerPrimitive.Root asChild><div className={`conversation-compose${fileDrag ? " is-file-drag" : ""}`}
+          onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); if (!busy && !detail.data?.archived) setFileDrag(true); } }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setFileDrag(false); }}
+          onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); event.stopPropagation(); setFileDrag(false); if (!busy && !detail.data?.archived) attachments.addFiles(event.dataTransfer.files, media.refs.length); }}
+          onPaste={event => { if (!event.clipboardData.files.length || busy || detail.data?.archived) return; event.preventDefault(); attachments.addFiles(event.clipboardData.files, media.refs.length); const text = event.clipboardData.getData("text/plain"); if (text) setDraft(`${draft}${text}`); }}>
+          <ComposerAttachmentTray projectId={projectId} uploads={attachments} references={media.refs} setReferences={media.setRefs} disabled={busy || !!detail.data?.archived} frameRoles={mode === "video" ? (media.capabilities?.features || []).filter(feature => feature === "first_frame" || feature === "last_frame") : []} />
           {((mode === "text" && targets.length > 0) || skills.length > 0) && (
             <div className="conversation-attachments" aria-label="本轮已选内容">
               {(mode === "text" ? targets : []).map((t) => {
@@ -1058,25 +1099,6 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ))}
             </div>
           )}
-          {mode !== "text" && media.refs.length > 0 && (
-            <div className="conversation-attachments">
-              {media.refs.map((r) => (
-                <span key={r.id} className="conversation-attachment">
-                  <Paperclip size={13} />
-                  <span>{r.title}</span>
-                  <button
-                    disabled={busy}
-                    aria-label={`移除参考 ${r.title}`}
-                    onClick={() =>
-                      media.setRefs((v) => v.filter((x) => x.id !== r.id))
-                    }
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
           <ComposerPrimitive.Input
             ref={input}
             minRows={2}
@@ -1097,6 +1119,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             }
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !draft.trim() && ready) { event.preventDefault(); void send.mutateAsync("").catch(() => undefined); } }}
             maxLength={mode === "text" ? 8000 : 6000}
             disabled={!!detail.data?.archived || busy}
           />
@@ -1130,20 +1153,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 media={media}
                 mode={mode}
                 disabled={busy || !!detail.data?.archived}
+                showReferences={false}
               />
             )}
-            {mode === "text" && (
-              <button
-                className="conversation-tool"
-                type="button"
-                disabled={busy}
-                onClick={() => setContextOpen(true)}
-                title="选择要一起修改的剧本、镜头或设定"
-              >
-                <Paperclip size={17} />
-                <span>添加内容</span>
-              </button>
-            )}
+            <ConversationAddMenu disabled={busy || !!detail.data?.archived} onFiles={files => attachments.addFiles(files, media.refs.length)} onLibrary={() => setAttachmentPickerOpen(true)} onObjects={() => { setMode("text"); setContextOpen(true); }} />
             <button
               className="conversation-tool"
               type="button"
@@ -1154,7 +1167,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               <Sparkles size={17} />
               <span>技能</span>
             </button>
-            <ComposerPrimitive.Send
+            {!draft.trim() && mode === "text" && (attachments.items.length > 0 || media.refs.length > 0) ? <button type="button" className="conversation-send" aria-label="发送附件" disabled={!ready} onClick={() => void send.mutateAsync("").catch(() => undefined)}>{send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}</button> : <ComposerPrimitive.Send
               className="conversation-send"
               type="button"
               aria-label="发送消息"
@@ -1165,14 +1178,17 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ) : (
                 <ArrowUp size={19} />
               )}
-            </ComposerPrimitive.Send>
+            </ComposerPrimitive.Send>}
           </div>
           {send.isPending && (
             <p className="conversation-note" role="status">
               正在提交创作要求…
             </p>
           )}
-          {mode !== "text" && media.error && (
+          {attachments.error && <p className="conversation-attachment-notice" role="alert">{attachments.error}</p>}
+          {attachmentProblem && <p className="conversation-attachment-notice" role="alert">{attachmentProblem}</p>}
+          {attachments.items.length > 0 && !attachmentProblem && <p className="conversation-attachment-notice">{!attachments.ready ? "附件准备好后即可发送。刷新后未完成的上传需要重新选择原文件续传。" : mode !== "text" && !draft.trim() ? "参考素材已就绪，请描述想生成的内容。" : "发送后自动保留到对话附件，可随时再次引用。"}</p>}
+          {mode !== "text" && media.error && media.error !== attachmentProblem && (
             <p className="conversation-error" role="alert">
               {media.error} <button onClick={media.retry}>重新检查</button>
             </p>
@@ -1233,6 +1249,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 </div>
         )}
       </div>
+      <ConversationAttachmentPicker mode={mode} projectId={projectId} open={attachmentPickerOpen} onClose={() => setAttachmentPickerOpen(false)} references={media.refs} uploads={attachments} pickReference={item => media.setRefs(current => current.some(value => value.id === item.id && value.source_type === item.source_type) ? current.filter(value => !(value.id === item.id && value.source_type === item.source_type)) : current.length + attachments.items.length < 8 ? [...current, item] : current)} />
       {contextOpen && (
         <ConversationObjectDialog
           projectId={projectId}

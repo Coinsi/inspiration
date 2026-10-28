@@ -1,3 +1,4 @@
+import { modelConfigRoot, modelConfigQueryKey } from "@/lib/model-config-scope";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { SearchField } from "@/components/ui/search-field";
 import { useState } from "react";
@@ -122,7 +123,7 @@ export function CreativeModels({
   openChannels: () => void;
   connectService: () => void;
 }) {
-  const root = `/projects/${projectId}`,
+  const root = `${modelConfigRoot(projectId)}`,
     qc = useQueryClient();
   const query = useQuery({
     queryKey: ["creative-models", projectId],
@@ -139,7 +140,7 @@ export function CreativeModels({
     [notice, setNotice] = useState("");
   const refresh = async () => {
     for (const key of ["creative-models", "providers", "capabilities"])
-      await qc.invalidateQueries({ queryKey: [key, projectId] });
+      await qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) });
   };
   const adopt = useMutation({
     mutationFn: () =>

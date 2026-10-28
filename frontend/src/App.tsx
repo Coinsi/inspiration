@@ -6,6 +6,7 @@ const Login = lazy(() => import("@/pages/Login"));
 const GoogleAuthComplete = lazy(() => import("@/pages/GoogleAuthComplete"));
 const Projects = lazy(() => import("@/pages/Projects"));
 const Landing = lazy(() => import("@/pages/Landing"));
+const ModelAdmin = lazy(() => import("@/pages/ModelAdmin"));
 const WebsiteAdmin = lazy(() => import("@/pages/WebsiteAdmin"));
 const Blog = lazy(() => import("@/pages/Blog"));
 const BlogArticle = lazy(() => import("@/pages/BlogArticle"));
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="/register" element={<Login />} />
         <Route path="/auth/google/complete" element={<GoogleAuthComplete />} />
         <Route element={<Protected />}>
+          <Route path="/admin/models" element={<ModelAdmin />} />
           <Route path="/admin/website" element={<WebsiteAdmin />} />
           <Route path="/admin/blog" element={<BlogAdmin />} />
           <Route path="/admin/blog/:postId" element={<BlogAdmin />} />

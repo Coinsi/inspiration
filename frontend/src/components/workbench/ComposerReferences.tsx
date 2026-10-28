@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, blobUrl } from "@/lib/api";
 import { MediaImage } from "@/components/MediaImage";
 import { Button } from "@/components/ui/button";
+import { FileAudio } from "lucide-react";
 import type { ReferenceSource } from "./referenceInput";
 export type ComposerReference = {
   id: string;
@@ -11,11 +12,12 @@ export type ComposerReference = {
   blob_hash: string;
   title: string;
   role: "reference" | "first_frame" | "last_frame";
-  kind?: "image" | "video";
+  kind?: "image" | "video" | "audio";
   thumbnail_hash?: string | null;
 };
 
 export function ReferencePreview({ projectId, item }: { projectId: string; item: ComposerReference }) {
+  if (item.kind === "audio") return <div className="composer-reference-video flex items-center justify-center"><FileAudio size={32} /></div>;
   if (item.kind === "video" && !item.thumbnail_hash)
     return <div className="composer-reference-video"><video src={blobUrl(projectId, item.blob_hash)} muted preload="metadata" aria-label={`参考视频 ${item.title}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>;
   return <MediaImage src={blobUrl(projectId, item.thumbnail_hash || item.blob_hash)} alt={item.title} />;
@@ -25,24 +27,28 @@ export function ComposerReferences({
   selected,
   pick,
   includeVideos = false,
+  includeAudio = false,
+  maxSelected = 8,
 }: {
   projectId: string;
   selected: ComposerReference[];
   pick: (item: ComposerReference) => void;
   includeVideos?: boolean;
+  includeAudio?: boolean;
+  maxSelected?: number;
 }) {
   const [query, setQuery] = useState(""),
     [offset, setOffset] = useState(0);
   const images = useQuery({
-    queryKey: ["workbench-references", projectId, query, offset, includeVideos],
+    queryKey: ["workbench-references", projectId, query, offset, includeVideos, includeAudio],
     queryFn: () =>
       api.get<{ items: Omit<ComposerReference, "role">[]; has_more: boolean }>(
-        `/projects/${projectId}/workbench/references?offset=${offset}&query=${encodeURIComponent(query)}&media_type=${includeVideos ? "all" : "image"}`,
+        `/projects/${projectId}/workbench/references?offset=${offset}&query=${encodeURIComponent(query)}&media_type=${includeAudio ? "any" : includeVideos ? "all" : "image"}`,
       ),
   });
   return (
     <div className="composer-reference-picker">
-      <p>从项目已有的生成结果或上传素材中选择，最多 8 项。{includeVideos ? "可混合选择图片和视频。" : "当前模型仅开放图片选择。"}参考会随本次创作保存。</p>
+      <p>从项目已有的生成结果或上传素材中选择，最多 8 项。{includeAudio ? "可选择图片、视频和音频。" : includeVideos ? "可混合选择图片和视频。" : "当前模型仅开放图片选择。"}参考会随本次创作保存。</p>
       <SearchField
         className="w-full"
         label="搜索参考素材"
@@ -68,11 +74,11 @@ export function ComposerReferences({
               key={item.id}
               aria-label={`引用 ${item.title}`}
               aria-pressed={selected.some((r) => r.id === item.id)}
-              disabled={selected.length >= 8 && !selected.some((r) => r.id === item.id)}
+              disabled={selected.length >= maxSelected && !selected.some((r) => r.id === item.id)}
               onClick={() => pick({ ...item, role: "reference" })}
             >
               <ReferencePreview projectId={projectId} item={{ ...item, role: "reference" }} />
-              <span>{item.kind === "video" ? "视频 · " : "图片 · "}{item.title}</span>
+              <span>{item.kind === "video" ? "视频 · " : item.kind === "audio" ? "音频 · " : "图片 · "}{item.title}</span>
             </button>
           ))}
         </div>

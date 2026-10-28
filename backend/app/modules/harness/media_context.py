@@ -56,8 +56,15 @@ def _resolve(db, ctx, reference):
         blob = db.get(Blob, row.output_blob_hash)
         name, typ, version_id = "生成结果", getattr(row.output_type, "value", row.output_type), None
         meta = {}
+    elif ref.kind == "attachment":
+        from app.modules.attachments.service import resolve
+
+        item = resolve(db, ctx, ref.id)
+        blob = db.get(Blob, item["blob_hash"])
+        name, typ, version_id = item["title"], item["kind"], None
+        meta = {key: item.get(key) for key in ("duration_ms", "width", "height", "has_audio")}
     else:
-        raise CapabilityUnsupported("媒体检查仅接受固定素材版本或生成记录")
+        raise CapabilityUnsupported("媒体检查仅接受固定素材版本、对话附件或生成记录")
     if blob is None:
         raise NotFound("素材文件不存在")
     if ref.expected_blob_hash and ref.expected_blob_hash != blob.hash:

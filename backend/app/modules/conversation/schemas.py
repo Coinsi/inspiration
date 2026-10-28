@@ -42,6 +42,12 @@ class MediaRequest(BaseModel):
     references: list[Reference] = Field(default_factory=list, max_length=8)
 
 
+class AttachmentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    attachment_id: uuid.UUID
+    role: Literal["reference", "first_frame", "last_frame"] = "reference"
+
+
 class ProductionControl(BaseModel):
     model_config = ConfigDict(extra="forbid")
     run_id: uuid.UUID
@@ -53,7 +59,7 @@ class ProductionControl(BaseModel):
 
 
 class Send(BaseModel):
-    content: str = Field(min_length=1, max_length=8000)
+    content: str = Field(default="", max_length=8000)
     request_key: uuid.UUID
     model_provider: str | None = Field(default=None, max_length=120)
     mode: Literal["standard", "test"] = "standard"
@@ -61,9 +67,21 @@ class Send(BaseModel):
     skills: list[SkillUse] = Field(default_factory=list, max_length=3)
     media: MediaRequest | None = None
     production: ProductionControl | None = None
+    attachments: list[AttachmentInput] = Field(default_factory=list, max_length=8)
+    references: list[Reference] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def media_controls(self):
+        if not self.content:
+            if self.media or self.production or not (self.attachments or self.references):
+                raise ValueError("请填写消息或添加要讨论的附件；生成时请描述创作要求")
+            self.content = "请查看这些附件，概括内容并告诉我可以怎样继续使用。"
+        if len(self.attachments) + len(self.references) > 8:
+            raise ValueError("每条消息最多添加 8 项参考内容")
+        if len({a.attachment_id for a in self.attachments}) != len(self.attachments):
+            raise ValueError("同一附件不能重复添加")
+        if self.media and self.references:
+            raise ValueError("生成参考请使用本轮生成的参考内容")
         if self.production and self.media:
             raise ValueError("任务指导和单独生成请分别发送")
         if self.media and (self.mode != "standard" or self.scope):
@@ -75,8 +93,6 @@ class Send(BaseModel):
     @field_validator("content")
     @classmethod
     def clean_content(cls, value):
-        if not value.strip():
-            raise ValueError("消息不能为空")
         return value.strip()
 
 

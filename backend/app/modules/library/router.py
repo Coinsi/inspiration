@@ -72,7 +72,7 @@ def retry_processing(
 def materials_catalog(
     query: str = Query(default="", max_length=255),
     kind: Literal["image", "video", "audio", "entity"] | None = None,
-    source: Literal["upload", "generated", "asset"] | None = None,
+    source: Literal["upload", "generated", "asset", "attachment"] | None = None,
     deleted: bool = False,
     offset: int = Query(default=0, ge=0, le=1_000_000),
     limit: int = Query(default=24, ge=1, le=100),
@@ -87,6 +87,7 @@ def materials_catalog(
         query=query,
         kind=kind,
         source=source,
+        user_id=ctx.user.id,
         deleted=deleted,
         offset=offset,
         limit=limit,
@@ -115,7 +116,7 @@ def material_profile(
 
 @router.post("/materials/{source}/{item_id}/{action}")
 def material_state(
-    source: Literal["upload", "generated", "asset"],
+    source: Literal["upload", "generated", "asset", "attachment"],
     item_id: uuid.UUID,
     action: Literal["trash", "restore"],
     ctx: ProjectContext = Depends(EDIT),

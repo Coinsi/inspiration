@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     library_max_upload_bytes: int = 10 * 1024 * 1024 * 1024
     library_staging_max_bytes: int = 100 * 1024 * 1024 * 1024
     library_staging_reserve_bytes: int = 2 * 1024 * 1024 * 1024
+    attachment_cleanup_enabled: bool = True
+    attachment_draft_ttl_days: int = Field(default=30, ge=1)
     agent_worker_enabled: bool = True
     production_harness_enabled: bool = True
     canvas_worker_enabled: bool = True

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Camera, Pencil, X } from "lucide-react";
-import { apiUpload } from "@/lib/api";
+import { api, apiUpload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -11,7 +11,7 @@ import "./material-profile.css";
 
 type Props = {
   projectId: string;
-  source: "upload" | "generated";
+  source: "upload" | "generated" | "attachment";
   item: {
     id: string;
     name: string;
@@ -143,13 +143,22 @@ export function MaterialProfileEditor({
         }),
       );
       if (frame) data.append("file", frame, "video-cover.jpg");
-      await apiUpload(
+      if (source === "attachment") {
+        await api.patch(`/projects/${projectId}/attachments/${item.id}`, {
+          title: name.trim(), description: description.trim(), tags: selectedTags,
+          expected_revision: revision,
+        });
+      } else await apiUpload(
         `/projects/${projectId}/library/materials/${source}/${item.id}/profile`,
         data,
       );
       await Promise.all(
         [
           "materials",
+          "material-attachment",
+          "conversation-attachments",
+          "saved-conversation-attachments",
+          "workbench-references",
           "library",
           "library-item",
           "generated-library",
@@ -164,7 +173,7 @@ export function MaterialProfileEditor({
       onClose();
     } catch (e) {
       setError((e as Error).message);
-      for (const key of ["materials", "library-item", "material-generation"])
+      for (const key of ["materials", "library-item", "material-generation", "material-attachment"])
         void qc.invalidateQueries({ queryKey: [key, projectId] });
     } finally {
       pending.current = false;

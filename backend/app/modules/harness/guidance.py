@@ -8,13 +8,14 @@ confirmation. Neither a model result nor a later reply resumes an explicit pause
 
 import copy
 import hashlib
+import json
 import uuid
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.core.errors import Conflict, Forbidden, NotFound
+from app.core.errors import CapabilityUnsupported, Conflict, Forbidden, NotFound
 from app.models.harness import ProductionAttempt, ProductionEvent, ProductionRun, ProductionTask
 
 
@@ -89,6 +90,41 @@ def _work_revision(db, run):
     return work.engineering_revision if work else None
 
 
+def _impact_references(run, anchor_references):
+    """New media belongs to the assessment, not to its business-task anchor.
+
+    Preserve selected task IDs and explicit fixed anchors independently from
+    newly attached evidence. Earlier conversation files are optional; accepted
+    business tasks retain their original immutable specifications.
+    """
+    from app.modules.harness.attachment_context import current_references
+    from app.modules.harness.context import ContextReference
+
+    current = current_references(run.context.get("current_attachments", []))
+    if not current:
+        return anchor_references
+    unique = {}
+    for item in [
+        *[{**ref, "required": True} for ref in current],
+        *anchor_references,
+        *run.context.get("references", []),
+    ]:
+        ref = ContextReference.model_validate(item)
+        key = json.dumps(
+            ref.model_dump(mode="json", exclude={"purpose", "required"}), sort_keys=True
+        )
+        prior = unique.get(key)
+        if prior is None:
+            unique[key] = ref.model_dump(mode="json")
+        elif ref.required:
+            prior["required"] = True
+    required = [ref for ref in unique.values() if ref["required"]]
+    if len(required) > 32:
+        raise CapabilityUnsupported("指导引用过多，请缩小本次需要评估的素材范围")
+    optional = [ref for ref in unique.values() if not ref["required"]]
+    return [*required, *optional[: 32 - len(required)]]
+
+
 def receive(db, ctx, run_id, request_key, text, anchor=None):
     """Record input before assessing it; no old business task is invalidated here."""
     from app.modules.harness import schemas, service
@@ -129,6 +165,7 @@ def receive(db, ctx, run_id, request_key, text, anchor=None):
     if not set(location.task_ids) <= {t.id for t in business}:
         raise Conflict("指导定位已失效，请重新选择当前步骤")
     fixed_refs = [resolve_reference(db, ctx, ref)["reference"] for ref in location.references]
+    impact_refs = _impact_references(run, fixed_refs)
     messages = previous["messages"] if previous else []
     messages = [*messages, {"sequence": run.event_sequence + 1, "text": text}]
     if sum(len(m["text"]) for m in messages) > 24000:
@@ -187,7 +224,7 @@ def receive(db, ctx, run_id, request_key, text, anchor=None):
                     key=f"impact_{gid.hex}",
                     role="impact",
                     goal="评估用户指导，只提出有证据的影响范围；不执行制作或写入。",
-                    references=fixed_refs,
+                    references=impact_refs,
                     expected_output="reply",
                 )
             ],

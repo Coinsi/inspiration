@@ -48,9 +48,7 @@ def retry_allowed(job):
             None,
         )
         return bool(
-            route
-            and resumable_profile(route["model_profile"])
-            and state.get("external_job_id")
+            route and resumable_profile(route["model_profile"]) and state.get("external_job_id")
         )
     return True
 
@@ -58,7 +56,7 @@ def retry_allowed(job):
 class RoutedProvider(GenerationProvider):
     def __init__(self, db, project_id, name, snapshot=None):
         self.db, self.project_id, self.name = db, project_id, name
-        self.row = catalog.get_model(db, project_id, name)
+        self.row = catalog.get_model(db, project_id, name, allow_global=True)
         self.plan = copy.deepcopy((snapshot or {}).get("routing"))
         self.job_id = None
         self.active = None
@@ -121,7 +119,7 @@ class RoutedProvider(GenerationProvider):
         self.db.commit()
 
     def _instance(self, route, resume=False):
-        p, ch, reason = catalog.route_profile(self.db, self.project_id, route)
+        p, ch, reason = catalog.route_profile(self.db, self.row.project_id, route)
         if not p or not ch:
             raise CapabilityUnsupported(reason)
         if reason and not resume:

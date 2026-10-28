@@ -14,7 +14,7 @@ from app.adapters.contracts import Capabilities, CostEstimate
 from app.core import audit
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.models.generation import CreativeModel, ModelChannel, ProviderConfig
-from app.models.identity import Project
+from app.modules.generation.model_scope import lock_model_scope
 
 PREFIX = "creative_"
 
@@ -76,13 +76,16 @@ class CreativeModelIn(BaseModel):
         return self
 
 
-def get_model(db, project_id, identity, lock=False):
+def get_model(db, project_id, identity, lock=False, *, allow_global=False):
     try:
         ident = uuid.UUID(str(identity).removeprefix(PREFIX))
     except ValueError:
         raise NotFound("创作模型不存在") from None
     query = select(CreativeModel).where(
-        CreativeModel.id == ident, CreativeModel.project_id == project_id
+        CreativeModel.id == ident,
+        ((CreativeModel.project_id == project_id) | CreativeModel.project_id.is_(None))
+        if allow_global
+        else CreativeModel.project_id == project_id,
     )
     row = db.scalar(query.with_for_update() if lock else query)
     if not row:
@@ -167,7 +170,7 @@ def public(db, row, admin=False):
 
 
 def save(db, ctx, data, model_id=None):
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     row = get_model(db, ctx.project.id, model_id, True) if model_id else None
     if row and row.revision != data.revision:
         raise Conflict("模型已被修改，请重新读取后保存")
@@ -219,7 +222,7 @@ def save(db, ctx, data, model_id=None):
 
 def import_profiles(db, ctx):
     """Explicit, idempotent adoption; never infer that equal names imply equal models."""
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     bound = {
         r["profile_id"] for m in rows(db, ctx.project.id) for r in m.definition.get("routes", [])
     }
@@ -257,7 +260,7 @@ class DefaultModelIn(BaseModel):
 
 def select_default(db, ctx, data):
     """Choose a default without making creators manually assemble a route."""
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     if data.source == "model":
         row = get_model(db, ctx.project.id, data.id, True)
     else:

@@ -352,7 +352,7 @@ export function ComposerModelPicker({
                                 (model.config.route_count
                                   ? `项目服务 · ${model.config.route_count} 条已配置线路`
                                   : "项目服务")}
-                            {model.config.is_default ? " · 项目默认" : ""}
+                            {model.config.is_default ? (model.config.scope === "platform" ? " · 平台默认" : " · 项目默认") : ""}
                             {model.config.scope === "personal"
                               ? ` · ${verificationLabel(model.config.verification as { status: string })}`
                               : ""}

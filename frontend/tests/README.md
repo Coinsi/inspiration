@@ -1,5 +1,11 @@
 # Frontend checks
 
+After `npm run build`, `node tests/platform-models-browser.mjs` (using `PLAYWRIGHT_MODULE` if needed) checks the actual platform model administrator components with intercepted APIs: global defaults and service dialogs, admin-only access, endpoint scope, light/dark and mobile layouts. Screenshots are under `test-results/platform-models`. No real credentials or model calls are used.
+
+`node --test tests/conversation-attachments.test.mjs tests/assistant-conversation.test.mjs` covers committed-offset uploads, prefix verification, refresh recovery, cancel/retry, attachment-only sends, immutable references and conversation isolation.
+
+After `npm run build`, `conversation-attachments-browser.mjs` and `materials-attachments-browser.mjs` use Chrome via `PLAYWRIGHT_MODULE` (or installed Playwright), real React components and intercepted API fixtures. They cover paste/drop/upload, saved-file reuse, failed-upload recovery, retry editing, theme/narrow layouts, metadata edits and returning to the source message. Screenshots are saved under repository `test-results/`. These fixtures never call model providers and do not replace backend or live-provider validation.
+
 `canvas-edge-create-live.mjs` requires `TEST_ISOLATED_PREVIEW=1`, `APP_URL`, `ARTIFACT_DIR`, `CANVAS_SOURCE_FIXTURE` (batch21 fixture) and `PLAYWRIGHT_MODULE`. It verifies the QA project name and creates/resets only the named drag-to-create QA canvas. Real pointer drags cover forward/reverse creation, port compatibility, cancellation, zoomed drop placement, keyboard choices, atomic undo/redo, persistence and existing connections. No model generation calls.
 
 `canvas-grid-tools-live.mjs` requires `TEST_ISOLATED_PREVIEW=1`, `APP_URL`, `ARTIFACT_DIR`, `TEST_MEDIA_DIR`, `PLAYWRIGHT_MODULE`, and `CANVAS_SOURCE_FIXTURE` pointing to the batch21 canvas media fixture. It checks the exact QA project name and creates/resets only its dedicated named canvas. It writes real grid crops and uploads real image/MP4 versions, exercises a committed-but-lost split response and idempotent retry, undo/redo/reload, source preview, reference creation, invalid file rejection, upload failure recovery, drag/drop and actual video playback. No cloud model calls. Never use a user project as its source fixture.

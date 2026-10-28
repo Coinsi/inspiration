@@ -1,3 +1,4 @@
+import { modelConfigRoot, modelConfigQueryKey } from "@/lib/model-config-scope";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -8,7 +9,7 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type ProviderConfig } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 type Model = {
@@ -85,23 +86,28 @@ export function DefaultModels({
   const [notice, setNotice] = useState("");
   const models = useQuery({
     queryKey: ["creative-models", projectId],
-    queryFn: () => api.get<Model[]>(`/projects/${projectId}/creative-models`),
+    queryFn: () => api.get<Model[]>(`${modelConfigRoot(projectId)}/creative-models`),
+  });
+  const shared = useQuery({
+    queryKey: ["providers", projectId],
+    queryFn: () => api.get<ProviderConfig[]>(`/projects/${projectId}/providers`),
+    enabled: projectId !== "platform",
   });
   const channels = useQuery({
     queryKey: ["model-channels", projectId],
     queryFn: () =>
-      api.get<{ channels: Channel[] }>(`/projects/${projectId}/model-channels`),
+      api.get<{ channels: Channel[] }>(`${modelConfigRoot(projectId)}/model-channels`),
   });
   const choose = useMutation({
     mutationFn: (item: Choice) =>
-      api.post(`/projects/${projectId}/creative-models/select-default`, {
+      api.post(`${modelConfigRoot(projectId)}/creative-models/select-default`, {
         id: item.id,
         source: item.source,
       }),
     onSuccess: async (_, item) => {
       await Promise.all(
         ["creative-models", "model-channels", "providers", "capabilities"].map(
-          (key) => qc.invalidateQueries({ queryKey: [key, projectId] }),
+          (key) => qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) }),
         ),
       );
       setNotice(
@@ -193,6 +199,8 @@ export function DefaultModels({
       ) : (
         groups.map((group) => {
           const items = choices.filter((m) => m.modality === group.type);
+          const inherited = (shared.data || []).filter(m => m.enabled && m.config.scope === "platform" && !m.config.hidden_from_catalog && (m.config.modality || (m.kind === "llm" ? "text" : "image")) === group.type);
+          const platformDefault = inherited.find(m => m.config.is_default) || inherited[0];
           const Icon = group.icon;
           return (
             <section
@@ -289,9 +297,9 @@ export function DefaultModels({
                 </div>
               ) : (
                 <div className="default-model-empty">
-                  <p>还没有连接{group.name.slice(2, 4)}模型</p>
+                  <p>{platformDefault ? `使用平台模型：${platformDefault.display_name || platformDefault.provider_name}` : `还没有连接${group.name.slice(2, 4)}模型`}</p>
                   <button onClick={connect}>
-                    添加模型服务
+                    {platformDefault ? "配置项目专用模型" : "添加模型服务"}
                     <ArrowRight size={13} />
                   </button>
                 </div>
@@ -301,7 +309,7 @@ export function DefaultModels({
         })
       )}
       <p className="model-settings-footnote">
-        默认选择对当前项目生效，已有任务和画布节点保留原来的模型。模型是否能生成，仍取决于服务权限和余额。
+        {projectId === "platform" ? "全局模型供所有用户使用。项目已有默认配置时优先使用项目配置；已有任务保留原模型。平台承担这些渠道的调用费用。" : "默认选择对当前项目生效，已有任务和画布节点保留原来的模型。模型是否能生成，仍取决于服务权限和余额。"}
       </p>
     </section>
   );

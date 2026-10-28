@@ -456,3 +456,9 @@
   font-size: 12px;
   padding: 12px 0;
 }
+
+.model-directory-row { display:flex; align-items:center; gap:12px; padding:14px 4px; border-bottom:1px solid hsl(var(--border)); }
+.model-directory-row small {display:block; margin-top:4px; color:hsl(var(--muted-foreground));}
+.model-directory-row > button {width:auto; padding:6px; flex-shrink:0; font-size:12px;}
+.model-directory-row > label input {flex-shrink:0;}
+@media(max-width:600px){.model-directory-row{flex-wrap:wrap}.model-directory-row > label{flex-basis:100%}.service-model-picker footer{flex-wrap:wrap}}

@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.core.errors import Forbidden, NotFound, Unauthorized
 from app.core.security import decode_access_token
 from app.models.asset import Asset, AssetReferenceImage
+from app.models.attachment import Attachment
 from app.models.generation import Generation
 from app.models.identity import Membership, Project, User
 from app.models.library import LibraryMedia, MediaVersion
@@ -76,6 +77,14 @@ def get_blob(
             or_(
                 select(Project.id)
                 .where(Project.id == project_id, Project.cover_blob_hash == blob_hash)
+                .exists(),
+                select(Attachment.id)
+                .where(
+                    Attachment.project_id == project_id,
+                    Attachment.created_by == user_id,
+                    Attachment.status == "ready",
+                    or_(Attachment.blob_hash == blob_hash, Attachment.thumbnail_hash == blob_hash),
+                )
                 .exists(),
                 select(MediaSegment.id)
                 .join(MediaIndex).join(MediaVersion).join(LibraryMedia)

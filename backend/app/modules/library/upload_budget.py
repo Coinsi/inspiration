@@ -7,6 +7,7 @@ from sqlalchemy import func, select, text
 
 from app.core.config import settings
 from app.core.errors import Conflict
+from app.models.attachment import Attachment
 from app.models.library import MediaVersion
 
 UPLOAD_BUDGET_LOCK = 726381913
@@ -29,6 +30,14 @@ def reserve(db, size_bytes):
             func.coalesce(func.sum(MediaVersion.size_bytes - MediaVersion.uploaded_bytes), 0),
         ).where(MediaVersion.status.in_(("uploading", "queued", "processing", "failed")))
     ).one()
+    attachment_reserved, attachment_remaining = db.execute(
+        select(
+            func.coalesce(func.sum(Attachment.size_bytes), 0),
+            func.coalesce(func.sum(Attachment.size_bytes - Attachment.uploaded_bytes), 0),
+        ).where(Attachment.status.in_(("uploading", "processing", "failed")))
+    ).one()
+    reserved += attachment_reserved
+    remaining += attachment_remaining
     if reserved + size_bytes > settings.library_staging_max_bytes:
         raise Conflict("上传暂存队列容量已满，请等待处理完成或取消不需要的上传")
     check_space(remaining + size_bytes)

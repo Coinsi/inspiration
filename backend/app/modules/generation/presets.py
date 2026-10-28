@@ -12,8 +12,8 @@ from sqlalchemy import select
 from app.core.crypto import decrypt
 from app.core.errors import CapabilityUnsupported, Conflict
 from app.models.generation import CreativeModel, ModelChannel, ProviderConfig
-from app.models.identity import Project
 from app.modules.generation import channels, model_catalog
+from app.modules.generation.model_scope import lock_model_scope
 
 PRESETS = {
     "ark": {
@@ -160,7 +160,7 @@ def connect(db, ctx, data):
         request_id=data.request_id,
     )
     # One project lock and one request transaction cover channel, profiles and routes.
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     ch = db.get(ModelChannel, data.request_id)
     if ch and (
         ch.project_id != ctx.project.id
@@ -229,7 +229,9 @@ def connect(db, ctx, data):
                 raise Conflict(f"{bound.name} 已停用，请先在创作模型中启用")
             result.append(model_catalog.public(db, bound))
             continue
-        ident = uuid.uuid5(ctx.project.id, "preset:" + data.preset_id + ":" + key)
+        ident = uuid.uuid5(
+            ctx.project.id or uuid.NAMESPACE_URL, "preset:" + data.preset_id + ":" + key
+        )
         existing = db.get(CreativeModel, ident)
         if existing:
             if not existing.enabled:

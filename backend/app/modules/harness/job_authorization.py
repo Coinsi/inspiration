@@ -56,6 +56,12 @@ def _reference(db, ctx, kind, ident, blob_hash):
         row = db.get(Generation, ident, populate_existing=True)
         if row:
             _target(db, ctx, row.target_type, row.target_id)
+    elif kind == "attachment":
+        from app.models.attachment import Attachment
+
+        # Refresh even when the same session materialized the source earlier.
+        # describe_media rechecks its live owner/project, readiness and hash.
+        db.get(Attachment, ident, populate_existing=True)
     else:
         raise Forbidden("制作任务缺少可核对的固定媒体来源")
     if not blob_hash:

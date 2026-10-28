@@ -26,6 +26,7 @@ from app.models import (  # noqa: F401
     canvas,
     agent,
     conversation,
+    attachment,
     skill,
     director,
     evidence,

@@ -116,6 +116,7 @@ export function useConversationMedia(
     refs,
     setRefs,
     schema,
+    capabilities: caps.data,
     videoReferencesAvailable: mode === "video" && !!caps.data?.features.includes("video_reference"),
     controls,
     choose: (value: string) => setChoices((v) => ({ ...v, [mode]: value })),
@@ -146,11 +147,13 @@ export function ConversationMediaControls({
   media,
   mode,
   disabled,
+  showReferences = true,
 }: {
   projectId: string;
   media: ReturnType<typeof useConversationMedia>;
   mode: CreationMode;
   disabled: boolean;
+  showReferences?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -161,7 +164,7 @@ export function ConversationMediaControls({
         disabled={disabled}
         onChange={media.parameter}
       />
-      <button
+      {showReferences && <button
         className="conversation-tool"
         disabled={disabled}
         onClick={() => setOpen(true)}
@@ -170,7 +173,7 @@ export function ConversationMediaControls({
         <span>
           参考素材{media.refs.length ? ` · ${media.refs.length}` : ""}
         </span>
-      </button>
+      </button>}
       <Modal
         open={open}
         onClose={() => setOpen(false)}

@@ -8,6 +8,7 @@ from sqlalchemy.orm import aliased
 from app.core import audit
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.models.asset import Asset
+from app.models.attachment import Attachment
 from app.models.generation import Generation, GenerationJob
 from app.models.library import LibraryMedia, MediaVersion
 from app.models.material import GeneratedMaterialState
@@ -16,7 +17,18 @@ from app.models.storage import Blob
 from app.modules.library import generated, service
 
 
-def catalog(db, project_id, *, query="", kind=None, source=None, deleted=False, offset=0, limit=24):
+def catalog(
+    db,
+    project_id,
+    *,
+    query="",
+    kind=None,
+    source=None,
+    deleted=False,
+    offset=0,
+    limit=24,
+    user_id=None,
+):
     variant = aliased(Generation)
     adopted = (
         select(variant.id)
@@ -157,6 +169,39 @@ def catalog(db, project_id, *, query="", kind=None, source=None, deleted=False, 
         literal(False),
     ).where(Asset.project_id == project_id, Asset.deleted_at.is_not(None))
     parts = [uploads, outputs] + ([entities] if deleted else [])
+    if user_id:
+        parts.append(
+            select(
+                Attachment.id,
+                literal("attachment"),
+                Attachment.title,
+                Attachment.description,
+                Attachment.tags,
+                Attachment.metadata_revision,
+                Attachment.kind,
+                Attachment.saved_at,
+                Attachment.hidden_at,
+                Attachment.status,
+                Attachment.thumbnail_hash,
+                Attachment.blob_hash,
+                Attachment.blob_hash,
+                Attachment.size_bytes,
+                Attachment.duration_ms,
+                literal(None, type_=String),
+                Attachment.filename
+                + " "
+                + Attachment.description
+                + " "
+                + cast(Attachment.tags, String),
+                literal(False),
+                literal(False),
+            ).where(
+                Attachment.project_id == project_id,
+                Attachment.created_by == user_id,
+                Attachment.saved_at.is_not(None),
+                Attachment.status == "ready",
+            )
+        )
     rows = union_all(*parts).subquery()
     conditions = [rows.c.deleted_at.is_not(None) if deleted else rows.c.deleted_at.is_(None)]
     if query.strip():
@@ -183,6 +228,10 @@ def catalog(db, project_id, *, query="", kind=None, source=None, deleted=False, 
 
 
 def state(db, ctx, source, item_id, *, restore=False):
+    if source == "attachment":
+        from app.modules.attachments.service import set_hidden
+
+        return set_hidden(db, ctx, item_id, hidden=not restore)
     if source == "upload":
         return service.trash(db, ctx, item_id, restore=restore)
     if source == "asset":

@@ -58,7 +58,7 @@ type Material = {
   adopted: boolean;
   is_test: boolean;
   id: string;
-  source: "upload" | "generated" | "asset";
+  source: "upload" | "generated" | "asset" | "attachment";
   name: string;
   description?: string;
   tags?: string[] | null;
@@ -78,6 +78,7 @@ const sourceNames = {
   upload: "上传与复用",
   generated: "AI 生成",
   asset: "角色与场景",
+  attachment: "对话附件",
 };
 const kindNames = {
   image: "图片",
@@ -104,7 +105,8 @@ function Collection({ projectId }: { projectId: string }) {
   const page = Math.max(0, Number(params.get("page")) || 0);
   const [search, setSearch] = useState(query);
   const media = params.get("media") || "",
-    generation = params.get("generation") || "";
+    generation = params.get("generation") || "",
+    attachment = params.get("attachment") || "";
   const [segment, setSegment] = useState<SegmentResult | null>(null);
   const [impact, setImpact] = useState<string | null>(null);
   const [upload, setUpload] = useState<{
@@ -122,7 +124,7 @@ function Collection({ projectId }: { projectId: string }) {
   );
   useEffect(
     () => setPreviewId(null),
-    [media, generation, tab, page, kind, source, query, editing],
+    [media, generation, attachment, tab, page, kind, source, query, editing],
   );
   const returnTo = params.get("return")?.startsWith(`${root}/`)
     ? params.get("return")!
@@ -138,6 +140,7 @@ function Collection({ projectId }: { projectId: string }) {
     next.delete("ordinal");
     next.delete("reference");
     next.delete("reuse");
+    next.delete("attachment");
     next.set(key, value);
     return `${root}/workbench?${next}`;
   };
@@ -180,9 +183,23 @@ function Collection({ projectId }: { projectId: string }) {
       api.get<GeneratedMaterial>(`${base}/generated/${generation}`),
     enabled: !!generation,
   });
+  const attached = useQuery({
+    queryKey: ["material-attachment", projectId, attachment],
+    queryFn: () => api.get<{
+      id: string; title: string; filename: string; kind: "image" | "video" | "audio";
+      blob_hash: string; thumbnail_hash?: string; description: string; tags: string[];
+      metadata_revision: number; conversation_id?: string; message_id?: string; message_ordinal?: number;
+      duration_ms?: number; size_bytes: number;
+    }>(`${root}/attachments/${attachment}`),
+    enabled: !!attachment,
+  });
   const refresh = () => {
     for (const key of [
       "materials",
+      "material-attachment",
+      "conversation-attachments",
+      "saved-conversation-attachments",
+      "workbench-references",
       "library",
       "library-item",
       "generated-library",
@@ -204,15 +221,17 @@ function Collection({ projectId }: { projectId: string }) {
   });
   const closeDetail = () => {
     setSegment(null);
-    choose({ media: "", generation: "", version: "", start: "", end: "" });
+    choose({ media: "", generation: "", attachment: "", version: "", start: "", end: "" });
   };
   const open = (item: Material) => {
     mutation.reset();
     setSegment(null);
     choose(
-      item.source === "upload"
-        ? { media: item.id, generation: "" }
-        : { generation: item.id, media: "" },
+      item.source === "attachment"
+        ? { attachment: item.id, media: "", generation: "" }
+        : item.source === "upload"
+        ? { media: item.id, generation: "", attachment: "" }
+        : { generation: item.id, media: "", attachment: "" },
     );
   };
   async function trash(item: Material) {
@@ -268,7 +287,7 @@ function Collection({ projectId }: { projectId: string }) {
               key={v}
               role="tab"
               aria-selected={tab === v}
-              onClick={() => choose({ tab: v, media: "", generation: "" })}
+              onClick={() => choose({ tab: v, media: "", generation: "", attachment: "" })}
             >
               {label}
             </button>
@@ -288,7 +307,7 @@ function Collection({ projectId }: { projectId: string }) {
           projectId={projectId}
           onSelect={(s) => {
             setSegment(s);
-            choose({ media: s.media_id, generation: "" });
+            choose({ media: s.media_id, generation: "", attachment: "" });
           }}
         />
       ) : tab === "processing" ? (
@@ -328,6 +347,7 @@ function Collection({ projectId }: { projectId: string }) {
                 { value: "", label: "全部来源" },
                 { value: "upload", label: "上传与复用" },
                 { value: "generated", label: "AI 生成" },
+                { value: "attachment", label: "对话附件" },
                 ...(deleted ? [{ value: "asset", label: "角色与场景" }] : []),
               ]}
             />
@@ -549,12 +569,13 @@ function Collection({ projectId }: { projectId: string }) {
           )}
         </>
       )}
-      {((detail.isError && media) || (generated.isError && generation)) && (
+      {((detail.isError && media) || (generated.isError && generation) || (attached.isError && attachment)) && (
         <div role="alert" className="materials-error">
-          {detail.error?.message || generated.error?.message}
+          {detail.error?.message || generated.error?.message || attached.error?.message}
           <Button
             onClick={() => {
               if (media) void detail.refetch();
+              if (attachment) void attached.refetch();
               if (generation) void generated.refetch();
             }}
           >
@@ -782,13 +803,46 @@ function Collection({ projectId }: { projectId: string }) {
           </div>
         )}
       </Modal>
+      <Modal open={!!attachment && !!attached.data} title="对话附件" width={1100}
+        bodyClassName="material-result-body" onClose={closeDetail}>
+        {attached.data && <div className="material-result-detail">
+          <div className="material-result-preview">
+            {attached.data.kind === "image" ? <MediaPreview
+              src={blobUrl(projectId, attached.data.blob_hash)} label={attached.data.title}
+              filename={attached.data.filename} />
+              : attached.data.kind === "video" ? <MediaVideo
+                src={blobUrl(projectId, attached.data.blob_hash)} label={attached.data.title} />
+              : <audio className="w-full" controls preload="metadata"
+                src={blobUrl(projectId, attached.data.blob_hash)} aria-label={attached.data.title} />}
+          </div>
+          <aside className="material-result-info">
+            <div className="material-result-kind">{kindNames[attached.data.kind]} · 对话附件</div>
+            <h2 className="text-xl font-semibold break-words">{attached.data.title}</h2>
+            <MaterialProfile projectId={projectId} source="attachment"
+              item={{ ...attached.data, name: attached.data.title }} />
+            <dl className="material-result-facts">
+              <div><dt>原始文件</dt><dd>{attached.data.filename}</dd></div>
+              <div><dt>文件信息</dt><dd>{mediaSize(attached.data.size_bytes)}{attached.data.duration_ms ? ` · ${mediaTime(attached.data.duration_ms)}` : ""}</dd></div>
+            </dl>
+            <div className="material-use-actions"><Link className="studio-primary" to={creativeLink("attachment", attached.data.id)}><Sparkles size={15} />用于创作</Link></div>
+            <div className="material-result-utilities">
+              <a download href={`${blobUrl(projectId, attached.data.blob_hash)}&download=true`}><Download size={15} />下载原文件</a>
+              {attached.data.conversation_id && <Link
+                to={`${root}/workbench?view=chat&conversation=${attached.data.conversation_id}${attached.data.message_id ? `&message=${attached.data.message_id}` : ""}${attached.data.message_ordinal ? `&ordinal=${attached.data.message_ordinal}` : ""}`}>
+                返回来源对话 <ArrowUpRight size={14} />
+              </Link>}
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">发送时自动保存。修改名称或从素材列表移除，不会更改对话中的原文件。</p>
+          </aside>
+        </div>}
+      </Modal>
       {editing && editing.source !== "asset" && (
         <MaterialProfileEditor
           projectId={projectId}
           source={editing.source}
           item={editing}
           video={
-            editing.kind === "video" &&
+            editing.source !== "attachment" && editing.kind === "video" &&
             editing.status === "ready" &&
             !editing.is_test &&
             (editing.preview_hash || editing.blob_hash)

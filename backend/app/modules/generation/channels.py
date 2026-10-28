@@ -15,8 +15,8 @@ from app.core import audit
 from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
 from app.models.generation import CreativeModel, GenerationJob, ModelChannel, ProviderConfig
-from app.models.identity import Project
 from app.modules.generation.model_catalog import Price
+from app.modules.generation.model_scope import lock_model_scope
 from app.modules.harness.kernel_modalities import InputCapabilities
 
 PROTOCOLS = {
@@ -264,7 +264,7 @@ def catalog(db, project_id):
 
 def save_channel(db, ctx, data, channel_id=None):
     # Serialize creates and defaults within a project; request identities make retries safe.
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     if channel_id:
         row = channel(db, ctx.project.id, channel_id, True)
         if data.revision != row.revision:
@@ -302,7 +302,7 @@ def save_channel(db, ctx, data, channel_id=None):
 
 
 def save_model(db, ctx, channel_id, data, model_id=None):
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     ch = channel(db, ctx.project.id, channel_id, True)
     if data.protocol != "mock" and not ch.endpoint:
         raise CapabilityUnsupported("请先为渠道填写服务地址")
@@ -322,7 +322,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         row = ProviderConfig(
             id=data.request_id or uuid.uuid4(),
             project_id=ctx.project.id,
-            provider_name="model_" + uuid.uuid4().hex,
+            provider_name=("platform_" if ctx.project.id is None else "model_") + uuid.uuid4().hex,
             config={},
         )
         db.add(row)
@@ -420,7 +420,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
 def import_legacy(db, ctx):
     from app.core.config import settings
 
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     count = 0
     for row in db.scalars(
         select(ProviderConfig).where(ProviderConfig.project_id == ctx.project.id).with_for_update()
@@ -519,7 +519,7 @@ def selected_llm(db, project_id, name, user_id=None):
             model_id = uuid.UUID(name[len(catalog.PREFIX) :])
         except ValueError:
             raise NotFound("文字模型不存在") from None
-        model = catalog.get_model(db, project_id, model_id)
+        model = catalog.get_model(db, project_id, model_id, allow_global=True)
         if model.modality != "text" or not model.enabled:
             raise CapabilityUnsupported("请选择已启用的文字模型")
         candidates, _ = catalog.all_candidates(db, model)
@@ -529,7 +529,8 @@ def selected_llm(db, project_id, name, user_id=None):
     else:
         row = db.scalar(
             select(ProviderConfig).where(
-                ProviderConfig.project_id == project_id, ProviderConfig.provider_name == name
+                ProviderConfig.project_id == (None if name.startswith("platform_") else project_id),
+                ProviderConfig.provider_name == name,
             )
         )
     if not row or row.kind != "llm":
@@ -577,13 +578,14 @@ def llm_config(db, project_id):
             return r
     if any(row.config.get("channel_id") for row in rows):
         raise CapabilityUnsupported("项目文字模型或渠道已停用，请在项目设置中启用后再使用")
-    return None
+    return llm_config(db, None) if project_id is not None else None
 
 
 def model_snapshot(db, project_id, name):
     row = db.scalar(
         select(ProviderConfig).where(
-            ProviderConfig.project_id == project_id, ProviderConfig.provider_name == name
+            ProviderConfig.project_id == (None if name.startswith("platform_") else project_id),
+            ProviderConfig.provider_name == name,
         )
     )
     if row and row.config.get("channel_id"):
@@ -592,9 +594,26 @@ def model_snapshot(db, project_id, name):
 
 
 def discover(db, ctx, channel_id):
-    from app.core.crypto import decrypt
 
     ch = channel(db, ctx.project.id, channel_id)
+    return discover_connection(ch)
+
+
+def check_connection(db, ctx, data, channel_id=None):
+    ch = channel(db, ctx.project.id, channel_id) if channel_id else None
+    credential = (
+        encrypt(data.token)
+        if data.token
+        else (ch.credentials_encrypted if ch and not data.clear_token else None)
+    )
+    return discover_connection(
+        SimpleNamespace(endpoint=data.endpoint, credentials_encrypted=credential)
+    )
+
+
+def discover_connection(ch):
+    from app.core.crypto import decrypt
+
     if not ch.endpoint or not ch.credentials_encrypted:
         raise CapabilityUnsupported("请先保存服务地址和密钥")
     try:
@@ -639,7 +658,7 @@ def discover(db, ctx, channel_id):
 
 
 def remove_channel(db, ctx, channel_id, revision):
-    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+    lock_model_scope(db, ctx.project.id)
     row = channel(db, ctx.project.id, channel_id, True)
     if row.revision != revision:
         raise Conflict("连接已更新，请刷新后重新删除")
@@ -656,7 +675,7 @@ def remove_channel(db, ctx, channel_id, revision):
     names = {p.provider_name for p in profiles}
     for job in db.scalars(
         select(GenerationJob).where(
-            GenerationJob.project_id == ctx.project.id,
+            (GenerationJob.project_id == ctx.project.id) if ctx.project.id is not None else True,
             GenerationJob.status.in_(["pending", "submitted", "running"]),
         )
     ):

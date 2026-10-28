@@ -93,6 +93,7 @@ def test_render_mixed_media_audio_and_cancel(tmp_path):
 
 @pytest.fixture
 def studio(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "attachment_cleanup_enabled", False)
     monkeypatch.setattr(settings, "transcription_worker_enabled", False)
     monkeypatch.setattr(settings, "agent_worker_enabled", False)
     monkeypatch.setattr(settings, "canvas_worker_enabled", False)

@@ -1,7 +1,9 @@
+import { connectionProtocol } from "@/lib/model-connection";
+import { modelConfigRoot, modelConfigQueryKey } from "@/lib/model-config-scope";
 import { ModelDirectory, modelSuggestion } from "./ModelDirectory";
 import { SelectField } from "./ui/select-field";
 import { PersonalModelServices } from "./PersonalModelServices";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -77,12 +79,13 @@ const paramNames: Record<string, string> = {
 
 export function ModelChannels({
   projectId,
-  initialTab: _initialTab = "defaults",
+  initialTab = "defaults",
 }: {
   projectId: string;
   initialTab?: "defaults" | "services";
 }) {
-  const [tab, setTab] = useState<string>("personal");
+  const platform = projectId === "platform";
+  const [tab, setTab] = useState<string>(platform ? initialTab : "personal");
   const [connecting, setConnecting] = useState(false);
   const [manualRequest, setManualRequest] = useState(false);
   const [notice, setNotice] = useState("");
@@ -90,23 +93,23 @@ export function ModelChannels({
   return (
     <div className="model-config-workspace">
       <nav className="model-settings-nav" aria-label="模型设置分区">
-        <button
+        {!platform && <button
           aria-pressed={tab === "personal"}
           onClick={() => setTab("personal")}
         >
           我的模型服务
-        </button>
+        </button>}
         <button
           aria-pressed={tab === "defaults"}
           onClick={() => setTab("defaults")}
         >
-          项目默认模型
+          {platform ? "全局默认模型" : "默认模型"}
         </button>
         <button
           aria-pressed={tab === "services"}
           onClick={() => setTab("services")}
         >
-          项目专用服务
+          {platform ? "全局模型服务" : "项目专用服务"}
         </button>
         <button
           aria-pressed={tab === "advanced"}
@@ -115,6 +118,7 @@ export function ModelChannels({
           高级路由
         </button>
       </nav>
+      <button className="text-sm text-muted-foreground underline mb-4" onClick={() => setConnecting(true)}>使用官方服务预设</button>
       {notice && (
         <p role="status" className="model-settings-notice">
           {notice}
@@ -125,13 +129,13 @@ export function ModelChannels({
       ) : tab === "defaults" ? (
         <DefaultModels
           projectId={projectId}
-          connect={() => setTab("personal")}
+          connect={() => { setTab("services"); setManualRequest(true); }}
           services={() => setTab("services")}
         />
       ) : tab === "services" ? (
         <ChannelsPane
           projectId={projectId}
-          connectService={() => setConnecting(true)}
+          connectService={() => { setTab("services"); setManualRequest(true); }}
           manualRequest={manualRequest}
           manualHandled={() => setManualRequest(false)}
         />
@@ -139,7 +143,7 @@ export function ModelChannels({
         <CreativeModels
           projectId={projectId}
           openChannels={() => setTab("services")}
-          connectService={() => setConnecting(true)}
+          connectService={() => { setTab("services"); setManualRequest(true); }}
         />
       )}
       {connecting && (
@@ -159,7 +163,7 @@ export function ModelChannels({
                 "providers",
                 "capabilities",
               ].map((key) =>
-                qc.invalidateQueries({ queryKey: [key, projectId] }),
+                qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) }),
               ),
             );
             setNotice(message);
@@ -184,7 +188,7 @@ function ChannelsPane({
   manualHandled: () => void;
 }) {
   const confirm = useConfirm();
-  const base = `/projects/${projectId}/model-channels`,
+  const base = `${modelConfigRoot(projectId)}/model-channels`,
     qc = useQueryClient();
   const query = useQuery({
     queryKey: ["model-channels", projectId],
@@ -218,7 +222,7 @@ function ChannelsPane({
       "providers",
       "capabilities",
     ])
-      await qc.invalidateQueries({ queryKey: [key, projectId] });
+      await qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) });
   };
   const remove = useMutation({
     mutationFn: (channel: Channel) =>
@@ -227,7 +231,7 @@ function ChannelsPane({
       setSelected("");
       setDirectory(null);
       setNotice(
-        "服务及其模型已删除，作品和历史记录保留。请重新检查项目默认模型。",
+        "服务及其模型已删除，作品和历史记录保留。请重新检查默认模型。",
       );
       await refresh();
     },
@@ -236,7 +240,7 @@ function ChannelsPane({
     if (
       await confirm({
         title: `删除「${channel.name}」？`,
-        message: `将移除本项目的服务连接、保存的密钥和 ${channel.models.length} 个模型。项目成员将无法继续使用它；已生成作品保留。默认模型若来自此服务，需要重新选择。`,
+        message: `将移除此范围内的服务连接、保存的密钥和 ${channel.models.length} 个模型。使用者将无法继续使用它；已生成作品保留。默认模型若来自此服务，需要重新选择。`,
         confirmText: "删除服务",
         danger: true,
       })
@@ -249,10 +253,23 @@ function ChannelsPane({
         `${base}/${id}/discover`,
       ),
     onSuccess: (r, id) => {
+      addMany.reset();
       setDirectory({ channel: id, ...r });
       setDirectoryOpen(true);
       setNotice("");
     },
+  });
+  const batchIds = useRef(new Map<string, string>());
+  const addMany = useMutation({
+    mutationFn: ({channel, items}: {channel: Channel; items: {code: string; modality: string}[]}) => {
+      const models = items.map(item => {
+        const key = `${channel.id}:${item.code}:${item.modality}`;
+        if (!batchIds.current.has(key)) batchIds.current.set(key, crypto.randomUUID());
+        return { name: item.code.slice(0, 100), model: item.code, modality: item.modality, protocol: connectionProtocol(channel.endpoint, item.modality), request_id: batchIds.current.get(key) };
+      });
+      return api.post(`${base}/${channel.id}/models/batch`, { models });
+    },
+    onSuccess: async () => { await refresh(); setDirectoryOpen(false); setNotice("模型已添加，可在创作中选择；实际生成能力尚未验证。"); },
   });
   const migrate = useMutation({
     mutationFn: () => api.post<{ imported: number }>(`${base}/import-legacy`),
@@ -280,7 +297,7 @@ function ChannelsPane({
       <header className="model-settings-heading">
         <div>
           <h2>服务连接</h2>
-          <p>管理当前项目使用的模型服务。一份连接可以提供多个模型。</p>
+          <p>{projectId === "platform" ? "供所有用户使用的模型服务。一份连接可以提供多个模型。" : "管理当前项目使用的模型服务。一份连接可以提供多个模型。"}</p>
         </div>
         <Button onClick={connectService}>
           <Plus size={15} />
@@ -454,7 +471,7 @@ function ChannelsPane({
         </div>
       )}
       <p className="model-settings-footnote">
-        连接对当前项目共享。密钥仅保存在服务端；修改连接不会改写已有作品。
+        连接在当前配置范围内共享。密钥仅保存在服务端；修改连接不会改写已有作品。
       </p>
       {channelEdit !== undefined && (
         <ChannelEditor
@@ -462,17 +479,21 @@ function ChannelsPane({
           base={base}
           channel={channelEdit}
           close={() => setChannelEdit(undefined)}
-          saved={async (id) => {
+          saved={async (id, readModels) => {
             setSelected(id);
             await refresh();
             setChannelEdit(undefined);
             setNotice("连接已保存");
+            if (readModels) discover.mutate(id);
           }}
         />
       )}
       {directory && data.channels.some((c) => c.id === directory.channel) && (
         <ModelDirectory
-          key={directory.channel}
+          key={`${directory.channel}-${directoryOpen}`}
+          busy={addMany.isPending}
+          error={addMany.error?.message}
+          addMany={(items) => addMany.mutate({channel: data.channels.find(c => c.id === directory.channel)!, items})}
           open={directoryOpen}
           name={data.channels.find((c) => c.id === directory.channel)!.name}
           models={directory.models}
@@ -515,7 +536,7 @@ function ChannelsPane({
             setDirectoryOpen(!!modelEdit.code);
             setModelEdit(null);
             setNotice(
-              "模型已保存，可在创作时选择，或在项目默认模型中设为默认。",
+              "模型已保存，可在创作时选择，或在默认模型中设为默认。",
             );
           }}
         />
@@ -533,7 +554,7 @@ function ChannelEditor({
   base: string;
   channel: Channel | null;
   close: () => void;
-  saved: (id: string) => Promise<void>;
+  saved: (id: string, readModels: boolean) => Promise<void>;
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState(channel?.name || ""),
@@ -543,6 +564,10 @@ function ChannelEditor({
     [clear, setClear] = useState(false),
     [dirty, setDirty] = useState(false);
   const [requestId] = useState(() => crypto.randomUUID());
+  const [readModels, setReadModels] = useState(false);
+  const check = useMutation({
+    mutationFn: () => api.post<{message: string}>(`${base}/check${channel ? `?channel_id=${channel.id}` : ""}`, { name: name || "连接检测", endpoint, token: token || null, clear_token: clear }),
+  });
   const save = useMutation({
     mutationFn: () => {
       const body = {
@@ -560,7 +585,7 @@ function ChannelEditor({
     },
     onSuccess: async (r) => {
       setToken("");
-      await saved(r.id);
+      await saved(r.id, readModels);
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === "VERSION_CONFLICT")
@@ -569,19 +594,19 @@ function ChannelEditor({
   });
   return (
     <EditorFrame
-      title={channel ? "编辑服务连接" : "添加自定义服务"}
+      title={channel ? "编辑服务连接" : "添加模型服务"}
       close={close}
       dirty={dirty}
-      busy={save.isPending}
+      busy={save.isPending || check.isPending}
     >
       <form
-        onChange={() => setDirty(true)}
+        onChange={() => { setDirty(true); check.reset(); }}
         onSubmit={(e) => {
           e.preventDefault();
           save.mutate();
         }}
       >
-        <fieldset disabled={save.isPending} className="model-form">
+        <fieldset disabled={save.isPending || check.isPending} className="model-form">
           <label>
             服务名称
             <Input
@@ -602,7 +627,7 @@ function ChannelEditor({
               onChange={(e) => setEndpoint(e.target.value)}
               placeholder="https://你的服务地址/v1"
             />
-            <small>填写服务提供的基础地址；离线测试可以留空。</small>
+            <small>填写服务提供的 API 基础地址，例如 https://example.com/v1。</small>
           </label>
           <label>
             API Key
@@ -644,9 +669,13 @@ function ChannelEditor({
               {save.error.message}
             </p>
           )}
-          <Button type="submit" disabled={!name.trim()}>
-            {save.isPending ? "保存中…" : "保存连接"}
-          </Button>
+          {(check.data || check.error) && <p role={check.error ? "alert" : "status"}>{check.error?.message || check.data?.message}</p>}
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="outline" disabled={!endpoint.trim() || (!token.trim() && (!channel?.has_token || clear))} onClick={() => check.mutate()}>{check.isPending ? "检测中…" : "检测连接"}</Button>
+            <Button type="submit" variant="outline" disabled={!name.trim()} onClick={() => setReadModels(false)}>保存连接</Button>
+            <Button type="submit" disabled={!name.trim() || !endpoint.trim() || (!token.trim() && (!channel?.has_token || clear))} onClick={() => setReadModels(true)}>{save.isPending ? "保存中…" : "保存并读取模型"}</Button>
+          </div>
+          <small>检测只检查地址、鉴权与模型目录，不发起付费生成。无法读取目录时，也可以保存连接后手动添加模型。</small>
         </fieldset>
       </form>
     </EditorFrame>
@@ -677,7 +706,7 @@ function ModelEditor({
   const [name, setName] = useState(model?.name || initialCode.slice(0, 100)),
     [code, setCode] = useState(model?.model || initialCode),
     [protocol, setProtocol] = useState(
-      model?.protocol || modelSuggestion(initialCode).protocol,
+      model?.protocol || connectionProtocol(channel.endpoint, modelSuggestion(initialCode).modality),
     ),
     [modality, setModality] = useState(
       model?.modality || modelSuggestion(initialCode).modality,
@@ -805,7 +834,7 @@ function ModelEditor({
                       setName(value.slice(0, 100));
                     const hint = modelSuggestion(value);
                     setModality(hint.modality);
-                    setProtocol(hint.protocol);
+                    setProtocol(connectionProtocol(channel.endpoint, hint.modality));
                     setParameters({});
                     setRefs(0);
                     setMask(false);
@@ -832,14 +861,7 @@ function ModelEditor({
               setProtocolChosen(true);
               setSdkProvider("openai");
               setInputCapabilities(textInputCapabilities);
-              const hint = modelSuggestion(code);
-              setProtocol(
-                hint.modality === value
-                  ? hint.protocol
-                  : value === "text"
-                    ? "cloud_llm"
-                    : "",
-              );
+              setProtocol(connectionProtocol(channel.endpoint, value));
               setParameters({});
               setRefs(0);
               setMask(false);
@@ -848,15 +870,18 @@ function ModelEditor({
               setDirty(true);
             }}
           />
+          {modality && <p className="text-sm text-muted-foreground">沿用服务地址和密钥。通用服务使用 OpenAI 兼容接口；特殊接口可在高级连接设置中调整。读取模型不代表实际生成能力已验证。</p>}
+          <details className="model-optional-settings">
+            <summary>高级连接设置</summary>
           {modality && (
             <SelectField
-              label="接入方式"
+              label="接口协议"
               value={protocol}
               options={[
                 { value: "", label: "请选择接入方式", disabled: true },
                 ...Object.entries(protocols)
                   .filter(([, p]) => p.types.includes(modality))
-                  .map(([value, p]) => ({ value, label: p.name })),
+                  .map(([value, p]) => ({ value, label: value === "litellm" ? "其他供应商接口" : p.name })),
               ]}
               onChange={(value) => {
                 setProtocol(value);
@@ -887,7 +912,7 @@ function ModelEditor({
           )}
           {!model && !protocolChosen && modelSuggestion(code).modality && (
             <p className="text-xs text-muted-foreground">
-              已按模型名称建议用途与接入方式，请以服务说明为准；可在上方调整。
+              用途按模型名称建议，接口按服务地址配置；请以服务说明为准。
             </p>
           )}
           {protocol === "jimeng" && (
@@ -910,6 +935,7 @@ function ModelEditor({
               请按服务商文档填写时长选项，提示词中的秒数不能代替时长设置。
             </p>
           )}
+          </details>
           {modality === "text" && protocol && (
             <details className="model-optional-settings">
               <summary>输入理解能力 · 图片与音频</summary>
@@ -1034,7 +1060,7 @@ function ModelEditor({
                 checked={isDefault}
                 onChange={(e) => setDefault(e.target.checked)}
               />
-              设为项目默认文字模型（故事、助手与 Agent）
+              设为默认文字模型（故事、助手与 Agent）
             </label>
           )}
           {save.error && (

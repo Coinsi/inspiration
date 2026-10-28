@@ -236,11 +236,18 @@ def prepare(db, ticket):
         "task_revision": task.revision,
         "tool_versions": {t["name"]: t.get("version") for t in packet["tools"]},
     }
+    from app.modules.harness.attachment_context import current_references
+
+    current = current_references(
+        run.context.get("current_attachments", []),
+        available=[item["reference"] for item in bundle["references"]],
+    )
     return {
         "engine": run.engine,
         "config": config,
         "packet": bound_request(packet, kernel.SYSTEM),
         "media": [],
+        "current_references": current,
         "inspection": task.state.get("inspection"),
         "input_contract": modalities,
         "kind": task.kind,
@@ -623,6 +630,15 @@ def execute(ticket, sessions=None):
                     ctx = service.execution_context(db, run)
                     observation = inspect_media(db, ctx, **prepared["inspection"])
                     media = observation.get("content_parts", [])
+            elif prepared.get("current_references"):
+                from app.modules.harness.attachment_context import current_media_parts
+
+                with sessions() as db:
+                    run = db.get(ProductionRun, uuid.UUID(ticket["run_id"]))
+                    ctx = service.execution_context(db, run)
+                    media = current_media_parts(
+                        db, ctx, prepared["current_references"], prepared["input_contract"]
+                    )
             from app.modules.harness.kernel_modalities import validate_media_parts
 
             validate_media_parts(prepared["input_contract"], media)

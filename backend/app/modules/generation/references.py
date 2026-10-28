@@ -24,12 +24,19 @@ class Reference(BaseModel):
     model_config = ConfigDict(extra="forbid")
     generation_id: uuid.UUID | None = None
     media_version_id: uuid.UUID | None = None
+    attachment_id: uuid.UUID | None = None
     role: Literal["reference", "first_frame", "last_frame"] = "reference"
 
     @model_validator(mode="after")
     def one_source(self):
-        if (self.generation_id is None) == (self.media_version_id is None):
-            raise ValueError("请选择一个生成结果或固定素材版本")
+        if (
+            sum(
+                v is not None
+                for v in (self.generation_id, self.media_version_id, self.attachment_id)
+            )
+            != 1
+        ):
+            raise ValueError("请选择一个附件、生成结果或固定素材版本")
         return self
 
     @model_serializer(mode="wrap")
@@ -39,16 +46,42 @@ class Reference(BaseModel):
 
     @property
     def source_type(self):
-        return "media_version" if self.media_version_id else "generation"
+        return (
+            "attachment"
+            if self.attachment_id
+            else "media_version"
+            if self.media_version_id
+            else "generation"
+        )
 
     @property
     def source_id(self):
-        return self.media_version_id or self.generation_id
+        return self.attachment_id or self.media_version_id or self.generation_id
 
 
-def resolve(db, project_id, reference):
+def resolve(db, project_id, reference, *, user_id=None, allow_audio=False):
     ref = reference if isinstance(reference, Reference) else Reference.model_validate(reference)
-    if ref.media_version_id:
+    if ref.attachment_id:
+        from app.models.attachment import Attachment
+
+        row = (
+            db.scalar(
+                select(Attachment).where(
+                    Attachment.id == ref.attachment_id,
+                    Attachment.project_id == project_id,
+                    Attachment.created_by == user_id,
+                )
+            )
+            if user_id
+            else None
+        )
+        if row is None:
+            raise NotFound("附件不存在或不属于当前账号")
+        if row.status != "ready" or not row.blob_hash:
+            raise Conflict("附件尚未上传完成，请就绪后再发送")
+        blob_hash, kind = row.blob_hash, row.kind
+        title, thumbnail = row.title, row.thumbnail_hash
+    elif ref.media_version_id:
         media, version = library.version(db, project_id, ref.media_version_id)
         if version.status != "ready" or not version.original_hash:
             raise Conflict("素材尚未完成上传处理，请就绪后再选择参考")
@@ -63,8 +96,8 @@ def resolve(db, project_id, reference):
         blob_hash, kind = item.output_blob_hash, item.output_type
         title = (state.name if state else None) or item.prompt_snapshot or "项目素材"
         thumbnail = (state.poster_hash if state else None) or item.thumbnail_hash
-    if kind not in ("image", "video"):
-        raise CapabilityUnsupported("请选择图片或视频素材")
+    if kind not in (("image", "video", "audio") if allow_audio else ("image", "video")):
+        raise CapabilityUnsupported("当前生成接口不支持音频参考，可在文字对话中添加音频讨论或处理")
     blob = db.get(Blob, blob_hash)
     if not blob or blob.size_bytes <= 0:
         raise NotFound("素材原文件不存在")
@@ -162,7 +195,11 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
         )
     )
     rows = union_all(uploads, generated).subquery()
-    kinds = ("image", "video") if media_type == "all" else (media_type,)
+    kinds = (
+        ("image", "video", "audio")
+        if media_type == "any"
+        else (("image", "video") if media_type == "all" else (media_type,))
+    )
     stmt = (
         select(rows)
         .join(Blob, Blob.hash == rows.c.blob_hash)
@@ -190,12 +227,12 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
     }
 
 
-def validate_snapshot(db, project_id, snapshot):
+def validate_snapshot(db, project_id, snapshot, *, user_id=None):
     """Recheck uploaded inputs at dispatch/retry without needing an index service."""
     for source in snapshot.get("reference_sources", []):
-        if not source.get("media_version_id"):
+        if not (source.get("media_version_id") or source.get("attachment_id")):
             continue  # Legacy generation references keep their existing contract.
-        item = resolve(db, project_id, source)
+        item = resolve(db, project_id, source, user_id=user_id)
         if not any(
             r.get("blob_hash") == item["blob_hash"]
             and r.get("kind", "image") == item["kind"]

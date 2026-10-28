@@ -7,9 +7,10 @@ type ReferenceCapabilities = {
 
 export function referenceProblem(
   caps: ReferenceCapabilities | undefined,
-  references: { role: string; kind?: "image" | "video" }[],
+  references: { role: string; kind?: "image" | "video" | "audio" }[],
 ): string {
   if (!caps || !references.length) return "";
+  if (references.some(r => r.kind === "audio")) return "当前生成模型不支持音频参考。可切回讨论，或移除音频后生成。";
   const images = references.filter(r => r.kind !== "video");
   const videos = references.filter(r => r.kind === "video");
   if (videos.length && (!caps.features.includes("video_reference") || !caps.max_reference_videos))

@@ -60,7 +60,7 @@ def prepare(db, ctx, data):
         if key in unique:
             raise CapabilityUnsupported("同一素材不能重复引用")
         unique.add(key)
-        item = reference_media.resolve(db, ctx.project.id, ref)
+        item = reference_media.resolve(db, ctx.project.id, ref, user_id=ctx.user.id)
         if item["kind"] == "video" and data.request_type.value != "video":
             raise CapabilityUnsupported("参考视频只能用于生成视频")
         if ref.role != "reference" and (
@@ -200,11 +200,23 @@ def history(
 
 @router.get("/references/{reference_id}")
 def reference_detail(
-    reference_id: uuid.UUID, ctx: ProjectContext = READ, db: Session = DB,
-    source_type: Literal["generation", "media_version"] = "generation",
+    reference_id: uuid.UUID,
+    ctx: ProjectContext = READ,
+    db: Session = DB,
+    source_type: Literal["generation", "media_version", "attachment"] = "generation",
 ):
-    field = "media_version_id" if source_type == "media_version" else "generation_id"
-    return reference_media.resolve(db, ctx.project.id, Reference(**{field: reference_id}))
+    field = {
+        "media_version": "media_version_id",
+        "generation": "generation_id",
+        "attachment": "attachment_id",
+    }[source_type]
+    return reference_media.resolve(
+        db,
+        ctx.project.id,
+        Reference(**{field: reference_id}),
+        user_id=ctx.user.id,
+        allow_audio=True,
+    )
 
 
 @router.get("/references")
@@ -213,7 +225,7 @@ def references(
     db: Session = DB,
     offset: int = Query(0, ge=0),
     query: str = Query("", max_length=100),
-    media_type: Literal["image", "video", "all"] = "image",
+    media_type: Literal["image", "video", "audio", "all", "any"] = "image",
 ):
     return reference_media.catalog(
         db, ctx.project.id, query=query, media_type=media_type, offset=offset

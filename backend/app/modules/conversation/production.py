@@ -44,17 +44,23 @@ def _history_references(db, ctx, history):
 
     references, omitted, seen = [], [], set()
     for message in reversed(history.get("messages", [])):
-        for output in reversed(message.get("media_outputs", [])):
+        items = [
+            *message.get("media_outputs", []),
+            *message.get("attachments", []),
+            *message.get("references", []),
+        ]
+        for output in reversed(items):
             raw_id = output.get("id")
-            if not raw_id or raw_id in seen:
+            kind = output.get("source_type", "generation")
+            if not raw_id or (kind, raw_id) in seen:
                 continue
-            seen.add(raw_id)
+            seen.add((kind, raw_id))
             if len(references) >= 12:
                 omitted.append({"id": raw_id, "reason": "history_reference_window"})
                 continue
             try:
                 ref = {
-                    "kind": "generation",
+                    "kind": kind,
                     "id": str(uuid.UUID(str(raw_id))),
                     "purpose": "先前对话中的成果；需要查看内容时先检查素材",
                 }
@@ -188,10 +194,15 @@ def start(db, ctx, conversation, message, data, history):
                 )
             continuation = active[0] if active else None
     if continuation:
+        from app.modules.conversation.inputs import merge_run_inputs
         from app.modules.harness import guidance as inbox
 
         run = continuation
         _archive_projection(db, run)
+        # The impact task freezes its sources when created. Persist this turn's
+        # files first; adding them after receive would leave that task blind.
+        merge_run_inputs(db, ctx, run, history)
+        db.flush()
         received_guidance = inbox.receive(db, ctx, run.id, key, data.content)["guidance_id"]
         run.context = {
             **run.context,
@@ -199,8 +210,12 @@ def start(db, ctx, conversation, message, data, history):
             "history_truncated": bool(history.get("history_truncated")),
         }
     elif guidance:
+        from app.modules.conversation.inputs import merge_run_inputs
+
         run = _owned_run(db, ctx, conversation.id, guidance.run_id, lock=True)
         _archive_projection(db, run)
+        merge_run_inputs(db, ctx, run, history)
+        db.flush()
         if guidance.action in {"guidance", "confirm_guidance"}:
             from app.modules.harness import guidance as inbox
 
@@ -260,6 +275,16 @@ def start(db, ctx, conversation, message, data, history):
             run = prior
         else:
             references, omitted = _history_references(db, ctx, history)
+            from app.modules.conversation.inputs import context_references
+
+            current = context_references(history.get("current_attachments", []))
+            seen = {(r["kind"], str(r["id"])) for r in current}
+            references = [
+                *current,
+                *[r for r in references if (r["kind"], str(r["id"])) not in seen][
+                    : 12 - len(current)
+                ],
+            ]
             plan, policy, quote = None, schemas.Policy(), None
             if data.media:
                 plan, policy, quote = _direct_plan(db, ctx, conversation, data)
@@ -299,6 +324,7 @@ def start(db, ctx, conversation, message, data, history):
                 "history": copy.deepcopy(history.get("messages", [])),
                 "history_truncated": bool(history.get("history_truncated")),
                 "history_reference_omissions": omitted,
+                "current_attachments": copy.deepcopy(history.get("current_attachments", [])),
                 "direct_request": bool(data.media),
             }
             if data.media:
@@ -469,7 +495,8 @@ def _project(db, message, run):
     content = "\n\n".join(replies)
     if not content and run.status == "running":
         content = "\n\n".join(
-            t.state.get("model_preview", "") for t in rows
+            t.state.get("model_preview", "")
+            for t in rows
             if t.status == "running" and not t.parent_id
         )
     if run.status == "needs_plan_approval":

@@ -1,3 +1,4 @@
+import { modelConfigRoot } from "@/lib/model-config-scope";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -51,7 +52,7 @@ export function ConnectModelService({
   const query = useQuery({
     queryKey: ["model-presets", projectId],
     queryFn: () =>
-      api.get<Preset[]>(`/projects/${projectId}/model-channels/presets`),
+      api.get<Preset[]>(`${modelConfigRoot(projectId)}/model-channels/presets`),
   });
   const [preset, setPreset] = useState<Preset | null>(null);
   const [token, setToken] = useState("");
@@ -64,7 +65,7 @@ export function ConnectModelService({
   const connect = useMutation({
     mutationFn: () =>
       api.post<{ message: string }>(
-        `/projects/${projectId}/model-channels/connect`,
+        `${modelConfigRoot(projectId)}/model-channels/connect`,
         {
           preset_id: preset!.id,
           token: token.trim(),

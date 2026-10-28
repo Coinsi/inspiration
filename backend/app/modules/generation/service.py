@@ -13,8 +13,8 @@ from app.core.crypto import decrypt, encrypt
 from app.core.deps import ProjectContext
 from app.core.errors import CapabilityUnsupported, NotFound
 from app.models.enums import JobStatus, QuotaScope
-from app.models.identity import Project
 from app.models.generation import Generation, GenerationJob, ProviderConfig, Quota
+from app.models.identity import Project
 from app.modules.generation import schemas
 from app.modules.generation.channels import model_snapshot
 from app.modules.shot import service as shot_service
@@ -27,6 +27,8 @@ def configure_provider(
 ) -> ProviderConfig:
     from app.core.errors import Conflict
 
+    if data.provider_name.startswith("platform_"):
+        raise Conflict("平台模型由平台管理员管理")
     if any(k in data.config for k in ("channel_id", "protocol", "modality")):
         raise Conflict("渠道模型请通过模型管理保存")
     pc = db.scalar(
@@ -95,7 +97,17 @@ def list_providers(db: Session, project_id: uuid.UUID, user_id=None) -> list[Pro
         if row.modality != "text":
             result[-1].config["param_schema"] = catalog.aggregate(db, row).param_schema
     from app.modules.generation.personal import providers
+
     result.extend(providers(db, user_id))
+    if project_id is not None:
+        # Publish only model capabilities. Shared credentials and upstream addresses stay private.
+        for entry in list_providers(db, None):
+            item = entry if isinstance(entry, dict) else entry.model_dump()
+            item["endpoint"] = None
+            item["channel_name"] = "平台提供"
+            item["config"] = {**item["config"], "scope": "platform"}
+            item["config"].pop("channel_id", None)
+            result.append(item)
     return result
 
 
@@ -215,6 +227,7 @@ def get_project_quota(db: Session, project_id: uuid.UUID) -> Quota | None:
 def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=None, user_id=None):
     from app.modules.generation.personal import PREFIX as PERSONAL
     from app.modules.generation.personal import PersonalProvider
+
     if name.startswith(PERSONAL):
         return PersonalProvider(db, name, user_id, snapshot)
     from app.modules.generation.model_catalog import PREFIX
@@ -225,7 +238,8 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=N
         return RoutedProvider(db, project_id, name, snapshot)
     pc = db.scalar(
         select(ProviderConfig).where(
-            ProviderConfig.project_id == project_id, ProviderConfig.provider_name == name
+            ProviderConfig.project_id == (None if name.startswith("platform_") else project_id),
+            ProviderConfig.provider_name == name,
         )
     )
     kwargs = {}
@@ -534,7 +548,9 @@ def submit(
             "params": gen_in.params,
             "provider_params": gen_in.provider_params,
             "count": gen_in.count,
-            "references": [{"blob_hash": r.blob_hash, "role": r.role, "kind": r.kind} for r in refs],
+            "references": [
+                {"blob_hash": r.blob_hash, "role": r.role, "kind": r.kind} for r in refs
+            ],
             "source_generation_id": str(gen_in.source_generation_id)
             if gen_in.source_generation_id
             else None,
@@ -639,4 +655,5 @@ def patch_generation(
 
 def select_variant(db: Session, ctx: ProjectContext, gen_id: uuid.UUID) -> Generation:
     from app.modules.generation import adoption, jobs
+
     return adoption.select_output(db, ctx, jobs.source(db, ctx.project.id, gen_id))

@@ -1,4 +1,5 @@
 """generation:供应商配置、配额、生成任务、不可变溯源/变体。"""
+
 import uuid
 
 from sqlalchemy import (
@@ -11,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,7 +26,9 @@ class ModelChannel(Base, TimestampMixin):
     __tablename__ = "model_channel"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     endpoint: Mapped[str] = mapped_column(String(512), default="")
     credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
@@ -38,7 +42,9 @@ class ProviderConfig(Base, TimestampMixin):
     __tablename__ = "provider_config"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     provider_name: Mapped[str] = mapped_column(String(64), nullable=False)
     kind: Mapped[ProviderKind] = mapped_column(String(16), default=ProviderKind.generation)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -47,7 +53,15 @@ class ProviderConfig(Base, TimestampMixin):
     credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
 
-    __table_args__ = (UniqueConstraint("project_id", "provider_name", name="uq_provider"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "provider_name", name="uq_provider"),
+        Index(
+            "uq_platform_provider_name",
+            "provider_name",
+            unique=True,
+            postgresql_where=text("project_id IS NULL"),
+        ),
+    )
 
 
 class CreativeModel(Base, TimestampMixin):
@@ -55,7 +69,9 @@ class CreativeModel(Base, TimestampMixin):
 
     __tablename__ = "creative_model"
     id: Mapped[uuid.UUID] = uuid_pk()
-    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100))
     modality: Mapped[str] = mapped_column(String(16))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

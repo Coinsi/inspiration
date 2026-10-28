@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.errors import Conflict, NotFound
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.identity import Project
-from app.modules.conversation import execution
+from app.modules.conversation import execution, inputs
 
 ACTIVE = {"queued", "running", "needs_review", "paused"}
 
@@ -147,12 +147,18 @@ def history_snapshot(messages):
         if (m.context or {}).get("outputs"):
             item["media_outputs"] = m.context["outputs"]
             item["media_note"] = "这些是生成素材引用，未附画面或音轨内容，不能声称已看过。"
+        for key in ("attachments", "references"):
+            if (m.context or {}).get(key) and m.role == "user":
+                item[key] = m.context[key]
+        cost = len(json.dumps(item, ensure_ascii=False))
+        if cost > budget:
+            break
         history.append(item)
-        budget -= len(content) + len(ui_text)
+        budget -= cost
     return {"messages": list(reversed(history)), "history_truncated": len(history) < len(messages)}
 
 
-def send(db, ctx, conversation_id, data):
+def send(db, ctx, conversation_id, data, *, retry_job_id=None):
     # Same lock order as agent.create; serializes sends without relying on UI.
     db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     c = get(db, ctx, conversation_id, True)
@@ -179,9 +185,12 @@ def send(db, ctx, conversation_id, data):
             "production_request": data.production.model_dump(mode="json")
             if data.production
             else None,
+            **inputs.request_context(data),
         }
         if prior.content != data.content or any(
-            prior.context.get(k) != v for k, v in expected.items()
+            prior.context.get(k, [] if k in {"attachment_requests", "reference_requests"} else None)
+            != v
+            for k, v in expected.items()
         ):
             raise Conflict("消息已发送，请使用新的请求提交不同内容或配置")
         return detail(db, ctx, c.id)
@@ -218,15 +227,21 @@ def send(db, ctx, conversation_id, data):
         request_key=data.request_key,
         status="queued",
     )
-    job = None
-    if settings.production_harness_enabled or data.production:
-        production.start(db, ctx, c, reply, data, history)
-    elif data.media:
-        job = media.start(db, ctx, c, reply, data)
-    else:
-        execution.start(db, ctx, c, reply, data, history)
-    user.context = reply.context
     db.add_all([user, reply])
+    db.flush()
+    execution_data, current_inputs, input_context = inputs.bind_inputs(db, ctx, c, user, data)
+    history["current_attachments"] = current_inputs
+    job = None
+    if retry_job_id:
+        job = media.start(db, ctx, c, reply, execution_data, retry_job_id=retry_job_id)
+    elif settings.production_harness_enabled or data.production:
+        production.start(db, ctx, c, reply, execution_data, history)
+    elif data.media:
+        job = media.start(db, ctx, c, reply, execution_data)
+    else:
+        execution.start(db, ctx, c, reply, execution_data, history)
+    reply.context = {**reply.context, **input_context}
+    user.context = dict(reply.context)
     if not rows and c.title == "新的对话":
         c.title = data.content.replace("\n", " ")[:48]
     c.updated_at = datetime.now(UTC)
@@ -248,7 +263,7 @@ def send(db, ctx, conversation_id, data):
     return detail(db, ctx, c.id)
 
 
-def retry_input(db, ctx, conversation_id, message_id):
+def retry_input(db, ctx, conversation_id, message_id, *, allow_resume=False):
     c = get(db, ctx, conversation_id)
     from app.modules.conversation.media import sync
 
@@ -266,6 +281,18 @@ def retry_input(db, ctx, conversation_id, message_id):
         raise Conflict("请在制作进度中重试失败步骤或提出修改意见，避免重复提交付费任务")
     if reply.status not in {"failed", "cancelled"}:
         raise Conflict("只有失败或已停止的任务可以重试")
+    if reply.execution_kind == "generation":
+        from app.models.generation import GenerationJob
+        from app.modules.generation.model_routing import retry_allowed
+
+        job = db.get(GenerationJob, reply.execution_id)
+        if not job or job.project_id != ctx.project.id or not retry_allowed(job):
+            raise Conflict("上游提交状态不确定，已停止重发；请先核对上游任务记录")
+        if not allow_resume and (
+            (job.routing_state or {}).get("resume")
+            or (job.routing_state or {}).get("phase") in {"accepted", "generated"}
+        ):
+            raise Conflict("上游已接收此任务，请使用重试继续接收原结果，不能按新参数重新提交")
     source = db.scalar(
         select(ConversationMessage).where(
             ConversationMessage.conversation_id == c.id,
@@ -283,6 +310,8 @@ def retry_input(db, ctx, conversation_id, message_id):
         "scope": context.get("scope", []),
         "skills": context.get("skills", []),
         "media": context.get("media"),
+        "attachments": context.get("attachment_requests", []),
+        "references": context.get("reference_requests", []),
     }
 
 
@@ -303,8 +332,14 @@ def retry(db, ctx, conversation_id, message_id, data):
         retry_production(db, ctx, reply, data)
         return detail(db, ctx, c.id)
 
-    payload = retry_input(db, ctx, conversation_id, message_id)
-    return send(db, ctx, conversation_id, Send(**payload, request_key=data.request_key))
+    payload = retry_input(db, ctx, conversation_id, message_id, allow_resume=True)
+    return send(
+        db,
+        ctx,
+        conversation_id,
+        Send(**payload, request_key=data.request_key),
+        retry_job_id=reply.execution_id if reply and reply.execution_kind == "generation" else None,
+    )
 
 
 def control(db, ctx, conversation_id, message_id, data):

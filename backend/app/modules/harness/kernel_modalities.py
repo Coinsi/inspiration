@@ -80,7 +80,7 @@ def resolve_cloud_input(db, ctx, provider=None, *, preferred_profile=None) -> di
         if preferred_profile and not name:
             raise Conflict("固定文字模型配置已失效，请重新确认模型")
         if preferred_profile and (provider or "").startswith(model_catalog.PREFIX):
-            logical = model_catalog.get_model(db, live.project.id, provider)
+            logical = model_catalog.get_model(db, live.project.id, provider, allow_global=True)
             candidates, _ = model_catalog.all_candidates(db, logical)
             if (
                 not logical.enabled
@@ -119,7 +119,11 @@ def resolve_cloud_input(db, ctx, provider=None, *, preferred_profile=None) -> di
         declaration = {}
     else:
         profile = {
-            "kind": "personal" if (provider or "").startswith("personal_") else "project",
+            "kind": "personal"
+            if (provider or "").startswith("personal_")
+            else "platform"
+            if getattr(pc, "provider_name", "").startswith("platform_")
+            else "project",
             "selector": provider,
             "provider_name": getattr(pc, "provider_name", None) or provider,
             "profile_id": str(pc.id) if getattr(pc, "id", None) else None,

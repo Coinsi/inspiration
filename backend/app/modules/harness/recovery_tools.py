@@ -105,8 +105,16 @@ def _config_digest(db, job):
         # Configuration writers serialize on Project before locking a channel,
         # profile and model. Follow that order to avoid a recovery/edit deadlock.
         db.scalar(select(Project).where(Project.id == job.project_id).with_for_update())
-        model = model_catalog.get_model(db, job.project_id, job.provider, lock=True)
-        profile, channel, reason = model_catalog.route_profile(db, job.project_id, route)
+        from app.modules.generation.model_scope import lock_model_scope
+
+        scope = model_catalog.get_model(
+            db, job.project_id, job.provider, allow_global=True
+        ).project_id
+        lock_model_scope(db, scope)
+        model = model_catalog.get_model(
+            db, job.project_id, job.provider, lock=True, allow_global=True
+        )
+        profile, channel, reason = model_catalog.route_profile(db, model.project_id, route)
         if reason or not model.enabled:
             raise Conflict("原模型或服务已停用，不能恢复原任务")
         # Keep the checked connection stable until the provider wrapper has built

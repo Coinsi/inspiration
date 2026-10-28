@@ -77,7 +77,7 @@ def failed_job(studio, mode="routed", phase="generated"):
             route_name, connection_id = provider, row.id
         else:
             channel = ModelChannel(
-                project_id=run.project_id,
+                project_id=None if mode == "platform" else run.project_id,
                 name="Fixture channel",
                 endpoint="https://fixture.invalid",
                 credentials_encrypted=encrypt("fixture-key"),
@@ -87,10 +87,12 @@ def failed_job(studio, mode="routed", phase="generated"):
             db.flush()
             config = {**config, "channel_id": str(channel.id)}
             profile = ProviderConfig(
-                project_id=run.project_id, provider_name="fixture-video-profile", config=config
+                project_id=None if mode == "platform" else run.project_id,
+                provider_name="platform_fixture" if mode == "platform" else "fixture-video-profile",
+                config=config,
             )
             model = CreativeModel(
-                project_id=run.project_id,
+                project_id=None if mode == "platform" else run.project_id,
                 name="Fixture routed",
                 modality="video",
                 revision=1,
@@ -210,7 +212,7 @@ def receive(db, ids, rid, tid, jid, execution=None):
     )
 
 
-@pytest.mark.parametrize("mode", ["routed", "personal"])
+@pytest.mark.parametrize("mode", ["routed", "personal", "platform"])
 @pytest.mark.parametrize("phase", ["accepted", "generated"])
 def test_original_handle_is_polled_and_saved_once_without_submission(
     studio, changing_video, monkeypatch, mode, phase

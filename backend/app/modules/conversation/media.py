@@ -21,19 +21,23 @@ STATES = {
 }
 
 
-def start(db, ctx, conversation, message, data):
+def start(db, ctx, conversation, message, data, *, retry_job_id=None):
     require(ctx.role, "generation.trigger")
-    job = workbench.create_job(
-        db,
-        ctx,
-        workbench.Create(
-            **data.media.model_dump(),
-            prompt_override=data.content,
-            request_key=uuid.uuid5(conversation.id, str(data.request_key)),
-            work_id=conversation.work_id,
-            skills=data.skills,
-            count=1,
-        ),
+    job = (
+        jobs.retry(db, ctx, retry_job_id, defer_dispatch=True)
+        if retry_job_id
+        else workbench.create_job(
+            db,
+            ctx,
+            workbench.Create(
+                **data.media.model_dump(),
+                prompt_override=data.content,
+                request_key=uuid.uuid5(conversation.id, str(data.request_key)),
+                work_id=conversation.work_id,
+                skills=data.skills,
+                count=1,
+            ),
+        )
     )
     message.execution_kind = "generation"
     message.execution_id = job.id

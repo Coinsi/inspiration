@@ -28,6 +28,7 @@ from app.modules.harness.transcription_tools import register_tools as register_t
 from app.modules.harness.recovery_tools import register_tools as register_recovery_tools
 from app.modules.harness.model_tools import register_tools as register_model_tools
 from app.modules.conversation.router import router as conversation_router
+from app.modules.attachments.router import router as attachments_router
 from app.modules.canvas.router import router as canvas_router
 from app.modules.asset.router import router as asset_router
 from app.modules.assist.router import router as assist_router
@@ -45,6 +46,7 @@ from app.modules.setting.router import router as setting_router
 from app.modules.shot.router import router as shot_router
 from app.modules.generation.channel_router import router as channel_router
 from app.modules.generation.model_router import router as creative_model_router
+from app.modules.generation.platform_router import router as platform_model_router
 from app.modules.timeline.router import router as timeline_router
 
 register_production_tools()
@@ -64,6 +66,12 @@ async def lifespan(app):
     from app.core.health import background_workers
 
     background_workers.clear()
+    attachment_stop = None
+    if settings.attachment_cleanup_enabled and not settings.celery_eager:
+        from app.modules.attachments.cleanup import start as start_attachment_cleanup
+
+        attachment_stop = start_attachment_cleanup()
+        background_workers["attachment_cleanup"] = attachment_stop.is_alive
     processing_stop = None
     if settings.library_processing_enabled:
         from app.modules.library.processing_worker import start as start_processing
@@ -113,6 +121,8 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if attachment_stop:
+            await to_thread(attachment_stop)
         if archive_stop:
             await to_thread(archive_stop)
         if delivery_stop:
@@ -165,6 +175,7 @@ app.include_router(transcription_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(production_router, prefix="/api/v1")
 app.include_router(conversation_router, prefix="/api/v1")
+app.include_router(attachments_router, prefix="/api/v1")
 from app.modules.conversation.works import router as works_router
 app.include_router(works_router, prefix="/api/v1")
 from app.modules.engineering.router import router as engineering_router
@@ -204,3 +215,4 @@ def ready():
 
 from app.modules.generation.personal import router as personal_model_router
 app.include_router(personal_model_router, prefix="/api/v1")
+app.include_router(platform_model_router, prefix="/api/v1")
