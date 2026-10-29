@@ -51,7 +51,7 @@ try {
   const files = page.locator('.conversation-add-menu input[type=file]');
   await files.setInputFiles({ name: 'character.webp', mimeType: 'image/webp', buffer: png });
   await page.getByRole('button', { name: '发送附件', exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.message-attachments > button').length === 1);
+  await page.waitForFunction(() => document.querySelectorAll('.message-attachment-preview').length === 1);
   assert.equal(sends.length, 1); assert.equal(sends[0].content, ''); assert.equal(sends[0].attachments.length, 1);
   assert.equal(await page.locator('.conversation-attachment-card').count(), 0);
   await page.getByRole('button', { name: '预览 character.webp', exact: true }).click();
@@ -122,7 +122,8 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/projects/fixture/workbench?conversation=retry-video`);
   await page.getByRole('button', { name: '修改后重试', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.conversation-attachment-card').length === 2);
-  assert.equal(await page.getByRole('button', { name: '预览 other.webp', exact: true }).count(), 1);
+  // Saved attachments display the editable title, keeping the filename in metadata.
+  assert.equal(await page.getByRole('button', { name: '预览 other', exact: true }).count(), 1);
   assert.deepEqual(errors, []);
   console.log('Attachment-only send, history preview, paste/drop, saved reuse, failed-draft refresh/resume, preserved audio capability error, light/dark and mobile menu bounds passed.');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

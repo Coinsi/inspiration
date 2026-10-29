@@ -247,6 +247,102 @@ def test_plan_confirmation_and_question_reply_share_same_production(studio):
         assert confirmed.context["production"]["is_current"] is False
 
 
+def test_composer_confirmation_and_answer_continue_exact_run(studio):
+    _, sessions, ids = studio
+    with sessions() as db:
+        c = conversation(db, ids)
+        initial, run, _ = start(db, ids, c)
+        coordinator = service.tasks(db, run)[0]
+        coordinator.status = "waiting_plan"
+        run.status = "needs_plan_approval"
+        run.plan = schemas.Plan(
+            summary="先整理剧情", tasks=[schemas.TaskSpec(key="story", goal="整理剧情")]
+        ).model_dump(mode="json")
+        db.flush()
+        production.publish(db, run)
+        assert "直接回复确认" in initial.content
+        budget = run.policy["budget_points"]
+        confirmed, _, _ = start(
+            db,
+            ids,
+            c,
+            ordinal=4,
+            content="可以",
+            production={"run_id": run.id, "action": "respond", "expected_revision": run.revision},
+        )
+        child = next(t for t in service.tasks(db, run) if t.parent_id == coordinator.id)
+        assert run.policy["budget_points"] == budget
+        assert not any(t.role == "impact" for t in service.tasks(db, run))
+        child.status = "waiting_input"
+        child.state = {**child.state, "question": "配乐偏悬疑还是舒缓？"}
+        run.status = "needs_attention"
+        db.flush()
+        answered, _, _ = start(
+            db,
+            ids,
+            c,
+            ordinal=6,
+            content="悬疑一些",
+            production={"run_id": run.id, "action": "respond", "expected_revision": run.revision},
+        )
+        assert child.state["answer"] == "悬疑一些"
+        assert child.status == "queued"
+        assert answered.execution_id == initial.execution_id
+        assert confirmed.context["production"]["is_current"] is False
+        assert not any(t.role == "impact" for t in service.tasks(db, run))
+
+
+@pytest.mark.parametrize("text", ["可以，但主角改成女性", "可以"])
+def test_composer_does_not_treat_qualified_or_ambiguous_reply_as_approval(studio, text):
+    from app.modules.conversation.production_reply import respond
+
+    _, sessions, ids = studio
+    with sessions() as db:
+        _, run, _ = start(db, ids, conversation(db, ids))
+        task = service.tasks(db, run)[0]
+        task.status = "waiting_plan"
+        run.status = "needs_plan_approval"
+        run.plan = schemas.Plan(
+            summary="方案", tasks=[schemas.TaskSpec(key="story", goal="剧情")]
+        ).model_dump(mode="json")
+        if text == "可以":
+            db.add(
+                ProductionTask(
+                    run_id=run.id,
+                    key="question",
+                    role="writer",
+                    goal="另一个问题",
+                    status="waiting_input",
+                    specification={},
+                    state={"question": "哪种风格？"},
+                    result={},
+                    error={},
+                )
+            )
+        db.flush()
+        respond(db, context(db, ids), run, uuid.uuid4(), text, run.revision)
+        assert task.status == "waiting_plan"
+        assert guidance.pending(run)
+        assert not any(t.parent_id == task.id for t in service.tasks(db, run))
+
+
+def test_composer_stale_reply_rejected_and_paused_answer_does_not_resume(studio):
+    from app.modules.conversation.production_reply import respond
+
+    _, sessions, ids = studio
+    with sessions() as db:
+        _, run, _ = start(db, ids, conversation(db, ids))
+        task = service.tasks(db, run)[0]
+        task.status = "waiting_input"
+        task.state = {"question": "哪种风格？"}
+        run.status = "paused"
+        with pytest.raises(Conflict):
+            respond(db, context(db, ids), run, uuid.uuid4(), "悬疑", run.revision - 1)
+        assert "answer" not in task.state
+        respond(db, context(db, ids), run, uuid.uuid4(), "悬疑", run.revision)
+        assert task.state["answer"] == "悬疑" and run.status == "paused"
+
+
 def test_controls_pause_resume_cancel_a_specific_run_without_touching_other_work(studio):
     _, sessions, ids = studio
     with sessions() as db:

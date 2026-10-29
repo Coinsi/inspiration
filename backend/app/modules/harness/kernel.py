@@ -29,6 +29,7 @@ wait: {kind:'wait',change_id:'实际候选ID',fingerprint:'固定指纹',message
 {kind:'guidance',guidance_id:'输入的ID',action:'discussion|question|local|global|retract',
 message:'说明',task_ids:[],evidence:[{task_id:'实际步骤ID',quote:'用户原文'}],supersedes:[],operation:'steer|reply'}。
 范围不明用question，讨论用discussion，具体局部修改用local并逐项给出原文证据；
+discussion/question 必须使用空 task_ids、空 supersedes 和 operation:'steer'；询问时不携带修改范围。
 global会等待用户确认，retract须用evidence.decision_id引用实际有效决定，不能猜测撤回历史。
 处理guidance时不提交制作计划、生成或直接finish；严格遵守guidance中的固定目标及rules。
 finish: {kind:'finish',message:'实际完成情况',artifacts:[]}。

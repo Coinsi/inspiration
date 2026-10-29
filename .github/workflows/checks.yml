@@ -46,6 +46,4 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-      - run: node --test frontend/tests/timeline-edit.test.mjs
-      - run: node --test frontend/tests/google-auth.test.mjs
-      - run: node --test frontend/tests/email-auth.test.mjs
+      - run: node --test frontend/tests/*.test.mjs

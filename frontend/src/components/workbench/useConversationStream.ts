@@ -1,13 +1,16 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getToken } from "@/lib/api";
 
 export function useConversationStream(projectId: string, conversationId: string | null) {
   const client = useQueryClient();
+  const [state, setState] = useState<"idle" | "connected" | "reconnecting">("idle");
   useEffect(() => {
+    setState("idle");
     if (!conversationId) return;
     const controller = new AbortController();
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let warning: ReturnType<typeof setTimeout> | undefined;
     async function connect() {
       const token = getToken();
       if (!token || controller.signal.aborted) return;
@@ -18,6 +21,8 @@ export function useConversationStream(projectId: string, conversationId: string 
         );
         if ([401, 403, 404].includes(response.status)) return;
         if (!response.ok || !response.body) throw new Error("Stream unavailable");
+        clearTimeout(warning); warning = undefined;
+        if (!controller.signal.aborted) setState("connected");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -39,9 +44,13 @@ export function useConversationStream(projectId: string, conversationId: string 
           }
         } finally { await reader.cancel().catch(() => {}); }
       } catch { /* Polling remains available during network/proxy interruptions. */ }
-      if (!controller.signal.aborted) retry = setTimeout(connect, 2000);
+      if (!controller.signal.aborted) {
+        warning ??= setTimeout(() => setState("reconnecting"), 8000);
+        retry = setTimeout(connect, 2000);
+      }
     }
     void connect();
-    return () => { controller.abort(); clearTimeout(retry); };
+    return () => { controller.abort(); clearTimeout(retry); clearTimeout(warning); };
   }, [projectId, conversationId, client]);
+  return state;
 }

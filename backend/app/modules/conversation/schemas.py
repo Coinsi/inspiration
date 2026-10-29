@@ -51,7 +51,7 @@ class AttachmentInput(BaseModel):
 class ProductionControl(BaseModel):
     model_config = ConfigDict(extra="forbid")
     run_id: uuid.UUID
-    action: Literal["steer", "reply", "approve_plan", "guidance", "confirm_guidance"]
+    action: Literal["steer", "reply", "approve_plan", "guidance", "confirm_guidance", "respond"]
     expected_revision: int = Field(ge=1)
     task_ids: list[uuid.UUID] = Field(default_factory=list, max_length=256)
     budget_points: int | None = Field(default=None, ge=0, le=1000000)

@@ -263,11 +263,14 @@ def send(db, ctx, conversation_id, data, *, retry_job_id=None):
     return detail(db, ctx, c.id)
 
 
-def retry_input(db, ctx, conversation_id, message_id, *, allow_resume=False):
+def retry_input(db, ctx, conversation_id, message_id, *, allow_resume=False, allow_completed=False):
     c = get(db, ctx, conversation_id)
     from app.modules.conversation.media import sync
 
     sync(db, c.id)
+    from app.modules.conversation.production import sync as sync_production
+
+    sync_production(db, c.id)
     reply = db.scalar(
         select(ConversationMessage).where(
             ConversationMessage.id == message_id,
@@ -277,11 +280,18 @@ def retry_input(db, ctx, conversation_id, message_id, *, allow_resume=False):
     )
     if not reply:
         raise NotFound("消息不存在")
-    if reply.execution_kind == "production":
+    restore_completed = (
+        allow_completed
+        and not allow_resume
+        and reply.status == "completed"
+        and reply.execution_kind in {"production", "generation"}
+        and bool((reply.context or {}).get("outputs"))
+    )
+    if reply.execution_kind == "production" and not restore_completed:
         raise Conflict("请在制作进度中重试失败步骤或提出修改意见，避免重复提交付费任务")
-    if reply.status not in {"failed", "cancelled"}:
+    if not restore_completed and reply.status not in {"failed", "cancelled"}:
         raise Conflict("只有失败或已停止的任务可以重试")
-    if reply.execution_kind == "generation":
+    if reply.execution_kind == "generation" and not restore_completed:
         from app.models.generation import GenerationJob
         from app.modules.generation.model_routing import retry_allowed
 
@@ -303,6 +313,8 @@ def retry_input(db, ctx, conversation_id, message_id, *, allow_resume=False):
     if not source:
         raise NotFound("原始创作要求不存在")
     context = source.context or {}
+    if restore_completed and not context.get("media"):
+        raise Conflict("这条消息没有可恢复的原始生成要求，请直接提出修改意见")
     return {
         "content": source.content,
         "mode": context.get("mode", "standard"),

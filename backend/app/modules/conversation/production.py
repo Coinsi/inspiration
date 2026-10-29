@@ -133,6 +133,9 @@ def _archive_projection(db, run):
                 message.content = "已收到新的指导，制作进度将在后续消息中继续。"
         message.context = {
             **message.context,
+            # A frozen history bubble must not retain a live loading state.
+            # Results and the original request remain available in its snapshot.
+            "media_progress": None,
             "production": {**message.context.get("production", {}), "is_current": False},
         }
 
@@ -216,7 +219,11 @@ def start(db, ctx, conversation, message, data, history):
         _archive_projection(db, run)
         merge_run_inputs(db, ctx, run, history)
         db.flush()
-        if guidance.action in {"guidance", "confirm_guidance"}:
+        if guidance.action == "respond":
+            from app.modules.conversation.production_reply import respond
+
+            received_guidance = respond(db, ctx, run, key, data.content, guidance.expected_revision)
+        elif guidance.action in {"guidance", "confirm_guidance"}:
             from app.modules.harness import guidance as inbox
 
             if guidance.action == "guidance":
@@ -407,7 +414,12 @@ def _outputs(db, run, rows):
     ctx = None
     for job_id in sorted(_job_ids(rows), key=str):
         job = db.get(GenerationJob, job_id)
-        if not job or job.project_id != run.project_id or job.status != "succeeded":
+        if (
+            not job
+            or job.project_id != run.project_id
+            or job.created_by != run.created_by
+            or job.status != "succeeded"
+        ):
             continue
         if ctx is None:
             ctx = service.execution_context(db, run)
@@ -426,6 +438,44 @@ def _outputs(db, run, rows):
                 }
             )
     return result
+
+
+def _media_progress(db, run, rows, outputs):
+    from app.modules.conversation.media_progress import project
+
+    candidates = []
+    for task in rows:
+        ids = _job_ids([task])
+        for key in ("waiting_job_id", "validation_job_id"):
+            value = task.state.get(key)
+            if value:
+                try:
+                    ids.add(uuid.UUID(str(value)))
+                except (ValueError, TypeError):
+                    continue
+        owned = []
+        for job_id in sorted(ids, key=str):
+            job = db.get(GenerationJob, job_id)
+            if job and job.project_id == run.project_id and job.created_by == run.created_by:
+                owned.append(job)
+        for job in owned:
+            candidates.append(project(
+                job.request_type, job=job, task=task, run=run,
+                completed_outputs=sum(o.get("job_id") == str(job.id) for o in outputs),
+            ))
+        if not owned and task.specification.get("tool") == "media.generate":
+            candidates.append(project(
+                task.specification.get("arguments", {}).get("request_type"), task=task, run=run,
+            ))
+    candidates = [value for value in candidates if value]
+    if not candidates:
+        return None
+    # Surface the earliest unfinished media operation while retaining already
+    # readable outputs from independent jobs in the same run.
+    order = {"generating": 0, "materializing": 1, "queued": 2,
+             "failed": 3, "stopped": 4, "completed": 5}
+    result = min(candidates, key=lambda value: (order[value["phase"]], value["started_at"] or ""))
+    return {**result, "completed_outputs": len(outputs)}
 
 
 def _ui_blocks(db, rows):
@@ -479,6 +529,7 @@ def _project(db, message, run):
         None,
     )
     outputs = _outputs(db, run, rows)
+    media_progress = _media_progress(db, run, rows, outputs)
     questions = [
         {
             "task_id": str(t.id),
@@ -501,14 +552,45 @@ def _project(db, message, run):
         )
     if run.status == "needs_plan_approval":
         content = run.plan.get("summary", "制作方案已准备好，请确认后继续。")
+        steps = [t["goal"] for t in run.plan.get("tasks", []) if t.get("role") != "impact"]
+        if steps:
+            content += "\n\n" + "\n".join(f"{i + 1}. {goal}" for i, goal in enumerate(steps))
+        budget = run.policy.get("budget_points", 0)
+        content += (
+            f"\n\n本次生成预算上限为 {budget} 点。"
+            if budget
+            else "\n\n当前预算为 0，不会调用付费生成。"
+        )
+        content += "你可以直接回复确认，或告诉我想调整的地方。"
     elif questions:
         content = "\n\n".join(q["message"] for q in questions)
+    elif any(t.status == "waiting_review" for t in rows):
+        reviews = [t for t in rows if t.status == "waiting_review"]
+        content = "\n\n".join(
+            t.state.get("review", {}).get("review", {}).get("arguments", {}).get("summary")
+            or "已准备好一份修改稿，请在执行详情中查看修改对比。"
+            for t in reviews
+        )
+        simple_review = (
+            len(reviews) == 1
+            and reviews[0].state.get("review", {}).get("review", {}).get("tool")
+            == "object.propose_edit"
+        )
+        content += "\n\n" + (
+            "你可以回复采用、不采用，或继续提出修改意见。"
+            if simple_review
+            else "请在执行详情中预览并选择要采用的候选，也可以直接告诉我修改意见。"
+        )
     elif run.context.get("direct_request") and run.status == "succeeded" and outputs:
         label = "图片" if outputs[0]["type"] == "image" else "视频"
         mock = (
             run.context.get("conversation_request", {}).get("media", {}).get("provider") == "mock"
         )
         content = ("模拟测试：" if mock else "") + f"已生成{label}候选，可以预览或继续修改。"
+    elif message.context.get("media") and run.status in {"queued", "running"} and not content:
+        kind = run.context.get("conversation_request", {}).get("media", {}).get("request_type")
+        label = "视频" if kind == "video" else "图片"
+        content = f"收到，我来按这些要求生成{label}。"
     message.status = STATES.get(run.status, "failed")
     message.content = content
     message.error = error[:1000] if error else None
@@ -525,6 +607,7 @@ def _project(db, message, run):
     message.context = {
         **(message.context or {}),
         "outputs": outputs,
+        "media_progress": media_progress,
         "ui_blocks": _ui_blocks(db, rows),
         "production": {
             **(message.context or {}).get("production", {}),

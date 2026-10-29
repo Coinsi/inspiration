@@ -102,7 +102,7 @@ def control(
 def retry_input(
     conversation_id: uuid.UUID, message_id: uuid.UUID, ctx: ProjectContext = READ, db: Session = DB
 ):
-    return service.retry_input(db, ctx, conversation_id, message_id)
+    return service.retry_input(db, ctx, conversation_id, message_id, allow_completed=True)
 
 
 @router.post("/{conversation_id}/messages/{message_id}/retry")

@@ -264,6 +264,7 @@ def prepare(db, run, task):
         "rules": [
             "只读评估：不要生成内容、执行工具写入或规划新的制作任务。",
             "没有明确定位时先 question，不猜测全部重做。discussion 不改变制作。",
+            "discussion/question 的 task_ids 和 supersedes 必须为空，operation 必须是 steer。",
             "local 必须指出现有 task_ids 并逐项引用用户原话；全局重做只提出 global 等待用户确认。",
             "回答某步骤已有问题时使用 local + operation=reply；不要把回答当成重做。",
             "撤回决定使用 retract + supersedes，证据须引用用户原话并指向真实 decision_id。",

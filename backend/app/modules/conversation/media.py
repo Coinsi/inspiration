@@ -68,6 +68,8 @@ def sync(db, conversation_id):
 
 
 def publish(db, message, job):
+    from app.modules.conversation.media_progress import project
+
     outputs = list(db.scalars(select(Generation).where(Generation.job_id == job.id)))
     message.status = STATES.get(job.status, "failed")
     message.error = job.error[:1000] if job.error else None
@@ -84,11 +86,16 @@ def publish(db, message, job):
             if g.output_blob_hash
         ],
     }
+    message.context["media_progress"] = project(
+        job.request_type, job=job, completed_outputs=len(message.context["outputs"])
+    )
     kind = "图片" if job.request_type == "image" else "视频"
     prefix = "模拟测试：" if job.provider == "mock" else ""
     message.content = (
         f"{prefix}已生成{kind}，可以预览、继续讨论或作为下一次创作的参考。"
         if job.status == "succeeded"
+        else f"收到，我来按这些要求生成{kind}。"
+        if job.status in {"pending", "running", "submitted"}
         else ""
     )
 

@@ -6,8 +6,10 @@ import { referenceDetailPath, retryAttachmentReferences, type ReferenceInput } f
 import { referenceInput } from "./referenceInput";
 import { referenceProblem } from "./referenceProblem";
 import { useConversationAttachments } from "./useConversationAttachments";
-import { ComposerAttachmentTray, ConversationAddMenu, ConversationAttachmentPicker, MessageAttachments } from "./ConversationAttachments";
-import type { ConversationAttachment } from "./attachmentUpload";
+import { ComposerAttachmentTray, ConversationAddMenu, ConversationAttachmentPicker, MessageAttachments, type MessageAttachmentItem } from "./ConversationAttachments";
+import type { ConversationAttachment, AttachmentDraft } from "./attachmentUpload";
+import { preflightAttachmentFiles } from "./attachmentSelection";
+import { prepareConversationRequest } from "./conversationRequest";
 import type { UIBlock } from "./GenerativeMessage";
 import { ConversationAnswer } from "./ConversationAnswer";
 import { SelectField } from "@/components/ui/select-field";
@@ -17,7 +19,9 @@ import {
   useConversationMedia,
   type CreationMode,
   type MediaOutput,
+  type MediaReferenceSelection,
 } from "./ConversationMedia";
+import { ConversationGenerationProgress, type MediaProgress } from "./ConversationGenerationProgress";
 import type { GeneratedMaterial } from "@/pages/GeneratedLibrary";
 import { SearchField } from "@/components/ui/search-field";
 import {
@@ -36,6 +40,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArrowUp,
+  ArrowDown,
+  MoreHorizontal,
+  Undo2,
   Check,
   FolderOpen,
   Loader2,
@@ -58,7 +65,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { ConversationText } from "./ConversationText";
-import { api, type ProviderConfig } from "@/lib/api";
+import { api, ApiError, type ProviderConfig } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { Button } from "@/components/ui/button";
@@ -93,6 +100,7 @@ type Message = {
   execution_kind?: string;
   created_at: string;
   context: {
+    media_progress?: MediaProgress | null;
     ui_blocks?: UIBlock[];
     mode?: string;
     scope?: Target[];
@@ -125,6 +133,11 @@ type RetryInput = {
     provider_params: Record<string, string | number>;
     references: ReferenceInput[];
   } | null;
+};
+type ComposerSnapshot = {
+  draft: string; mode: CreationMode; provider: string; targets: Target[]; skills: SkillUse[];
+  references: ComposerReference[]; attachments: AttachmentDraft[]; mediaProvider: string;
+  mediaParameters: Record<string, string | number>;
 };
 type Detail = Conversation & { messages: Message[]; has_older: boolean };
 const active = new Set(["queued", "running", "needs_review", "paused"]);
@@ -223,6 +236,11 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     return `${location.pathname}?${next}`;
   };
   const [atBottom, setAtBottom] = useState(true);
+  const [composerUndo, setComposerUndo] = useState<ComposerSnapshot | null>(null);
+  const [composerNotice, setComposerNotice] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [completionNotice, setCompletionNotice] = useState("");
+  const [submission, setSubmission] = useState<{ content: string; mode: CreationMode; attachments: ConversationAttachment[]; references: ComposerReference[] } | null>(null);
   const list = useQuery({
     queryKey: ["conversations", projectId, archived, query, offset],
     queryFn: () =>
@@ -241,7 +259,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     refetchInterval: (q) =>
       q.state.data?.messages.some((m) => active.has(m.status)) ? 2000 : false,
   });
-  useConversationStream(
+  const stream = useConversationStream(
     projectId,
     detail.data?.messages.some((m) => active.has(m.status)) ? selected : null,
   );
@@ -304,6 +322,32 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     ...(detail.data?.messages || []),
   ].filter((m, i, a) => a.findIndex((x) => x.id === m.id) === i);
   const latest = messages[messages.length - 1];
+  const latestAssistant = [...messages].reverse().find(m => m.role === "assistant");
+  const ongoing = !!latestAssistant?.context.production && ["queued", "running"].includes(latestAssistant.context.production.status);
+  const awaitingReply = latestAssistant?.status === "needs_review";
+  const scrollToLatest = () => { setAtBottom(true); bottom.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); setCompletionNotice(""); };
+  useEffect(() => {
+    if (!detail.isSuccess || !selected) return;
+    const storageKey = `${scopeKey}.awaiting-results`;
+    try {
+      const previous: string[] = JSON.parse(sessionStorage.getItem(storageKey) || "[]");
+      if (messages.some(m => previous.includes(m.id) && m.status === "completed" &&
+        m.context.production?.is_current !== false &&
+        (!!m.context.outputs?.length || m.context.production?.status === "succeeded"))) setCompletionNotice("结果已准备好");
+      sessionStorage.setItem(storageKey, JSON.stringify(messages.filter(m => ["queued", "running"].includes(m.status)).map(m => m.id)));
+    } catch { /* Completion hints are optional; saved results remain in the conversation. */ }
+  }, [detail.data, scopeKey]);
+  useEffect(() => { setComposerUndo(null); setComposerNotice(""); setMoreOpen(false); setCompletionNotice(""); setSubmission(null); }, [scopeKey]);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setMoreOpen(false); };
+    const outside = (event: PointerEvent) => {
+      const element = event.target as Element;
+      if (!element.closest(".conversation-extra-controls, .conversation-more, [role='dialog'], [role='listbox']")) setMoreOpen(false);
+    };
+    window.addEventListener("keydown", close); document.addEventListener("pointerdown", outside);
+    return () => { window.removeEventListener("keydown", close); document.removeEventListener("pointerdown", outside); };
+  }, [moreOpen]);
   const blocked = !!latest && active.has(latest.status) && latest.execution_kind !== "production";
   const select = (id: string) => {
     const next = new URLSearchParams(params);
@@ -353,7 +397,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     }
     if (atBottom && restoredPosition.current === selected)
       bottom.current?.scrollIntoView({ block: "nearest" });
-  }, [selected, latest?.id, latest?.content, latest?.status, atBottom]);
+  }, [selected, latest?.id, latest?.content, latest?.status, latest?.context.outputs?.length, submission, atBottom]);
   const refresh = async (id = selected) => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["conversation", projectId, id] }),
@@ -387,6 +431,16 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     },
   });
   const send = useMutation({
+    onMutate: (text: string) => { setSubmission({ content: text.trim(), mode, attachments: attachments.items.flatMap(item => item.attachment ? [item.attachment] : []), references: media.refs }); setAtBottom(true); setComposerNotice(""); setMoreOpen(false); },
+    onSettled: () => setSubmission(null),
+    onError: async error => {
+      // A confirmed revision conflict did not commit. Network/unknown failures
+      // retain the exact request and idempotency key for a safe manual retry.
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        setPending(null);
+        await refresh();
+      }
+    },
     mutationFn: async (text: string) => {
       const body = {
         content: text.trim(),
@@ -397,12 +451,12 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         attachments: attachments.references.map(item => ({ ...item, role: mode !== "video" ? "reference" : item.role })),
         references: mode === "text" ? media.refs.map(item => referenceInput(item, "reference")) : [],
         media: mode === "text" ? null : media.request,
+        production: mode === "text" && latest?.context.production?.is_current !== false && latest?.context.production &&
+          !["succeeded", "canceled"].includes(latest.context.production.status)
+          ? { run_id: latest.context.production.run_id, action: "respond", expected_revision: latest.context.production.revision }
+          : null,
       };
-      const fingerprint = JSON.stringify(body);
-      const request =
-        pending?.fingerprint === fingerprint
-          ? pending
-          : { fingerprint, key: crypto.randomUUID() };
+      const { request, body: requestBody } = prepareConversationRequest(body, pending);
       setPending(request);
       let id = selected;
       if (!id) {
@@ -415,17 +469,18 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       return {
         id,
         data: await api.post<Detail>(`${base}/${id}/messages`, {
-          ...body,
+          ...requestBody,
           request_key: request.key,
         }),
       };
     },
     onSuccess: async ({ id, data }) => {
+      setSubmission(null);
       if (!selected) {
         const prefix = `conversation.${me?.user.id}.${projectId}.${id}`;
         for (const [key, value] of Object.entries({
           provider: selectedProvider,
-          mode,
+          mode: "text",
           mediaModels: media.choices,
           mediaParameters: media.parameters,
           references: [],
@@ -447,6 +502,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         /* local draft persistence is best effort */
       }
       setDraft("");
+      setMode("text");
+      setComposerUndo(null);
       attachments.clear();
       media.setRefs([]);
       void qc.invalidateQueries({ queryKey: ["saved-conversation-attachments", projectId] });
@@ -487,10 +544,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   });
   const editRetry = useMutation({
     mutationFn: async (message: Message) => {
-      if (draft.trim() || attachments.items.length || media.refs.length)
-        throw new Error(
-          "输入框里还有草稿，请先发送或清空，再载入原来的创作要求。",
-        );
+      if (attachments.items.some(item => ["preparing", "uploading", "processing"].includes(item.state)))
+        throw new Error("附件仍在上传，完成后可载入原要求；当前草稿会保留。");
       const original = await api.get<RetryInput>(
         `${base}/${selected}/messages/${message.id}/retry-input`,
       );
@@ -515,6 +570,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       return { original, refs, restored };
     },
     onSuccess: ({ original, refs, restored }) => {
+      rememberComposer("已载入原要求，可调整后发送；原草稿可撤销恢复。");
       setDraft(original.content);
       setTargets(original.scope);
       setSkills(original.skills);
@@ -541,7 +597,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       api.post(`${base}/${selected}/messages/${message.id}/control`, {
         action,
       }),
-    onSuccess: () => refresh(),
+    onSuccess: (_, { action }) => {
+      if (action === "cancel") setComposerNotice("已停止后续步骤；已提交的生成仍可能完成，费用以上游实际处理为准。");
+      void refresh();
+    },
   });
   const loadOlder = useMutation({
     mutationFn: () =>
@@ -617,18 +676,24 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     const item = imported.data;
     if (params.has("reference")) {
       if (!item.reference_available) return;
-      media.setRefs([
-        {
+      const exists = media.refs.some(ref => ref.id === item.id && ref.source_type !== "media_version");
+      if (!exists && media.refs.length + attachments.items.length >= 8) {
+        setComposerNotice("参考内容已满，请移除一项再添加。");
+        return;
+      }
+      rememberComposer("已添加这份参考，现有输入已保留。");
+      media.setRefs([...media.refs, ...(exists ? [] : [{
           id: item.id,
+          source_type: "generation" as const,
           title: item.title,
           blob_hash: item.blob_hash,
           kind: item.output_type,
           thumbnail_hash: item.poster_hash,
-          role: "reference",
-        },
-      ]);
+          role: "reference" as const,
+      }])]);
       setMode(item.output_type);
     } else {
+      rememberComposer("已载入提示词，可撤销恢复原草稿。");
       setDraft(item.prompt);
       setMode(item.output_type);
     }
@@ -638,19 +703,48 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     next.set("view", "chat");
     setParams(next, { replace: true });
   }, [importId, imported.data]);
-  const useOutput = (output: MediaOutput, nextMode: CreationMode) => {
-    media.setRefs([
-      {
-        id: output.id,
-        title: output.type === "video" ? "对话生成的视频" : "对话生成的图片",
-        blob_hash: output.blob_hash,
-        kind: output.type,
-        thumbnail_hash: output.thumbnail_hash,
-        role: "reference",
-      },
-    ]);
-    setMode(nextMode);
-    input.current?.focus();
+  function rememberComposer(notice: string) {
+    setComposerUndo({ draft, mode, provider, targets, skills, references: media.refs, attachments: attachments.items, mediaProvider: media.provider, mediaParameters: media.controls });
+    setComposerNotice(notice);
+  }
+  const undoComposer = () => {
+    if (!composerUndo) return;
+    const previous = composerUndo;
+    setDraft(previous.draft); setMode(previous.mode); setProvider(previous.provider); setTargets(previous.targets); setSkills(previous.skills);
+    media.setRefs(previous.references); attachments.restoreDrafts(previous.attachments);
+    if (previous.mode !== "text") media.restore(previous.mode, previous.mediaProvider, previous.mediaParameters);
+    setComposerUndo(null); setComposerNotice("已恢复原来的输入。"); input.current?.focus();
+  };
+  const useOutput = (output: MediaOutput, nextMode: CreationMode, selection?: MediaReferenceSelection) => {
+    const exists = media.refs.some(ref => ref.id === output.id && ref.source_type !== "media_version");
+    if (!exists && media.refs.length + attachments.items.length >= 8) { setComposerNotice("参考内容已满，请移除一项再添加。"); return; }
+    rememberComposer("已添加这份参考，现有内容已保留。");
+    const range = selection?.startSeconds !== undefined && selection?.endSeconds !== undefined
+      ? ` ${selection.startSeconds.toFixed(2)}–${selection.endSeconds.toFixed(2)} 秒` : "";
+    const title = `${output.type === "video" ? "视频" : "图片"}${selection ? ` · 方案 ${selection.index + 1}` : ""}${range}`;
+    media.setRefs(current => exists ? current : [...current, { id: output.id, source_type: "generation", title, blob_hash: output.blob_hash, kind: output.type, thumbnail_hash: output.thumbnail_hash, role: "reference" }]);
+    if (range) setDraft(current => `${current}${current.trim() ? "\n\n" : ""}针对${title}：`);
+    setMode(nextMode); input.current?.focus();
+  };
+  const reuseAttachment = (item: MessageAttachmentItem) => {
+    if (!item.id) return;
+    const exists = "filename" in item ? attachments.items.some(value => value.attachment?.id === item.id) : media.refs.some(value => value.id === item.id && value.source_type === item.source_type);
+    if (exists) { setComposerNotice("这份内容已在输入框中。"); input.current?.focus(); return; }
+    if (media.refs.length + attachments.items.length >= 8) { setComposerNotice("参考内容已满，请移除一项再添加。"); return; }
+    rememberComposer("已再次引用，现有输入已保留。");
+    if ("filename" in item) attachments.addSaved(item, media.refs.length);
+    else media.setRefs(current => [...current, { ...item, role: "reference" }]);
+    setMode("text"); input.current?.focus();
+  };
+  const addLocalFiles = (files: FileList | File[]) => {
+    const { accepted, errors } = preflightAttachmentFiles(files, {
+      mode, capabilities: media.capabilities,
+      capabilitiesLoading: media.capabilitiesLoading,
+      capabilitiesError: media.capabilitiesError,
+      references: [...media.refs, ...attachments.items],
+    });
+    attachments.addFiles(accepted.map(item => item.file), media.refs.length, new Map(accepted.map(item => [item.file, item.role])));
+    if (errors.length) attachments.setError(errors.join(" "));
   };
 
   const messageById = new Map(messages.map(message => [message.id, message]));
@@ -883,7 +977,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               加载更早的消息
             </button>
           )}
-          {!messages.length &&
+          {!messages.length && !submission &&
             (!selected || (detail.isSuccess && !detail.isPending)) && (
               <div className="conversation-empty">
                 <h3><Clapperboard aria-hidden="true" />今天，想创作些什么？</h3>
@@ -911,7 +1005,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 {m.context.mode === "test" && <span>离线机制测试</span>}
               </div>
               {m.role === "user" ? (
-                <><MessageAttachments projectId={projectId} attachments={m.context.attachments} references={m.context.references} /><ConversationText content={m.content} user /></>
+                <><MessageAttachments projectId={projectId} attachments={m.context.attachments} references={m.context.references} onReuse={busy || !!detail.data?.archived ? undefined : reuseAttachment} /><ConversationText content={m.content} user /></>
               ) : (
                 <ConversationAnswer
                   content={m.execution_kind === "generation" && m.context.outputs?.length &&
@@ -924,6 +1018,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                     setMode("text"); setDraft(next); input.current?.focus();
                   }}
                 >
+                  {m.context.media_progress && m.context.production?.is_current !== false && <ConversationGenerationProgress progress={m.context.media_progress} />}
                   {!!m.context.outputs?.length && <ConversationMediaResults
                     projectId={projectId}
                     outputs={m.context.outputs}
@@ -933,13 +1028,17 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                     simulated={m.content.startsWith("模拟测试：")}
                     disabled={busy || !!detail.data?.archived}
                     reuse={useOutput}
+                    onRecreate={m.context.media && m.status === "completed" ? () => editRetry.mutate(m) : undefined}
+                    onReference={(output, selection) => useOutput(output, "text", selection)}
                   />}
                 </ConversationAnswer>
               )}
               {m.role === "assistant" && (
                 <>
                   {m.execution_kind === "production" && m.task_id && m.context.production?.is_current !== false ? (
-                    <ProductionTask projectId={projectId} runId={m.task_id} onUpdated={() => void refresh()} />
+                    <ProductionTask compact projectId={projectId} runId={m.task_id} onUpdated={() => void refresh()}
+                      hasMediaProgress={!!m.context.media_progress && ["queued", "generating", "materializing"].includes(m.context.media_progress.phase)}
+                      onReply={() => { setMode("text"); input.current?.focus(); }} />
                   ) : m.execution_kind !== "production" ? <ConversationTaskState
                     status={m.status}
                     kind={
@@ -1027,8 +1126,17 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               )}
             </article></MessagePrimitive.Root>;
           }}</ThreadPrimitive.Messages>
+          {submission && <>
+            <article className="conversation-message conversation-message-user" aria-label="正在发送的消息">
+              <MessageAttachments projectId={projectId} attachments={submission.attachments} references={submission.references} />
+              <ConversationText content={submission.content} user />
+            </article>
+            <div className="conversation-submitting" role="status"><Loader2 size={15} className="conversation-spinner" />正在发送{submission.mode === "text" ? "" : submission.mode === "image" ? "图片创作要求" : "视频创作要求"}…</div>
+          </>}
           <div ref={bottom} />
         </div>
+        {(completionNotice || !atBottom) && messages.length > 0 && <button type="button" className="conversation-jump" onClick={scrollToLatest}><ArrowDown size={14} />{completionNotice || "回到最新消息"}</button>}
+        {(detail.isRefetchError || stream === "reconnecting") && <p className="conversation-connection" role="status">正在重新连接进度，已有内容会保留。<button type="button" onClick={() => void refresh()}>重新连接</button></p>}
         {error && (
           <p className="conversation-error px-5" role="alert">
             {error.message}
@@ -1037,8 +1145,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         <ComposerPrimitive.Root asChild><div className={`conversation-compose${fileDrag ? " is-file-drag" : ""}`}
           onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); if (!busy && !detail.data?.archived) setFileDrag(true); } }}
           onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setFileDrag(false); }}
-          onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); event.stopPropagation(); setFileDrag(false); if (!busy && !detail.data?.archived) attachments.addFiles(event.dataTransfer.files, media.refs.length); }}
-          onPaste={event => { if (!event.clipboardData.files.length || busy || detail.data?.archived) return; event.preventDefault(); attachments.addFiles(event.clipboardData.files, media.refs.length); const text = event.clipboardData.getData("text/plain"); if (text) setDraft(`${draft}${text}`); }}>
+          onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); event.stopPropagation(); setFileDrag(false); if (!busy && !detail.data?.archived) addLocalFiles(event.dataTransfer.files); }}
+          onPaste={event => { if (!event.clipboardData.files.length || busy || detail.data?.archived) return; event.preventDefault(); addLocalFiles(event.clipboardData.files); const text = event.clipboardData.getData("text/plain"); if (text) setDraft(`${draft}${text}`); }}>
           <ComposerAttachmentTray projectId={projectId} uploads={attachments} references={media.refs} setReferences={media.setRefs} disabled={busy || !!detail.data?.archived} frameRoles={mode === "video" ? (media.capabilities?.features || []).filter(feature => feature === "first_frame" || feature === "last_frame") : []} />
           {((mode === "text" && targets.length > 0) || skills.length > 0) && (
             <div className="conversation-attachments" aria-label="本轮已选内容">
@@ -1099,6 +1207,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ))}
             </div>
           )}
+          {composerNotice && <div className="conversation-composer-notice" role="status"><span>{composerNotice}</span>{composerUndo && <button type="button" onClick={undoComposer}><Undo2 size={13} />撤销</button>}<button type="button" aria-label="关闭提示" onClick={() => { setComposerNotice(""); setComposerUndo(null); }}><X size={13} /></button></div>}
           <ComposerPrimitive.Input
             ref={input}
             minRows={2}
@@ -1115,15 +1224,25 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                     ? "描述想生成的画面，也可以引用上面的图片继续修改…"
                     : mode === "video"
                       ? "描述镜头、动作和氛围，直接生成一段视频…"
-                      : "聊聊想法，或一起完善故事和镜头…"
+                      : awaitingReply ? "回复上面的问题，或告诉我想调整的地方…" : ongoing ? "继续补充要求，或讨论下一步…" : "聊聊想法，或一起完善故事和镜头…"
             }
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !draft.trim() && ready) { event.preventDefault(); void send.mutateAsync("").catch(() => undefined); } }}
+            onKeyDown={event => {
+              // This composer is a div, so the primitive's form.requestSubmit
+              // fallback cannot send. Keep text and attachment Enter consistent.
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && ready) {
+                event.preventDefault();
+                void send.mutateAsync(draft).catch(() => undefined);
+              }
+            }}
             maxLength={mode === "text" ? 8000 : 6000}
             disabled={!!detail.data?.archived || busy}
           />
           <div className="conversation-compose-tools">
+            {latest?.execution_kind === "production" && ["queued", "running"].includes(latest.context.production?.status || "") &&
+              <button type="button" className="conversation-tool" aria-label="停止后续步骤" title="停止后续步骤；已提交的生成仍可能完成" disabled={control.isPending}
+                onClick={() => control.mutate({message: latest, action: "cancel"})}><Square size={17} /></button>}
             <SelectField
               label="本轮创作方式"
               className="composer-control composer-mode-select"
@@ -1136,6 +1255,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 { value: "video", label: "视频", icon: <Video size={17} aria-hidden="true" /> },
               ]}
             />
+            <div className={`conversation-extra-controls${moreOpen ? " is-open" : ""}`} id="conversation-extra-controls">
             <ComposerModelPicker
               models={displayedModels || models}
               value={mode === "text" ? selectedProvider : media.provider}
@@ -1156,17 +1276,20 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 showReferences={false}
               />
             )}
-            <ConversationAddMenu disabled={busy || !!detail.data?.archived} onFiles={files => attachments.addFiles(files, media.refs.length)} onLibrary={() => setAttachmentPickerOpen(true)} onObjects={() => { setMode("text"); setContextOpen(true); }} />
+
             <button
               className="conversation-tool"
               type="button"
               disabled={busy}
-              onClick={() => setSkillOpen(true)}
+              onClick={() => { setSkillOpen(true); setMoreOpen(false); }}
               title="选用已有的创作方法"
             >
               <Sparkles size={17} />
               <span>技能</span>
             </button>
+            </div>
+            <ConversationAddMenu disabled={busy || !!detail.data?.archived} onFiles={addLocalFiles} onLibrary={() => setAttachmentPickerOpen(true)} onObjects={() => { setMode("text"); setContextOpen(true); }} />
+            <button type="button" className="conversation-tool conversation-more" aria-label="创作设置" aria-expanded={moreOpen} aria-controls="conversation-extra-controls" onClick={() => setMoreOpen(value => !value)}><MoreHorizontal size={18}/></button>
             {!draft.trim() && mode === "text" && (attachments.items.length > 0 || media.refs.length > 0) ? <button type="button" className="conversation-send" aria-label="发送附件" disabled={!ready} onClick={() => void send.mutateAsync("").catch(() => undefined)}>{send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}</button> : <ComposerPrimitive.Send
               className="conversation-send"
               type="button"
@@ -1180,11 +1303,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               )}
             </ComposerPrimitive.Send>}
           </div>
-          {send.isPending && (
-            <p className="conversation-note" role="status">
-              正在提交创作要求…
-            </p>
-          )}
+          {ongoing && !send.isPending && <p className="conversation-compose-context">可继续讨论；本次生成仍按原要求进行。</p>}
           {attachments.error && <p className="conversation-attachment-notice" role="alert">{attachments.error}</p>}
           {attachmentProblem && <p className="conversation-attachment-notice" role="alert">{attachmentProblem}</p>}
           {attachments.items.length > 0 && !attachmentProblem && <p className="conversation-attachment-notice">{!attachments.ready ? "附件准备好后即可发送。刷新后未完成的上传需要重新选择原文件续传。" : mode !== "text" && !draft.trim() ? "参考素材已就绪，请描述想生成的内容。" : "发送后自动保留到对话附件，可随时再次引用。"}</p>}
@@ -1249,7 +1368,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 </div>
         )}
       </div>
-      <ConversationAttachmentPicker mode={mode} projectId={projectId} open={attachmentPickerOpen} onClose={() => setAttachmentPickerOpen(false)} references={media.refs} uploads={attachments} pickReference={item => media.setRefs(current => current.some(value => value.id === item.id && value.source_type === item.source_type) ? current.filter(value => !(value.id === item.id && value.source_type === item.source_type)) : current.length + attachments.items.length < 8 ? [...current, item] : current)} />
+      <ConversationAttachmentPicker mode={mode} capabilities={mode === "text" ? undefined : media.capabilities} capabilitiesLoading={mode !== "text" && media.capabilitiesLoading} capabilitiesError={mode === "text" ? null : media.capabilitiesError} onRetryCapabilities={media.retry} projectId={projectId} open={attachmentPickerOpen} onClose={() => setAttachmentPickerOpen(false)} references={media.refs} uploads={attachments} pickReference={item => media.setRefs(current => current.some(value => value.id === item.id && value.source_type === item.source_type) ? current.filter(value => !(value.id === item.id && value.source_type === item.source_type)) : current.length + attachments.items.length < 8 ? [...current, item] : current)} />
       {contextOpen && (
         <ConversationObjectDialog
           projectId={projectId}

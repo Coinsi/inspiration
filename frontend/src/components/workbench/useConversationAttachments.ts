@@ -101,7 +101,7 @@ export function useConversationAttachments(projectId: string, scopeKey: string) 
     return () => { alive = false; window.clearInterval(timer); };
   }, [tracked, key, base]);
 
-  const addFiles = (selected: FileList | File[], occupied = 0) => {
+  const addFiles = (selected: FileList | File[], occupied = 0, roles?: ReadonlyMap<File, ReferenceRole>) => {
     setError("");
     const drafts: { item: AttachmentDraft; file: File }[] = [];
     const errors: string[] = [];
@@ -113,7 +113,7 @@ export function useConversationAttachments(projectId: string, scopeKey: string) 
         const id = crypto.randomUUID();
         const preview = URL.createObjectURL(file);
         urls.current.set(id, preview);
-        drafts.push({ file, item: { client_id: id, filename: file.name, kind, size_bytes: file.size, role: "reference", state: "preparing", preview_url: preview } });
+        drafts.push({ file, item: { client_id: id, filename: file.name, kind, size_bytes: file.size, role: roles?.get(file) || "reference", state: "preparing", preview_url: preview } });
       } catch (e) { errors.push(`${file.name}：${(e as Error).message}`); }
     });
     write(key, list => [...list, ...drafts.map(d => d.item)]);
@@ -161,5 +161,6 @@ export function useConversationAttachments(projectId: string, scopeKey: string) 
       write(key, () => []); setError("");
     },
     restore: (attachments: ConversationAttachment[]) => write(key, () => attachments.map(attachment => ({ client_id: crypto.randomUUID(), filename: attachment.filename, kind: attachment.kind, size_bytes: attachment.size_bytes, role: attachment.role || "reference", state: "ready", attachment }))),
+    restoreDrafts: (drafts: AttachmentDraft[]) => write(key, () => drafts),
   };
 }

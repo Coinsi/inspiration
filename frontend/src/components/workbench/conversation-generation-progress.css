@@ -1,0 +1,26 @@
+.conversation-generation {
+  width: min(100%, 480px);
+  margin: 18px 0 12px;
+  color: hsl(var(--muted));
+}
+.conversation-generation-viewport {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  aspect-ratio: 16 / 8;
+  border: 1px solid hsl(var(--border) / .65);
+  border-radius: 14px;
+  background: hsl(var(--surface) / .5);
+  font-size: 12px;
+}
+.conversation-generation figcaption { padding: 12px 2px 0; }
+.conversation-generation-heading { display: flex; align-items: center; gap: 8px; }
+.conversation-generation-heading svg { flex-shrink: 0; }
+.conversation-generation-heading strong { color: hsl(var(--fg)); font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.conversation-generation p { margin: 5px 0 0 23px; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.conversation-generation small { display: block; margin: 5px 0 0 23px; font-size: 12px; }
+.conversation-generation-spin { animation: conversation-generation-spin 1.4s linear infinite; }
+@keyframes conversation-generation-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .conversation-generation-spin { animation: none; } }

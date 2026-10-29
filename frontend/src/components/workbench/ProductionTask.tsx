@@ -353,6 +353,32 @@ const labels: Record<string, string> = {
   superseded: "已调整",
 };
 
+export function productionBriefStatus(run: ProductionRun): { status: string; label: string } {
+  const tasks = run.tasks.filter(task => task.status !== "superseded");
+  if (run.status === "succeeded") return { status: run.status, label: "执行记录" };
+  if (run.status === "needs_attention") {
+    if (tasks.some(task => ["failed", "uncertain"].includes(task.status)))
+      return { status: "needs_attention", label: "执行遇到问题" };
+    if (tasks.some(task => ["waiting_review", "waiting_candidate"].includes(task.status)))
+      return { status: "waiting_review", label: "等待你确认结果" };
+    return { status: "waiting_input", label: "等待你的回复" };
+  }
+  if (!["running", "queued"].includes(run.status))
+    return { status: run.status, label: labels[run.status] || "执行进展" };
+  if (tasks.some(task => task.role === "impact" && ["running", "queued"].includes(task.status)))
+    return { status: "running", label: "正在处理你的补充" };
+  for (const [status, label] of [
+    ["validating_job", "正在检查生成结果"],
+    ["waiting_job", "正在等待生成结果"],
+    ["waiting_transcription", "正在转写音轨"],
+    ["running", "正在创作"],
+  ]) {
+    if (tasks.some(task => task.role !== "impact" && task.status === status))
+      return { status, label };
+  }
+  return { status: "queued", label: "已提交，等待开始" };
+}
+
 function StatusIcon({ status }: { status: string }) {
   if (status === "succeeded") return <Check size={16} />;
   if (status === "running" || status === "validating_job")
@@ -370,17 +396,25 @@ export function ProductionTask({
   runId,
   onGuide,
   onUpdated,
+  compact = false,
+  onReply,
+  hasMediaProgress = false,
 }: {
   projectId: string;
   runId: string;
   /** Notification after a guidance control has been saved successfully. */
   onGuide?: (control: ProductionControl) => void;
   onUpdated?: (run: ProductionRun) => void;
+  compact?: boolean;
+  onReply?: () => void;
+  /** The adjacent media placeholder already explains the current waiting stage. */
+  hasMediaProgress?: boolean;
 }) {
   const qc = useQueryClient();
   const key = ["production-run", projectId, runId];
   const base = `/projects/${projectId}/production/runs/${runId}`;
   const [expanded, setExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(24);
   const [planExpanded, setPlanExpanded] = useState(false);
   const [form, setForm] = useState<{
@@ -433,6 +467,7 @@ export function ProductionTask({
     setForm(null);
     setMessage("");
     setExpanded(false);
+    setDetailsOpen(false);
     setPlanExpanded(false);
     setModelSettingsOpen(false);
     setModelNotice("");
@@ -521,8 +556,9 @@ export function ProductionTask({
   });
   // Routine work stays behind the progress summary; decisions and failures stay visible.
   const displayed = expanded ? ordered.slice(0, visibleCount) : actionable.slice(0, 5);
-  const completed = tasks.filter((t) => t.status === "succeeded").length;
-  const running = tasks.filter((t) => t.status === "running").length;
+  const business = tasks.filter((t) => t.role !== "impact");
+  const completed = business.filter((t) => t.status === "succeeded").length;
+  const running = business.filter((t) => t.status === "running").length;
   const ended = run?.status === "succeeded" || run?.status === "canceled";
   const budgetValue = Number(budget);
   const validBudget =
@@ -562,6 +598,7 @@ export function ProductionTask({
     update.mutate(request);
   };
   const openForm = (action: "steer" | "reply", task?: Task) => {
+    if (compact && onReply) { onReply(); return; }
     setForm({ action, task });
     setMessage("");
     update.reset();
@@ -590,7 +627,7 @@ export function ProductionTask({
 
   if (!run)
     return (
-      <section className="production-task" aria-label="制作进度">
+      <section className={`production-task${compact ? " production-task-compact" : ""}`} aria-label="制作进度">
         {query.isError ? (
           <div className="production-notice" role="alert">
             <AlertCircle size={17} />
@@ -609,20 +646,36 @@ export function ProductionTask({
       </section>
     );
 
+  const brief = productionBriefStatus(run);
+  const statusCovered = hasMediaProgress && ["running", "queued"].includes(run.status);
   return (
     <section
-      className="production-task"
+      className={`production-task${compact ? " production-task-compact" : ""}`}
       aria-label="制作进度"
       data-status={run.status}
       aria-busy={update.isPending}
     >
+      {compact && <div className="production-brief">
+        <button type="button" className="production-brief-toggle" aria-expanded={detailsOpen}
+          onClick={() => setDetailsOpen(!detailsOpen)}>
+          {!statusCovered && <StatusIcon status={brief.status} />}
+          <span>{statusCovered ? "执行详情" : brief.label}</span>
+          {business.length > 1 && ["running", "queued"].includes(run.status) && <small>{completed}/{business.length}</small>}
+          <ChevronDown size={13} className={detailsOpen ? "production-chevron-open" : ""} />
+        </button>
+        {run.status === "paused" && <button type="button" className="production-brief-action" disabled={update.isPending} onClick={() => send("resume")}>继续</button>}
+        {actionable.length === 1 && actionable[0].status === "failed" && actionable[0].error?.retryable && !ended && <button type="button" className="production-brief-action" disabled={update.isPending} onClick={() => send(actionable[0].error?.recovery === "resume_receipt" ? "resume_receipt" : "retry", [actionable[0].id])}>重试</button>}
+      </div>}
+      {compact && query.isError && <p className="production-brief-note" role="status">暂时无法更新进展，可以展开详情重新连接。</p>}
+      {compact && update.isError && <p className="production-brief-note" role="alert">操作未完成，请展开详情查看并重试。</p>}
+      <div className={compact ? "production-detail-content" : undefined} hidden={compact && !detailsOpen}>
       <header className="production-heading">
         <span className="production-status-icon">
           <StatusIcon status={run.status} />
         </span>
         <div>
           <strong>{labels[run.status] || "制作任务"}</strong>
-          <p>{run.goal}</p>
+          {!compact && <p>{run.goal}</p>}
         </div>
         <div className="production-controls">
           {run.status === "paused" ? (
@@ -819,7 +872,7 @@ export function ProductionTask({
         <>
           <div className="production-progress" aria-live="polite">
             <span>
-              已完成 <b>{completed}</b> / {tasks.length} 步
+              已完成 <b>{completed}</b> / {business.length} 步
             </span>
             {running > 0 && <span>{running} 个步骤正在处理</span>}
             {actionable.length > 0 && (
@@ -844,8 +897,8 @@ export function ProductionTask({
                   <StatusIcon status={task.status} />
                 </span>
                 <div className="production-step-main">
-                  <span className="production-step-goal" title={task.goal}>
-                    {task.goal}
+                  <span className="production-step-goal" title={task.role === "impact" ? undefined : task.goal}>
+                    {task.role === "impact" ? "处理补充意见" : task.goal}
                   </span>
                   <span className="production-step-status">
                     {labels[task.status] || task.status}
@@ -969,7 +1022,7 @@ export function ProductionTask({
         </>
       )}
 
-      {form && (
+      {form && !compact && (
         <form
           className="production-guidance"
           onSubmit={(e) => {
@@ -1088,6 +1141,7 @@ export function ProductionTask({
           </button>
         )}
       </footer>
+      </div>
     </section>
   );
 }
