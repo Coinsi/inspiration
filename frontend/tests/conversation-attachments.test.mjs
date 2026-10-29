@@ -21,6 +21,11 @@ const file = new File(['abcdef'], 'scene.png', { type: 'image/png' });
 const draft = { client_id: 'request-id', filename: file.name, kind: 'image', size_bytes: file.size, role: 'reference', state: 'preparing' };
 let requests, current;
 const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+};
 beforeEach(async () => {
   requests = [];
   current = { id: 'file-id', filename: file.name, title: 'scene', kind: 'image', status: 'uploading', uploaded_bytes: 0, size_bytes: file.size, chunk_size: 3, fingerprint: await fileFingerprint(file), chunk_hashes: [], blob_hash: null };
@@ -93,48 +98,74 @@ test('editing a retry combines distinct uploaded and reused files and deduplicat
   assert.deepEqual(retryAttachmentReferences({ attachments: [local], media: { references: [local, reused, { generation_id: 'result', role: 'reference' }] } }), [local, reused]);
   assert.deepEqual(retryAttachmentReferences({ attachments: [local], references: [reused, local] }), [local, reused]);
 });
-test('a background upload updates only its original conversation after switching drafts', async () => {
-  const storage = new Map(); globalThis.localStorage = { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) }; globalThis.window = globalThis;
+test('a background upload updates only its original conversation after switching drafts', { timeout: 10000 }, async t => {
+  const completed = deferred();
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: key => storage.get(key) || null,
+    setItem: (key, value) => {
+      storage.set(key, value);
+      if (key === 'first.attachments' && JSON.parse(value)[0]?.state === 'ready') completed.resolve();
+    },
+  };
+  globalThis.window = globalThis;
   const normalFetch = globalThis.fetch; let unblock; let chunkStarted;
   const started = new Promise(resolve => { chunkStarted = resolve; });
   globalThis.fetch = async (url, options) => { if (url.includes('/chunk?') && !unblock) { await new Promise(resolve => { unblock = resolve; chunkStarted(); }); } return normalFetch(url, options); };
   let hook, rendered;
   function Probe({ scope }) { hook = useConversationAttachments('p', scope); return null; }
   await act(async () => { rendered = create(React.createElement(Probe, { scope: 'first' })); });
+  t.after(async () => { await act(async () => { rendered.unmount(); }); });
   await act(async () => { hook.addFiles([file]); await started; });
   await act(async () => { rendered.update(React.createElement(Probe, { scope: 'second' })); });
   assert.equal(hook.items.length, 0);
-  await act(async () => { unblock(); for (let n=0; n<10; n++) await new Promise(resolve => setImmediate(resolve)); });
+  await act(async () => { unblock(); await completed.promise; });
   assert.equal(hook.items.length, 0);
   assert.equal(JSON.parse(storage.get('first.attachments'))[0].state, 'ready');
-  await act(async () => { rendered.unmount(); });
 });
-test('leaving the page keeps resumable uploaded bytes without deleting the draft', async () => {
-  const storage = new Map(); globalThis.localStorage = { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) }; globalThis.window = globalThis;
+test('leaving the page keeps resumable uploaded bytes without deleting the draft', { timeout: 10000 }, async t => {
+  const persistedChunk = deferred();
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: key => storage.get(key) || null,
+    setItem: (key, value) => {
+      storage.set(key, value);
+      if (key === 'leave.attachments' && JSON.parse(value)[0]?.attachment?.uploaded_bytes === 3) persistedChunk.resolve();
+    },
+  };
+  globalThis.window = globalThis;
   const normalFetch = globalThis.fetch; let unblock; let chunkStarted;
   const started = new Promise(resolve => { chunkStarted = resolve; });
   globalThis.fetch = async (url, options) => { if (url.includes('/chunk?') && !unblock) await new Promise(resolve => { unblock = resolve; chunkStarted(); }); return normalFetch(url, options); };
   let hook, rendered;
   function Probe() { hook = useConversationAttachments('p', 'leave'); return null; }
   await act(async () => { rendered = create(React.createElement(Probe)); });
+  t.after(async () => { await act(async () => { rendered.unmount(); }); });
   await act(async () => { hook.addFiles([file]); await started; });
-  await act(async () => { rendered.unmount(); unblock(); for (let n=0; n<10; n++) await new Promise(resolve => setImmediate(resolve)); });
+  // Flush unmount cleanup before allowing the in-flight chunk to finish.
+  await act(async () => { rendered.unmount(); });
+  await act(async () => { unblock(); await persistedChunk.promise; });
   assert.ok(!requests.some(([, method]) => method === 'DELETE'));
+  assert.equal(requests.filter(([url]) => url.includes('/chunk?')).length, 1);
+  assert.ok(!requests.some(([url]) => url.endsWith('/complete')));
   assert.equal(JSON.parse(storage.get('leave.attachments'))[0].attachment.uploaded_bytes, 3);
   assert.equal(restoreAttachmentDrafts(storage.get('leave.attachments'))[0].state, 'paused');
 });
-test('explicitly removing an in-flight upload cancels only that draft after the current chunk', async () => {
+test('explicitly removing an in-flight upload cancels only that draft after the current chunk', { timeout: 10000 }, async t => {
+  const deleted = deferred();
   const storage = new Map(); globalThis.localStorage = { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) }; globalThis.window = globalThis;
   const normalFetch = globalThis.fetch; let unblock; let chunkStarted;
   const started = new Promise(resolve => { chunkStarted = resolve; });
-  globalThis.fetch = async (url, options) => { if (options.method === 'DELETE') { requests.push([url, 'DELETE']); return new Response(null, { status: 204 }); } if (url.includes('/chunk?') && !unblock) await new Promise(resolve => { unblock = resolve; chunkStarted(); }); return normalFetch(url, options); };
+  globalThis.fetch = async (url, options) => { if (options.method === 'DELETE') { requests.push([url, 'DELETE']); deleted.resolve(); return new Response(null, { status: 204 }); } if (url.includes('/chunk?') && !unblock) await new Promise(resolve => { unblock = resolve; chunkStarted(); }); return normalFetch(url, options); };
   let hook, rendered;
   function Probe() { hook = useConversationAttachments('p', 'remove'); return null; }
   await act(async () => { rendered = create(React.createElement(Probe)); });
+  t.after(async () => { await act(async () => { rendered.unmount(); }); });
   await act(async () => { hook.addFiles([file]); await started; });
-  await act(async () => { hook.remove(hook.items[0]); unblock(); for (let n=0; n<10; n++) await new Promise(resolve => setImmediate(resolve)); });
+  await act(async () => { hook.remove(hook.items[0]); unblock(); await deleted.promise; });
   assert.equal(hook.items.length, 0); assert.deepEqual(JSON.parse(storage.get('remove.attachments')), []);
   assert.equal(requests.filter(([, method]) => method === 'DELETE').length, 1);
+  assert.equal(current.uploaded_bytes, 3);
+  assert.equal(requests.filter(([url]) => url.includes('/chunk?')).length, 1);
   assert.ok(!requests.some(([url]) => url.endsWith('/complete')));
-  await act(async () => { rendered.unmount(); });
 });

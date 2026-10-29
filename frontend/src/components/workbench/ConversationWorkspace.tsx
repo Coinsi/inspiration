@@ -598,7 +598,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         action,
       }),
     onSuccess: (_, { action }) => {
-      if (action === "cancel") setComposerNotice("已停止后续步骤；已提交的生成仍可能完成，费用以上游实际处理为准。");
+      if (action === "cancel") {
+        setComposerUndo(null);
+        setComposerNotice("已停止后续步骤；已提交的生成仍可能完成，费用以上游实际处理为准。");
+      }
       void refresh();
     },
   });
