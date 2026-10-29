@@ -101,7 +101,7 @@ try{
  assert.equal(await tray.locator('.conversation-attachment-card').count(),2);
  await tray.getByRole('button',{name:'预览 角色参考.webp',exact:true}).waitFor();
  assert.equal(await tray.getByRole('button',{name:'预览 原始构图.webp',exact:true}).count(),0);
- assert.match(await page.getByRole('button',{name:'本轮创作方式',exact:true}).innerText(),/文字/);
+ assert.match(await page.getByRole('button',{name:'本轮创作方式',exact:true}).innerText(),/对话/);
  assert.equal(writes.length,0);
  await page.screenshot({path:resolve(out,'restored-undo-desktop.png'),fullPage:true});
  await answer.locator('.conversation-result-more > summary').click();
@@ -119,7 +119,7 @@ try{
  await page.getByRole('article',{name:'正在发送的消息',exact:true}).waitFor({state:'detached'});
  assert.equal(await composer.inputValue(),'');
  assert.equal(await tray.count(),0);
- assert.match(await page.getByRole('button',{name:'本轮创作方式',exact:true}).innerText(),/文字/);
+ assert.match(await page.getByRole('button',{name:'本轮创作方式',exact:true}).innerText(),/对话/);
  await composer.fill('接下来先讨论音乐。');
  await page.getByRole('button',{name:'发送消息',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('textarea')?.value==='');

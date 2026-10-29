@@ -207,6 +207,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const messageList = useRef<HTMLDivElement>(null);
+  const messageContent = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const restoringScroll = useRef(false);
   const restoredPosition = useRef<string | null>(null);
   const skipInitialAutoScroll = useRef(false);
   const returnPosition = useMemo(() => {
@@ -325,7 +328,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   const latestAssistant = [...messages].reverse().find(m => m.role === "assistant");
   const ongoing = !!latestAssistant?.context.production && ["queued", "running"].includes(latestAssistant.context.production.status);
   const awaitingReply = latestAssistant?.status === "needs_review";
-  const scrollToLatest = () => { setAtBottom(true); bottom.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); setCompletionNotice(""); };
+  const scrollToLatest = () => { followLatest.current = true; setAtBottom(true); bottom.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); setCompletionNotice(""); };
   useEffect(() => {
     if (!detail.isSuccess || !selected) return;
     const storageKey = `${scopeKey}.awaiting-results`;
@@ -364,25 +367,43 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     setOlder([]);
     setHasOlder(false);
     restoredPosition.current = null;
+    followLatest.current = !returnPosition;
     setAtBottom(!returnPosition);
   }, [selected]);
   useLayoutEffect(() => {
     const list = messageList.current;
     if (!list || !detail.isSuccess || restoredPosition.current === selected)
       return;
-    const target = returnPosition
-      ? document.getElementById(`conversation-message-${returnPosition.id}`)
-      : null;
-    if (returnPosition && !target && returnPage.isFetching) return;
-    if (target)
-      list.scrollTop +=
-        target.getBoundingClientRect().top -
-        list.getBoundingClientRect().top -
-        returnPosition!.offset;
-    else list.scrollTop = list.scrollHeight;
-    restoredPosition.current = selected;
-    skipInitialAutoScroll.current = !!returnPosition;
-    setAtBottom(list.scrollHeight - list.scrollTop - list.clientHeight < 80);
+    let frame: number | undefined;
+    const restore = () => {
+      const target = returnPosition
+        ? document.getElementById(`conversation-message-${returnPosition.id}`)
+        : null;
+      // The assistant runtime can mount its articles after query data is available.
+      if (returnPosition && !target &&
+        (returnPage.isFetching || messages.some(message => message.id === returnPosition.id))) return false;
+      if (messages.length && !list.querySelector("article[data-message]")) return false;
+      restoringScroll.current = !!returnPosition;
+      if (target)
+        list.scrollTop +=
+          target.getBoundingClientRect().top -
+          list.getBoundingClientRect().top -
+          returnPosition!.offset;
+      else list.scrollTop = list.scrollHeight;
+      restoredPosition.current = selected;
+      skipInitialAutoScroll.current = !!returnPosition;
+      followLatest.current = !returnPosition;
+      setAtBottom(list.scrollHeight - list.scrollTop - list.clientHeight < 80);
+      frame = requestAnimationFrame(() => { restoringScroll.current = false; });
+      return true;
+    };
+    const observer = new MutationObserver(() => { if (restore()) observer.disconnect(); });
+    if (!restore()) observer.observe(list, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      restoringScroll.current = false;
+    };
   }, [
     selected,
     detail.isSuccess,
@@ -395,9 +416,22 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       skipInitialAutoScroll.current = false;
       return;
     }
-    if (atBottom && restoredPosition.current === selected)
+    if (followLatest.current && restoredPosition.current === selected)
       bottom.current?.scrollIntoView({ block: "nearest" });
   }, [selected, latest?.id, latest?.content, latest?.status, latest?.context.outputs?.length, submission, atBottom]);
+  useLayoutEffect(() => {
+    const list = messageList.current, content = messageContent.current;
+    if (!list || !content || !detail.isSuccess) return;
+    // Media metadata changes child geometry without changing the saved message.
+    const observer = new ResizeObserver(() => {
+      if (restoredPosition.current !== selected) return;
+      if (followLatest.current) list.scrollTop = list.scrollHeight;
+      setAtBottom(list.scrollHeight - list.scrollTop - list.clientHeight < 80);
+    });
+    observer.observe(content);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [selected, detail.isSuccess]);
   const refresh = async (id = selected) => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["conversation", projectId, id] }),
@@ -431,7 +465,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     },
   });
   const send = useMutation({
-    onMutate: (text: string) => { setSubmission({ content: text.trim(), mode, attachments: attachments.items.flatMap(item => item.attachment ? [item.attachment] : []), references: media.refs }); setAtBottom(true); setComposerNotice(""); setMoreOpen(false); },
+    onMutate: (text: string) => { setSubmission({ content: text.trim(), mode, attachments: attachments.items.flatMap(item => item.attachment ? [item.attachment] : []), references: media.refs }); followLatest.current = true; setAtBottom(true); setComposerNotice(""); setMoreOpen(false); },
     onSettled: () => setSubmission(null),
     onError: async error => {
       // A confirmed revision conflict did not commit. Network/unknown failures
@@ -510,6 +544,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       setPending(null);
       setNewId(crypto.randomUUID());
       qc.setQueryData(["conversation", projectId, id], data);
+      followLatest.current = true;
       setAtBottom(true);
       setArchived(false);
       setQuery("");
@@ -538,6 +573,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         return next;
       });
       qc.setQueryData(["conversation", projectId, selected], data);
+      followLatest.current = true;
       setAtBottom(true);
       await refresh();
     },
@@ -940,7 +976,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           aria-live="polite"
           onScroll={(e) => {
             const el = e.currentTarget;
-            setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+            const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            if (!restoringScroll.current) followLatest.current = nearBottom;
+            setAtBottom(nearBottom);
             if (restoredPosition.current === selected) {
               const top = el.getBoundingClientRect().top;
               const visible = [
@@ -962,6 +1000,15 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             }
           }}
         >
+          <div ref={messageContent} style={{ display: "flow-root" }} onClickCapture={event => {
+            const trigger = (event.target as Element).closest("summary, button[aria-expanded]");
+            if (!trigger || !event.currentTarget.contains(trigger)) return;
+            const opening = trigger.tagName === "SUMMARY"
+              ? !(trigger.parentElement as HTMLDetailsElement | null)?.open
+              : trigger.getAttribute("aria-expanded") === "false";
+            // Opening details expresses a reading intent; keep its heading in place.
+            if (opening) followLatest.current = false;
+          }}>
           {selected && detail.isPending && <p role="status">正在打开对话…</p>}
           {detail.isError && (
             <p role="alert">
@@ -1137,6 +1184,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             <div className="conversation-submitting" role="status"><Loader2 size={15} className="conversation-spinner" />正在发送{submission.mode === "text" ? "" : submission.mode === "image" ? "图片创作要求" : "视频创作要求"}…</div>
           </>}
           <div ref={bottom} />
+          </div>
         </div>
         {(completionNotice || !atBottom) && messages.length > 0 && <button type="button" className="conversation-jump" onClick={scrollToLatest}><ArrowDown size={14} />{completionNotice || "回到最新消息"}</button>}
         {(detail.isRefetchError || stream === "reconnecting") && <p className="conversation-connection" role="status">正在重新连接进度，已有内容会保留。<button type="button" onClick={() => void refresh()}>重新连接</button></p>}
@@ -1253,7 +1301,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               disabled={busy}
               onChange={(value) => setMode(value as CreationMode)}
               options={[
-                { value: "text", label: "文字", icon: <Type size={17} aria-hidden="true" /> },
+                { value: "text", label: "对话", icon: <Type size={17} aria-hidden="true" /> },
                 { value: "image", label: "图片", icon: <Image size={17} aria-hidden="true" /> },
                 { value: "video", label: "视频", icon: <Video size={17} aria-hidden="true" /> },
               ]}

@@ -34,8 +34,8 @@ export function ModelBrandIcon({
         style={{
           width: size,
           height: size,
-          maskImage: `url(${src})`,
-          WebkitMaskImage: `url(${src})`,
+          maskImage: `url("${src}")`,
+          WebkitMaskImage: `url("${src}")`,
         }}
       />
     );
