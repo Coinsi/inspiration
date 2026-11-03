@@ -1130,3 +1130,28 @@
     padding: 8px 6px;
   }
 }
+.conversation-generation-brief {
+  margin: 10px 0 16px;
+  color: hsl(var(--muted));
+  font-size: 13px;
+  line-height: 1.65;
+}
+.conversation-generation-brief > summary {
+  width: fit-content;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.conversation-generation-brief[open] {
+  border-left: 2px solid hsl(var(--border));
+  padding-left: 14px;
+}
+.conversation-generation-brief p {
+  margin: 8px 0;
+}
+.conversation-generation-brief .conversation-generation-prompt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow-y: auto;
+  color: hsl(var(--fg));
+}

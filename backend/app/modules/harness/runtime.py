@@ -82,6 +82,13 @@ def prepare(db, ticket):
         return None
     run, task, attempt = locked
     ctx = service.execution_context(db, run)
+    from app.modules.harness import generation_context
+
+    compile_generation = (
+        generation_context.enabled(run, task)
+        and not task.state.get("generation_brief")
+        and not task.state.get("pending_action")
+    )
     if task.state.get("validation_finish"):
         attempt.operation = {"phase": "validate", "purpose": "finish"}
         return {"validation_finish": True}
@@ -91,7 +98,14 @@ def prepare(db, ticket):
     from app.modules.harness.context import build_context
     from app.modules.harness.resources import summary as resource_summary
 
+    generation_packet = (
+        generation_context.packet(db, ctx, run, task) if compile_generation else None
+    )
     refs = task.specification.get("references") or run.context.get("references", [])
+    if generation_packet:
+        refs = [c["reference"] for c in generation_packet["reference_candidates"]]
+    elif generation_context.enabled(run, task) and task.state.get("generation_brief"):
+        refs = task.state["generation_brief"]["references"]
     related = {str(task.id), *task.state.get("replaces", [])}
     replanning = bool(task.state.get("replaces"))
     ancestor = db.get(ProductionTask, task.parent_id) if task.parent_id else None
@@ -214,7 +228,7 @@ def prepare(db, ticket):
     modalities = (
         input_contract(run.engine) if task.kind == "agent" else InputCapabilities().model_dump()
     )
-    if run.engine == "cloud_llm" and task.kind == "agent":
+    if run.engine == "cloud_llm" and (task.kind == "agent" or compile_generation):
         resolved = resolve_cloud_input(
             db, ctx, run.model_provider, preferred_profile=run.context.get("kernel_profile")
         )
@@ -242,10 +256,22 @@ def prepare(db, ticket):
         run.context.get("current_attachments", []),
         available=[item["reference"] for item in bundle["references"]],
     )
+    if generation_packet:
+        current = (
+            [
+                c["reference"]
+                for c in generation_packet["reference_candidates"]
+                if c["media_type"] == "image"
+            ][: min(4, modalities.get("max_images", 0))]
+            if "image" in modalities.get("modalities", [])
+            else []
+        )
     return {
         "engine": run.engine,
         "config": config,
-        "packet": bound_request(packet, kernel.SYSTEM),
+        "packet": generation_packet or bound_request(packet, kernel.SYSTEM),
+        "generation_preparation": bool(generation_packet),
+        "generation_brief": task.state.get("generation_brief"),
         "media": [],
         "current_references": current,
         "inspection": task.state.get("inspection"),
@@ -296,6 +322,19 @@ def apply_action(db, ticket, action):
         service.finish_attempt(db, ticket, status="queued", state=state)
         return
     state.pop("pending_action", None)
+    from app.modules.harness import generation_context
+
+    receipt_only = (
+        isinstance(action, schemas.ToolAction)
+        and action.tool == "media.resume_receipt"
+        and task.state.get("authorized_receipt_job_id")
+        and action.arguments == {"job_id": task.state["authorized_receipt_job_id"]}
+    )
+    if generation_context.enabled(run, task) and not receipt_only:
+        brief = generation_context.freeze(db, ctx, run, task, action)
+        if brief:
+            state["generation_brief"] = brief
+            task.state = copy.deepcopy(state)
     if isinstance(action, schemas.ToolAction):
         fingerprint = hashlib.sha256(
             json.dumps(action.model_dump(mode="json"), sort_keys=True).encode()
@@ -597,12 +636,14 @@ def execute(ticket, sessions=None):
 
     heartbeat_thread = threading.Thread(target=heartbeat, daemon=True, name="production-lease")
     heartbeat_thread.start()
+    preparing_generation = False
     try:
         with sessions() as db:
             prepared = prepare(db, ticket)
             db.commit()
         if prepared is None:
             return
+        preparing_generation = bool(prepared.get("generation_preparation"))
         if prepared.get("validation_finish"):
             from app.modules.harness.validation_stage import execute_finish_validation
 
@@ -615,7 +656,15 @@ def execute(ticket, sessions=None):
             return
         if prepared["pending_action"]:
             action = kernel.ACTION.validate_python(prepared["pending_action"])
-        elif prepared["kind"] == "tool":
+        elif prepared.get("generation_brief"):
+            brief = prepared["generation_brief"]
+            action = schemas.ToolAction(
+                kind="tool",
+                tool="media.generate",
+                arguments=brief["arguments"],
+                message=brief["summary"],
+            )
+        elif prepared["kind"] == "tool" and not prepared.get("generation_preparation"):
             spec = prepared["specification"]
             action = schemas.ToolAction(kind="tool", tool=spec["tool"], arguments=spec["arguments"])
         else:
@@ -661,9 +710,19 @@ def execute(ticket, sessions=None):
             from app.modules.harness.live_progress import writer
 
             with progress(writer(sessions, ticket)):
-                action, usage = kernel.decide_with_usage(
-                    prepared["engine"], prepared["config"], prepared["packet"], media
-                )
+                if prepared.get("generation_preparation"):
+                    from app.modules.harness.generation_context import decide
+
+                    action, usage = decide(
+                        prepared["config"],
+                        prepared["packet"],
+                        prepared["specification"]["arguments"],
+                        media,
+                    )
+                else:
+                    action, usage = kernel.decide_with_usage(
+                        prepared["engine"], prepared["config"], prepared["packet"], media
+                    )
             with sessions() as db:
                 run = db.scalar(
                     select(ProductionRun)
@@ -672,6 +731,7 @@ def execute(ticket, sessions=None):
                 )
                 resources.settle_model(run, ticket, usage)
                 db.commit()
+        preparing_generation = False
         with sessions() as db:
             apply_action(db, ticket, action)
             from app.modules.conversation.production import publish
@@ -685,8 +745,12 @@ def execute(ticket, sessions=None):
             "code": exc.code if isinstance(exc, AppError) else "EXECUTION_ERROR",
             "message": exc.message
             if isinstance(exc, (Conflict, Forbidden, QuotaExceeded, CapabilityUnsupported))
-            else "执行未完成，请检查任务记录和服务状态",
-            "retryable": isinstance(exc, Conflict),
+            else (
+                "没能整理本次创作要求，尚未提交生成。请检查文字模型后重试。"
+                if preparing_generation
+                else "执行未完成，请检查任务记录和服务状态"
+            ),
+            "retryable": isinstance(exc, Conflict) or preparing_generation,
         }
         with sessions() as db:
             service.finish_attempt(db, ticket, status="failed", error=error)

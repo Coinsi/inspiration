@@ -293,11 +293,16 @@ def start(db, ctx, conversation, message, data, history):
                 ],
             ]
             plan, policy, quote = None, schemas.Policy(), None
+            from app.modules.harness.generation_context import needed as needs_generation_context
+
+            contextual_media = bool(
+                data.media
+                and data.mode != "test"
+                and needs_generation_context(history, data.content)
+            )
             if data.media:
                 plan, policy, quote = _direct_plan(db, ctx, conversation, data)
-                # Direct generation uses only the references explicitly selected
-                # for this request; prior history does not silently alter input.
-                references = [
+                explicit = [
                     {
                         "kind": ref.source_type,
                         "id": str(ref.source_id),
@@ -305,6 +310,19 @@ def start(db, ctx, conversation, message, data, history):
                         "required": True,
                     }
                     for ref in data.media.references
+                ]
+                explicit_keys = {(ref["kind"], ref["id"]) for ref in explicit}
+                references = [
+                    *explicit,
+                    *(
+                        [
+                            ref
+                            for ref in references
+                            if (ref["kind"], ref["id"]) not in explicit_keys
+                        ][: 12 - len(explicit)]
+                        if contextual_media
+                        else []
+                    ),
                 ]
             value = service.create(
                 db,
@@ -333,6 +351,7 @@ def start(db, ctx, conversation, message, data, history):
                 "history_reference_omissions": omitted,
                 "current_attachments": copy.deepcopy(history.get("current_attachments", [])),
                 "direct_request": bool(data.media),
+                "generation_context_version": 1 if contextual_media else None,
             }
             if data.media:
                 run.context = {**run.context, "estimate": quote}
@@ -459,21 +478,36 @@ def _media_progress(db, run, rows, outputs):
             if job and job.project_id == run.project_id and job.created_by == run.created_by:
                 owned.append(job)
         for job in owned:
-            candidates.append(project(
-                job.request_type, job=job, task=task, run=run,
-                completed_outputs=sum(o.get("job_id") == str(job.id) for o in outputs),
-            ))
+            candidates.append(
+                project(
+                    job.request_type,
+                    job=job,
+                    task=task,
+                    run=run,
+                    completed_outputs=sum(o.get("job_id") == str(job.id) for o in outputs),
+                )
+            )
         if not owned and task.specification.get("tool") == "media.generate":
-            candidates.append(project(
-                task.specification.get("arguments", {}).get("request_type"), task=task, run=run,
-            ))
+            candidates.append(
+                project(
+                    task.specification.get("arguments", {}).get("request_type"),
+                    task=task,
+                    run=run,
+                )
+            )
     candidates = [value for value in candidates if value]
     if not candidates:
         return None
     # Surface the earliest unfinished media operation while retaining already
     # readable outputs from independent jobs in the same run.
-    order = {"generating": 0, "materializing": 1, "queued": 2,
-             "failed": 3, "stopped": 4, "completed": 5}
+    order = {
+        "generating": 0,
+        "materializing": 1,
+        "queued": 2,
+        "failed": 3,
+        "stopped": 4,
+        "completed": 5,
+    }
     result = min(candidates, key=lambda value: (order[value["phase"]], value["started_at"] or ""))
     return {**result, "completed_outputs": len(outputs)}
 
@@ -608,6 +642,14 @@ def _project(db, message, run):
         **(message.context or {}),
         "outputs": outputs,
         "media_progress": media_progress,
+        "generation_brief": next(
+            (
+                {k: v for k, v in t.state["generation_brief"].items() if k != "arguments"}
+                for t in rows
+                if t.state.get("generation_brief")
+            ),
+            None,
+        ),
         "ui_blocks": _ui_blocks(db, rows),
         "production": {
             **(message.context or {}).get("production", {}),

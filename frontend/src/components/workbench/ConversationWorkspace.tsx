@@ -101,6 +101,7 @@ type Message = {
   created_at: string;
   context: {
     media_progress?: MediaProgress | null;
+    generation_brief?: { prompt: string; summary: string; references: { kind: string; id: string }[] } | null;
     ui_blocks?: UIBlock[];
     mode?: string;
     scope?: Target[];
@@ -478,7 +479,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     mutationFn: async (text: string) => {
       const body = {
         content: text.trim(),
-        model_provider: mode === "text" ? selectedProvider : null,
+        model_provider: selectedProvider || null,
         mode: "standard",
         scope: mode === "text" ? targets : [],
         skills,
@@ -1085,6 +1086,12 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               )}
               {m.role === "assistant" && (
                 <>
+                  {m.context.generation_brief && <details className="conversation-generation-brief">
+                    <summary>本次生成依据</summary>
+                    {m.context.generation_brief.summary && <p>{m.context.generation_brief.summary}</p>}
+                    <p className="conversation-generation-prompt">{m.context.generation_brief.prompt}</p>
+                    {!!m.context.generation_brief.references.length && <small>使用了 {m.context.generation_brief.references.length} 项参考素材</small>}
+                  </details>}
                   {m.execution_kind === "production" && m.task_id && m.context.production?.is_current !== false ? (
                     <ProductionTask compact projectId={projectId} runId={m.task_id} onUpdated={() => void refresh()}
                       hasMediaProgress={!!m.context.media_progress && ["queued", "generating", "materializing"].includes(m.context.media_progress.phase)}

@@ -136,12 +136,30 @@ def history_snapshot(messages):
     for m in reversed(messages):
         content = m.content or m.error or ""
         ui = (m.context or {}).get("ui_blocks", [])
-        if not content and not ui:
+        if (
+            not content
+            and not ui
+            and not any(
+                (m.context or {}).get(k)
+                for k in ("outputs", "attachments", "references", "generation_brief")
+            )
+        ):
             continue
         ui_text = json.dumps(ui, ensure_ascii=False) if ui else ""
         if len(content) + len(ui_text) > budget:
             break
-        item = {"role": m.role, "content": content, "status": m.status}
+        item = {
+            "id": str(m.id),
+            "ordinal": m.ordinal,
+            "role": m.role,
+            "content": content,
+            "status": m.status,
+        }
+        brief = (m.context or {}).get("generation_brief")
+        if brief and m.role == "assistant":
+            item["generation_brief"] = {
+                k: brief.get(k) for k in ("prompt", "summary", "references")
+            }
         if ui:
             item["ui_blocks"] = ui
         if (m.context or {}).get("outputs"):

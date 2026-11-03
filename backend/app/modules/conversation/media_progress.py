@@ -12,6 +12,13 @@ def timestamp(value):
 def project(kind, *, job=None, task=None, run=None, completed_outputs=0):
     if kind not in {"image", "video", "audio"}:
         return None
+    if job is None and (
+        (task is not None and task.status in {"waiting_input", "waiting_review"})
+        or (run is not None and run.status == "paused")
+    ):
+        # No generation has been submitted: the conversational question/pause
+        # is the actual state, not an indefinitely spinning image placeholder.
+        return None
     label = {"image": "图片", "video": "视频", "audio": "音频"}[kind]
     phase = "queued"
     if job is not None:
@@ -46,6 +53,11 @@ def project(kind, *, job=None, task=None, run=None, completed_outputs=0):
         "failed": ("生成未完成", "本次生成遇到问题，请查看错误信息后处理。"),
         "stopped": ("已停止后续制作", "已提交的生成可能仍在执行，已有成果会保留。"),
     }[phase]
+    if phase == "queued" and job is None and task is not None and run is not None:
+        from app.modules.harness.generation_context import enabled
+
+        if enabled(run, task) and not task.state.get("generation_brief"):
+            title, message = "正在整理创作要求", "结合前面的讨论和相关参考，准备本次生成。"
     sources = [item for item in (run, task, job) if item is not None]
     # started_at is the durable request/task creation time, never a guessed
     # upstream start time; updated_at changes only with persisted state.

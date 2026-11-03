@@ -29,7 +29,7 @@ const attachment=(id,title)=>({id,title,filename:title,kind:'image',status:'read
 const history=attachment('history-file','角色参考.webp'),originalFile=attachment('original-file','原始构图.webp');
 const originalReference={id:'original-reference',title:'原始生成图',source_type:'generation',kind:'image',blob_hash:'image',role:'reference'};
 const message=(id,role,content,context={},extra={})=>({id,role,content,context,ordinal:role==='user'?1:2,status:'completed',created_at:timestamp,progress:[],...extra});
-const completedAnswer=message('answer','assistant','这是雨夜开场的画面。',{media:{request_type:'image'},outputs:[{id:'result-image',type:'image',blob_hash:'image'}]},{execution_kind:'generation',task_id:'job-image'});
+const completedAnswer=message('answer','assistant','这是雨夜开场的画面。',{generation_brief:{prompt:'沿用黑衣女主和水彩风格，雨夜开场，16:9构图，无文字。',summary:'沿用已讨论的人物和画风。',references:[{kind:'attachment',id:'history-file'}]},media:{request_type:'image'},outputs:[{id:'result-image',type:'image',blob_hash:'image'}]},{execution_kind:'generation',task_id:'job-image'});
 let conversation={id:'chat',title:'雨夜开场',work_id:null,archived:false,updated_at:timestamp,has_older:false,messages:[message('user','user','请按角色参考生成雨夜开场。',{attachments:[history]}),completedAnswer]};
 let run={id:'run',goal:'生成雨夜镜头',engine:'mock',status:'running',revision:1,event_sequence:1,policy:{budget_points:0},tasks:[{id:'task',key:'shot',role:'generator',goal:'生成雨夜镜头',status:'waiting_job',state:{},result:{}}]};
 const retryInput={content:'按原始构图重新安排人物位置。',model_provider:null,scope:[],skills:[],attachments:[{attachment_id:originalFile.id,role:'reference'}],references:[],media:{provider:'image-model',request_type:'image',provider_params:{aspect_ratio:'16:9'},references:[{generation_id:originalReference.id,role:'reference'}]}};
@@ -76,6 +76,13 @@ try{
  const tray=page.locator('.conversation-compose .conversation-attachment-tray');
  const answer=page.locator('#conversation-message-answer');
  await answer.getByRole('button',{name:'讨论这张',exact:true}).waitFor();
+ const basis=answer.locator('.conversation-generation-brief');
+ assert.equal(await basis.getAttribute('open'),null);
+ await basis.locator('summary').click();
+ assert.equal(await basis.locator('.conversation-generation-prompt').innerText(),completedAnswer.context.generation_brief.prompt);
+ await basis.locator('.conversation-generation-prompt').scrollIntoViewIfNeeded();
+ await page.screenshot({path:resolve(out,'generation-context-expanded.png'),fullPage:true});
+ await basis.locator('summary').click();
  await composer.fill('这段草稿先保留。');
  await answer.getByRole('button',{name:'讨论这张',exact:true}).click();
  assert.equal(await composer.inputValue(),'这段草稿先保留。');
@@ -114,6 +121,7 @@ try{
  await page.getByText('正在发送图片创作要求…',{exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'发送消息',exact:true}).isDisabled(),true);
  assert.equal(sends.length,1);assert.equal(sends[0].media.request_type,'image');
+ assert.equal(sends[0].model_provider,'text-model','media preparation retains the selected discussion model');
  await page.screenshot({path:resolve(out,'sending-desktop.png'),fullPage:true});
  releaseSend();
  await page.getByRole('article',{name:'正在发送的消息',exact:true}).waitFor({state:'detached'});
