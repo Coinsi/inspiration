@@ -15,20 +15,29 @@ flock -n 9 || { echo 'Another deployment is running'; exit 1; }
 work=$(mktemp -d "$root/releases/.incoming-XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 cat > "$work/bundle.tgz"
-# Reject extra paths, links and duplicate members before extraction.
-python3 - "$work/bundle.tgz" <<'PY'
-import sys, tarfile
-with tarfile.open(sys.argv[1], 'r:gz') as archive:
-    members = archive.getmembers()
-    expected = {'compose.yml', 'nginx.conf', 'deploy.sh', 'images.tar.gz'}
-    if len(members) != 4 or {m.name for m in members} != expected or not all(m.isfile() for m in members):
-        raise SystemExit('Invalid release archive')
-PY
-tar -xzf "$work/bundle.tgz" -C "$work" --no-same-owner --no-same-permissions
+# Validate exact members and pinned repositories before touching a running release.
+python3 "$root/release_manifest.py" unpack "$work/bundle.tgz" "$work" "$release"
 rm "$work/bundle.tgz"
+if [[ -f "$work/release-images.env" ]]; then
+    set -a
+    source "$work/release-images.env"
+    set +a
+    export DOCKER_CONFIG="$work/docker-auth"
+    # Pull while the previous version still serves traffic. Retries only download layers.
+    for image in "$API_IMAGE" "$WEB_IMAGE"; do
+        pulled=false
+        for attempt in 1 2 3; do
+            if docker pull "$image"; then pulled=true; break; fi
+            sleep "$((attempt * 2))"
+        done
+        "$pulled" || exit 1
+    done
+    rm -rf -- "$work/docker-auth"
+    unset DOCKER_CONFIG
+fi
 target="$root/releases/$release"
 mkdir -p "$target"
-for file in compose.yml nginx.conf deploy.sh images.tar.gz; do
-    mv "$work/$file" "$target/$file"
+for file in compose.yml nginx.conf deploy.sh images.tar.gz release.json release-images.env; do
+    if [[ -f "$work/$file" ]]; then mv "$work/$file" "$target/$file"; fi
 done
 bash "$target/deploy.sh" "$release"

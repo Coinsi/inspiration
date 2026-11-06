@@ -25,6 +25,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
       - run: pip install -e './backend[dev]'
       - name: Prepare vector extension for integration tests
         env:
@@ -47,3 +49,11 @@ jobs:
       - run: npm run build
         working-directory: frontend
       - run: node --test frontend/tests/*.test.mjs
+      - name: Package tested frontend (large media stays in its own image layer)
+        run: tar --exclude='./media' -czf frontend-dist.tgz -C frontend/dist .
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: frontend-dist.tgz
+          retention-days: 7

@@ -1,0 +1,7 @@
+*
+!dist/
+!dist/**
+!public/
+!public/media/
+!public/media/**
+!nginx.conf

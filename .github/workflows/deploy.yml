@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  packages: write
 
 concurrency:
   group: production-deployment
@@ -25,27 +27,76 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+      - name: Identify release
+        run: |
+          echo "RELEASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "IMAGE_ROOT=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'workflow_run'
+        with:
+          name: frontend-dist-${{ github.event.workflow_run.head_sha }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: prepared-frontend
+      - name: Restore tested frontend
+        if: github.event_name == 'workflow_run'
+        run: |
+          mkdir -p frontend/dist
+          tar -xzf prepared-frontend/frontend-dist.tgz -C frontend/dist
+      - uses: actions/setup-node@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend for manual release
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          rm -rf dist/media
       - uses: docker/setup-buildx-action@v3
-      - name: Build pinned MinIO source
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish API
+        id: api
         uses: docker/build-push-action@v6
         with:
-          context: deploy/production/minio
-          load: true
-          tags: inspiration-minio:source-7aac2a2c5b7c
-          cache-from: type=gha,scope=inspiration-minio
-          cache-to: type=gha,mode=max,scope=inspiration-minio
-      - name: Build release images
+          context: backend
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE_ROOT }}-api:${{ env.RELEASE }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=inspiration-api
+          cache-to: type=gha,mode=max,scope=inspiration-api
+      - name: Package and publish tested frontend
+        id: web
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile.release
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE_ROOT }}-web:${{ env.RELEASE }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=inspiration-web
+          cache-to: type=gha,mode=max,scope=inspiration-web
+      - name: Prepare small release manifest
+        env:
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          RELEASE=$(git rev-parse HEAD)
-          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
-          docker build -t "inspiration-api:$RELEASE" backend
-          docker build -t "inspiration-web:$RELEASE" frontend
-          mkdir bundle
-          docker save "inspiration-api:$RELEASE" "inspiration-web:$RELEASE" inspiration-minio:source-7aac2a2c5b7c | gzip -1 > bundle/images.tar.gz
-          cp deploy/production/{compose.yml,nginx.conf,deploy.sh} bundle/
-          tar -czf release.tgz -C bundle compose.yml nginx.conf deploy.sh images.tar.gz
-      - name: Transfer and deploy
+          umask 077
+          python deploy/production/release_manifest.py package
+          echo "Manifest bundle: $(wc -c < release.tgz) bytes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Pull changed layers and deploy
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
@@ -57,8 +108,12 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          trap 'rm -f ~/.ssh/deploy_key' EXIT
+          trap 'rm -f ~/.ssh/deploy_key release.tgz' EXIT
           ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            -o ServerAliveInterval=20 -o ServerAliveCountMax=30 \
+            -o KexAlgorithms=ecdh-sha2-nistp256 -c aes128-gcm@openssh.com \
+            -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=30 \
             "root@$DEPLOY_HOST" "deploy $RELEASE" < release.tgz
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f release.tgz ~/.ssh/deploy_key

@@ -7,7 +7,7 @@ x-logging: &logging
     max-file: '3'
 
 x-app: &app
-  image: inspiration-api:${RELEASE:?RELEASE is required}
+  image: ${API_IMAGE:-inspiration-api:${RELEASE:?RELEASE is required}}
   env_file: /opt/inspiration/runtime.env
   environment:
     DATABASE_URL: postgresql+psycopg://inspiration:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/inspiration
@@ -98,7 +98,7 @@ services:
       minio: {condition: service_healthy}
 
   web:
-    image: inspiration-web:${RELEASE:?RELEASE is required}
+    image: ${WEB_IMAGE:-inspiration-web:${RELEASE:?RELEASE is required}}
     # OpenResty owns the public 80/443 ports. Do not expose this backend publicly.
     ports: ['${WEB_BIND:-127.0.0.1}:${WEB_PORT:-18080}:80']
     volumes:

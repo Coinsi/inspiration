@@ -2,17 +2,22 @@
 
 独立生产栈 `inspiration-production`，不读取本机开发 `.env`，不启动 MediaCMS、WISE 或旧推理服务。原文件使用 MinIO 对象存储，API 和单并发 Celery worker 共用持久暂存/导出目录；PostgreSQL、Redis AOF、MinIO 各有独立卷。项目默认只发布 `127.0.0.1:18080`，公网 80/443 由 1Panel 的 OpenResty 管理；MinIO 的 9000/9001 仅监听宿主回环地址。
 
-MinIO 由 GitHub 从官方源码固定提交 `7aac2a2c5b7c882e68c1ce017d8256be2feea27f` 构建，不拉取已失效的旧 MinIO 镜像。构建层通过 GitHub Actions 缓存，普通业务更新复用编译结果；源码和许可证来源记录在镜像标签及 `/usr/share/doc/minio/LICENSE`。MinIO 内存上限 512MiB，Go 软内存目标 384MiB；需按实际上传负载观察。
+MinIO 由 GitHub 从官方源码固定提交 `7aac2a2c5b7c882e68c1ce017d8256be2feea27f` 构建，不拉取已失效的旧 MinIO 镜像。基础镜像只在首次安装或明确升级中间件时构建，普通业务更新不构建、不传输它；源码和许可证来源记录在镜像标签及 `/usr/share/doc/minio/LICENSE`。MinIO 内存上限 512MiB，Go 软内存目标 384MiB；需按实际上传负载观察。
 
 ## 首次准备
 
 1. 服务器安装 Docker Compose、Python 3、flock，保留至少 3 GiB 空闲空间。
 2. 将 `runtime.env.example` 按实际情况生成到 `/opt/inspiration/runtime.env`，权限 `600`。生产密钥必须随机生成并单独备份，密码使用十六进制避免数据库 URL 编码问题。
-3. 将 `receive-release.sh` 安装为 `/opt/inspiration/receive-release.sh`。为 GitHub 单独生成 SSH 密钥；服务器 `authorized_keys` 中使用 `restrict,command="/opt/inspiration/receive-release.sh"` 限制此公钥，不能复用个人登录私钥。
+3. 将 `receive-release.sh`、`release_manifest.py` 安装到 `/opt/inspiration/`（root 所有，权限分别 700、600）。新接收器兼容旧整包协议，必须先安装再启用新工作流。为 GitHub 单独生成 SSH 密钥；服务器 `authorized_keys` 中使用 `restrict,command="/opt/inspiration/receive-release.sh"` 限制此公钥，不能复用个人登录私钥。
 4. 配置 GitHub `production` 环境的 Secrets：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`。known_hosts 应来自已核对的服务器主机密钥，不能在流水线中盲目信任新密钥。
-5. 手动运行 `Deploy production` 首次部署，或推送到 main 等待 `Regression checks` 全部通过后自动部署。手动运行用于首次部署与排错，不会等待另一条测试流水线。
+5. 首次安装准备固定 MinIO 镜像：`docker build -t inspiration-minio:source-7aac2a2c5b7c deploy/production/minio`（可在独立机器构建后传入）。服务器须可访问 GHCR 的 HTTPS 镜像下载入口。
+6. 手动运行 `Deploy production` 首次部署，或推送到 main 等待 `Regression checks` 全部通过后自动部署。手动运行用于首次部署与排错，不会等待另一条测试流水线。
 
-GitHub 构建主 API、前端和 MinIO 三个镜像，将镜像与生产 Compose、Nginx 配置一并经 SSH 流传到服务器。无需服务器访问私有镜像仓库或在 4GB 内存中编译项目。只有 main 的 push 测试成功才触发自动发布；PR 测试不会部署。工作流手动运行应选择 main。
+GitHub 构建 API、前端镜像并推送 GHCR，两个镜像都有持久构建缓存。自动发布直接使用同一次成功回归检查的前端产物，手动发布才重新编译前端。`public/media` 在独立镜像层，页面修改不重复传输大视频。服务器接收小型发布清单，按固定 SHA256 摘要拉取缺失镜像层，不在生产机编译。只有 main 的 push 检查成功才自动部署，PR 不部署。
+
+镜像保持私有。仓库范围、当次运行有效的 GITHUB_TOKEN 仅经已有加密 SSH 传入临时目录；拉取完成立即删除临时 Docker 配置，异常退出也清理，不写入长期凭据或发布目录。`release.tgz` 含短期凭据，禁止上传为 Actions artifact。接收器校验提交、仓库白名单和固定摘要，并拒绝路径穿越、链接及重复文件。
+
+首次发布需要下载基础层，仍可能较慢；后续才享受缓存和增量传输收益。应分别观察构建、推送、拉取和切换阶段耗时。
 
 ## 运行与更新
 
@@ -34,7 +39,9 @@ GitHub 构建主 API、前端和 MinIO 三个镜像，将镜像与生产 Compose
 
 首次安装不创建 demo，也不自动创建正式用户。公网账号密码注册已开放，注册接口配置请求体大小限制与访问限流，应用层另有限流；新注册用户为普通账户。可执行 `python -m app.modules.website.admin grant 用户名` 为指定账户授予平台管理权限。邮箱验证和邮件找回密码尚未接通。
 
-每次升级先加载新镜像，等待基础服务健康，再停止应用服务并创建数据库备份，然后运行数据库迁移、启动新应用并等待就绪。升级期间有短暂停机，正在运行的任务应提前结束；120 秒优雅退出不能保证任意长任务完成。迁移或健康检查失败会标记 GitHub 部署失败，不自动恢复数据库，也不宣称已经回滚。检查 `/opt/inspiration/backups`、容器日志和数据库版本后再决定恢复方式。
+新镜像先在旧版本仍服务时拉取。镜像摘要未变时复用容器，纯前端更新不停止 API/worker、不执行备份或迁移。后端更新优雅停止 worker 并备份数据库。迁移文件指纹变化或首次从旧协议升级时，执行停写、备份和迁移流程。120 秒优雅退出不能保证任意长任务完成，后端更新应选任务空闲期。
+
+未改变数据库结构的更新若健康检查失败，会尝试恢复上一版本应用；发生结构迁移时不自动回滚数据库。只有健康检查成功才更新 current-release。检查 `/opt/inspiration/backups`、日志和数据库版本后再决定数据库恢复方式。
 
 更新不会删除数据库、Redis、MinIO、工作目录数据卷，也不会重新初始化密钥。仅清理较旧的应用镜像以及超过七天的升级前数据库备份。数据库备份不包含素材；对象存储与环境密钥需另做异地备份。不要执行 `down -v` 或 `docker system prune --volumes`。
 

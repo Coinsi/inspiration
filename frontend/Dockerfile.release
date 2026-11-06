@@ -1,0 +1,6 @@
+# CI supplies the already tested dist, without public/media.
+FROM nginx:alpine
+COPY public/media /usr/share/nginx/html/media
+COPY dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
