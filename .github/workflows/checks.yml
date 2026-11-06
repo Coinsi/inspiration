@@ -5,6 +5,10 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -33,8 +37,9 @@ jobs:
           PGPASSWORD: test
         run: psql -h localhost -U test -d inspiration_test -c 'CREATE EXTENSION IF NOT EXISTS vector'
       - run: python -m unittest discover -s tests -v
-      - run: pytest -q
-        working-directory: backend
+        if: matrix.shard == 0
+      - name: Run isolated backend test shard
+        run: python deploy/ci/backend_shard.py --index ${{ matrix.shard }} --count 4
   frontend:
     runs-on: ubuntu-latest
     steps:

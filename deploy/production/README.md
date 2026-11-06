@@ -13,6 +13,8 @@ MinIO 由 GitHub 从官方源码固定提交 `7aac2a2c5b7c882e68c1ce017d8256be2f
 5. 首次安装准备固定 MinIO 镜像：`docker build -t inspiration-minio:source-7aac2a2c5b7c deploy/production/minio`（可在独立机器构建后传入）。服务器须可访问 GHCR 的 HTTPS 镜像下载入口。
 6. 手动运行 `Deploy production` 首次部署，或推送到 main 等待 `Regression checks` 全部通过后自动部署。手动运行用于首次部署与排错，不会等待另一条测试流水线。
 
+后端全量回归按完整测试文件分成四组并行，每组有独立 PostgreSQL，所有组通过后才发布；不在共享数据库上并发执行。分组保持文件覆盖完整，保留慢测试耗时供后续调整。
+
 GitHub 构建 API、前端镜像并推送 GHCR，两个镜像都有持久构建缓存。自动发布直接使用同一次成功回归检查的前端产物，手动发布才重新编译前端。`public/media` 在独立镜像层，页面修改不重复传输大视频。服务器接收小型发布清单，按固定 SHA256 摘要拉取缺失镜像层，不在生产机编译。只有 main 的 push 检查成功才自动部署，PR 不部署。
 
 镜像保持私有。仓库范围、当次运行有效的 GITHUB_TOKEN 仅经已有加密 SSH 传入临时目录；拉取完成立即删除临时 Docker 配置，异常退出也清理，不写入长期凭据或发布目录。`release.tgz` 含短期凭据，禁止上传为 Actions artifact。接收器校验提交、仓库白名单和固定摘要，并拒绝路径穿越、链接及重复文件。
