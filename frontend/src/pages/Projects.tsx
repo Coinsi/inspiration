@@ -23,7 +23,6 @@ import { StudioScenes } from "@/components/StudioScenes";
 import { ProjectTrashDialog } from "@/components/ProjectTrashDialog";
 import { useConfirm } from "@/components/ui/confirm";
 import { ProjectDialog } from "@/components/ProjectDialog";
-import { CreativeLaunch } from "@/components/CreativeLaunch";
 
 export default function Projects() {
   const qc = useQueryClient();
@@ -41,6 +40,7 @@ export default function Projects() {
   } = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.get<Project[]>("/projects"),
+    staleTime: 30_000,
   });
 
   const [open, setOpen] = useState(false);
@@ -192,10 +192,6 @@ export default function Projects() {
                 </>
               )}
             </h1>
-            <CreativeLaunch
-              projects={isError ? undefined : projects}
-              onCreate={() => setOpen(true)}
-            />
           </section>
           <section id="project-list" className="space-y-6 scroll-mt-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -203,11 +199,6 @@ export default function Projects() {
                 <h2 className="text-xl font-semibold tracking-tight">
                   {zh ? "继续你的创作" : "Pick up your story"}
                 </h2>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {zh
-                    ? "打开一个项目，继续整理故事、打磨镜头与制作成片。"
-                    : "Open a project to develop your story, shape shots and create a film."}
-                </p>
               </div>
               <Button onClick={() => setOpen(true)} aria-expanded={open}>
                 <Plus className="h-4 w-4 mr-1" /> {tr("proj.new")}
@@ -234,15 +225,15 @@ export default function Projects() {
               />
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+            <div className="home-project-toolbar flex flex-wrap items-center justify-between gap-3 border-b pb-4">
               <h2 className="text-sm font-semibold">
                 {tr("proj.title")}{" "}
                 <span className="ml-2 font-normal text-faint">
                   {!isError && projects ? projects.length : "—"}
                 </span>
               </h2>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="ghost" onClick={() => setTrashOpen(true)}>
+              <div className="home-project-filters flex flex-wrap gap-2">
+                <Button className="home-project-trash" variant="ghost" onClick={() => setTrashOpen(true)}>
                   <Trash2 size={15} />
                   {zh ? "回收站" : "Trash"}
                 </Button>
@@ -254,13 +245,13 @@ export default function Projects() {
                   placeholder={
                     zh ? "搜索项目名称或编号" : "Search name or code"
                   }
-                  className="w-full sm:w-64"
+                  className="home-project-search w-full sm:w-64"
                 />
                 <StudioSelect
                   aria-label={zh ? "项目排序" : "Sort projects"}
                   value={sort}
                   onValueChange={(selectedValue) => setSort(selectedValue)}
-                  className="rounded-lg border bg-card px-3 py-2 text-xs"
+                  className="home-project-sort rounded-lg border bg-card px-3 py-2 text-xs"
                 >
                   <option value="newest">
                     {zh ? "最新创建" : "Newest created"}
@@ -283,9 +274,7 @@ export default function Projects() {
                 </Button>
               </div>
             ) : isLoading ? (
-              <p className="text-muted-foreground text-sm">
-                {tr("common.loading")}
-              </p>
+              <div className="workspace-loading-grid" aria-label={tr("common.loading")} aria-busy="true">{[0, 1, 2].map(i => <div key={i} />)}</div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {visible.map((p) => (
@@ -325,7 +314,7 @@ export default function Projects() {
                               : "Develop your story and bring your references together.")}
                         </p>
                         <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3 text-[11px] text-faint">
-                          <span>{zh ? "进入创作" : "Open project"}</span>
+                          <span className="font-medium text-foreground">{zh ? "进入创作 →" : "Open project →"}</span>
                           <span>
                             {new Date(p.created_at).toLocaleDateString(
                               zh ? "zh-CN" : "en-US",

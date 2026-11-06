@@ -378,6 +378,14 @@ def upload(
     return service.begin_upload(db, ctx, data)
 
 
+@router.get("/uploads")
+def pending_uploads(
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service.pending_uploads(db, ctx.project.id)
+
+
 @router.get("/versions/{version_id}")
 def version(
     version_id: uuid.UUID,

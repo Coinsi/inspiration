@@ -41,7 +41,7 @@ def register_user(db: Session, data: schemas.RegisterIn) -> User:
     return user
 
 
-def login(db: Session, data: schemas.LoginIn) -> str:
+def authenticate(db: Session, data: schemas.LoginIn) -> User:
     if data.email is not None:
         # Legacy data can contain emails that differ only by case or whitespace.
         # Never choose an arbitrary account or use its password to disambiguate.
@@ -62,6 +62,11 @@ def login(db: Session, data: schemas.LoginIn) -> str:
         or not verify_password(data.password, user.password_hash)
     ):
         raise Unauthorized("邮箱或密码错误" if data.email is not None else "用户名或密码错误")
+    return user
+
+
+def login(db: Session, data: schemas.LoginIn) -> str:
+    user = authenticate(db, data)
     return create_access_token(str(user.id), {"ver": user.auth_version})
 
 

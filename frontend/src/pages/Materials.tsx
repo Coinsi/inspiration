@@ -39,6 +39,7 @@ import { MediaImage } from "@/components/MediaImage";
 import { MediaPreview } from "@/components/MediaPreview";
 import { MediaVideo } from "@/components/MediaVideo";
 import { LibraryUpload } from "@/components/LibraryUpload";
+import { PendingUploads } from "@/components/PendingUploads";
 import { LibrarySearch, type SegmentResult } from "@/components/LibrarySearch";
 import { LibraryProcessing } from "@/components/LibraryProcessing";
 import { LibraryReuse } from "@/components/LibraryReuse";
@@ -163,7 +164,8 @@ function Collection({ projectId }: { projectId: string }) {
       api.get<{ items: Material[]; total: number }>(
         `${base}/materials?${new URLSearchParams({ deleted: String(deleted), offset: String(page * 24), query, ...(kind ? { kind } : {}), ...(source ? { source } : {}) })}`,
       ),
-    refetchInterval: 5000,
+    refetchInterval: query => query.state.data?.items.some(item => ["uploading", "queued", "processing"].includes(item.status)) ? 5000 : 30_000,
+    staleTime: 5000,
   });
   useEffect(() => {
     if (list.data && page > 0 && page * 24 >= list.data.total)
@@ -196,6 +198,7 @@ function Collection({ projectId }: { projectId: string }) {
   const refresh = () => {
     for (const key of [
       "materials",
+      "pending-uploads",
       "material-attachment",
       "conversation-attachments",
       "saved-conversation-attachments",
@@ -274,6 +277,7 @@ function Collection({ projectId }: { projectId: string }) {
           )}
         </div>
       </header>
+      {!deleted && <PendingUploads projectId={projectId} canEdit={!!canEdit} onResume={resume => setUpload({ resume })} onChange={refresh} />}
       <div className="materials-navigation">
       <MaterialTabs projectId={projectId} compact />
       {!deleted && (
@@ -368,9 +372,9 @@ function Collection({ projectId }: { projectId: string }) {
               <Button onClick={() => list.refetch()}>重新加载</Button>
             </div>
           ) : list.isPending ? (
-            <p className="materials-empty" role="status">
-              正在整理素材…
-            </p>
+            <div className="materials-grid" aria-label="正在加载素材" aria-busy="true">
+              {Array.from({ length: 8 }, (_, i) => <div className="material-tile material-skeleton" key={i}><div className="material-thumb" /><div className="skeleton-line" /><div className="skeleton-line short" /></div>)}
+            </div>
           ) : !list.data.items.length ? (
             <div className="materials-empty">
               <ImageIcon size={28} />

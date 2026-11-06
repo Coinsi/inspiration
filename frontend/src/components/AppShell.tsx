@@ -25,6 +25,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { AccountMenu } from "@/components/AccountMenu";
+import { WorkspaceLoading } from "@/components/WorkspaceLoading";
 import { HeaderMenu, headerMenuItem } from "@/components/ui/header-menu";
 import { api, type Project } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -482,12 +483,7 @@ export default function AppShell() {
         >
           <Suspense
             fallback={
-              <div
-                role="status"
-                className="studio-page text-sm text-muted-foreground"
-              >
-                {lang === "zh" ? "正在打开工作区…" : "Opening workspace…"}
-              </div>
+              <WorkspaceLoading />
             }
           >
             <Outlet />

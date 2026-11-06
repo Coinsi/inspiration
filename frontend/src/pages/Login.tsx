@@ -19,6 +19,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { LoginBackground } from "@/components/LoginBackground";
+import { preloadEntry } from "@/lib/preload-entry";
 import { GoogleAuthButton } from "@/components/GoogleAuthButton";
 import { googleAuthError, safeAuthNext, startGoogleAuth, type AuthProviders } from "@/lib/google-auth";
 
@@ -219,6 +220,7 @@ export default function Login() {
                 <Mail size={17} />
                 <input
                   id="login-email"
+                  onFocus={() => preloadEntry(returnPath)}
                   type="email"
                   autoComplete="email"
                   maxLength={254}

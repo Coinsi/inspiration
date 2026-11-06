@@ -72,6 +72,21 @@ def version_out(v):
     return {**{key: getattr(v, key) for key in fields}, "chunk_size": CHUNK_SIZE}
 
 
+def pending_uploads(db, project_id):
+    rows = db.execute(
+        select(MediaVersion, LibraryMedia.name)
+        .join(LibraryMedia, LibraryMedia.id == MediaVersion.media_id)
+        .where(
+            LibraryMedia.project_id == project_id,
+            LibraryMedia.deleted_at.is_(None),
+            MediaVersion.status == "uploading",
+        )
+        .order_by(MediaVersion.created_at.desc())
+    )
+    # Independent of catalog filters and selected/current versions.
+    return [{**version_out(v), "name": name} for v, name in rows]
+
+
 def list_media(db, project_id, deleted=False):
     items = list(
         db.scalars(

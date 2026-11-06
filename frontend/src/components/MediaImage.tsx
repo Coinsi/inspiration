@@ -1,5 +1,5 @@
-import { ImageOff, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ImageOff } from "lucide-react";
+import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -40,11 +40,6 @@ function MediaImageContent({
   const [state, setState] = useState<"loading" | "loaded" | "error">(
     src ? "loading" : "error",
   );
-  useEffect(() => {
-    if (!src || state !== "loading") return;
-    const timer = window.setTimeout(() => setState("error"), 12000);
-    return () => window.clearTimeout(timer);
-  }, [src, state]);
   return (
     <div
       className={cn(
@@ -56,6 +51,8 @@ function MediaImageContent({
         <img
           src={src}
           alt={alt}
+          loading="lazy"
+          decoding="async"
           onLoad={(e) => {
             setState("loaded");
             onDimensions?.(
@@ -73,11 +70,11 @@ function MediaImageContent({
       {state !== "loaded" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-2 text-center text-muted-foreground">
           {state === "loading" ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="media-image-placeholder" aria-label={lang === "zh" ? "正在加载图片" : "Loading image"} />
           ) : (
             <ImageOff className="h-6 w-6" strokeWidth={1.5} />
           )}
-          <span className="text-xs">
+          <span className="text-xs" hidden={state === "loading"}>
             {state === "loading"
               ? lang === "zh"
                 ? "加载画面…"

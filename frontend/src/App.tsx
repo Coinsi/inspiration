@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 const AppShell = lazy(() => import("@/components/AppShell"));
 import { useAuth } from "@/lib/auth";
+import { WorkspaceLoading } from "@/components/WorkspaceLoading";
 const Login = lazy(() => import("@/pages/Login"));
 const GoogleAuthComplete = lazy(() => import("@/pages/GoogleAuthComplete"));
 const Projects = lazy(() => import("@/pages/Projects"));
@@ -42,7 +43,7 @@ const GeneratedLibrary = lazy(() => import("@/pages/GeneratedLibrary"));
 function Protected() {
   const { me, loading } = useAuth();
   const location = useLocation();
-  if (loading) return <div className="p-6 text-muted-foreground">加载中…</div>;
+  if (loading) return <WorkspaceLoading />;
   if (!me)
     return (
       <Navigate
@@ -55,7 +56,7 @@ function Protected() {
 
 export default function App() {
   return (
-    <Suspense fallback={<div className="p-8">正在加载…</div>}>
+    <Suspense fallback={<WorkspaceLoading />}>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/blog" element={<Blog />} />

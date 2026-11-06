@@ -50,12 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const acceptSession = useCallback(async (accessToken: string) => {
+  const acceptSession = useCallback(async (accessToken: string, session?: Me) => {
     setToken(accessToken);
     setMe(null);
     queryClient.clear();
     try {
-      const result = await api.get<Me>("/me");
+      const result = session ?? await api.get<Me>("/me");
       if (getToken() !== accessToken) throw new Error("Session changed while signing in");
       setMe(result);
       setLogoutError("");
@@ -79,14 +79,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [acceptSession]);
 
   async function login(email: string, password: string) {
-    const { access_token } = await api.post<{ access_token: string }>(
+    const { access_token, me: session } = await api.post<{ access_token: string; me?: Me }>(
       "/auth/login",
       {
         email: email.trim(),
         password,
       },
     );
-    await acceptSession(access_token);
+    await acceptSession(access_token, session);
+    // Start the landing data request without delaying sign-in or navigation.
+    void queryClient.prefetchQuery({
+      queryKey: ["projects"], queryFn: () => api.get("/projects"), staleTime: 30_000, retry: false,
+    });
   }
 
   async function logout() {

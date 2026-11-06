@@ -23,6 +23,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  options?: { signal?: AbortSignal },
 ): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -34,6 +35,7 @@ async function request<T>(
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: options?.signal,
   });
 
   if (!res.ok) {
@@ -61,7 +63,51 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
-export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+export type UploadOptions = {
+  signal?: AbortSignal;
+  onProgress: (fraction: number) => void;
+};
+
+/** Track bytes in flight and detect stalled connections, including response waits. */
+function progressUpload<T>(path: string, form: FormData, options: UploadOptions): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const token = getToken();
+    let timer: ReturnType<typeof setTimeout>;
+    let timedOut = false;
+    const abort = () => xhr.abort();
+    const cleanup = () => { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); };
+    const fail = (error: Error) => { cleanup(); reject(error); };
+    const watch = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { timedOut = true; xhr.abort(); }, 60_000);
+    };
+    xhr.open("POST", `/api/v1${path}`);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = e => { watch(); if (e.lengthComputable) options.onProgress(e.loaded / e.total); };
+    xhr.upload.onload = watch;
+    xhr.onload = () => {
+      cleanup();
+      let data;
+      try { data = JSON.parse(xhr.responseText); } catch { reject(new ApiError("INVALID_RESPONSE", "上传响应不完整，请继续上传以同步进度。")); return; }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        if (xhr.status === 401 && getToken() === token) clearToken();
+        reject(new ApiError(data?.error?.code || "ERROR", data?.error?.message || `上传失败（HTTP ${xhr.status}），请重试。`));
+      } else resolve(data as T);
+    };
+    xhr.onerror = () => fail(new TypeError("网络连接中断，请继续上传。"));
+    xhr.onabort = () => fail(timedOut
+      ? new ApiError("UPLOAD_TIMEOUT", "上传连接长时间没有响应，已保留进度，请继续上传。")
+      : new DOMException("Upload paused", "AbortError"));
+    if (options.signal?.aborted) { fail(new DOMException("Upload paused", "AbortError")); return; }
+    options.signal?.addEventListener("abort", abort, { once: true });
+    watch();
+    try { xhr.send(form); } catch (error) { fail(error as Error); }
+  });
+}
+
+export async function apiUpload<T>(path: string, form: FormData, options?: UploadOptions): Promise<T> {
+  if (options) return progressUpload<T>(path, form, options);
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -86,8 +132,8 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
 }
 
 export const api = {
-  get: <T>(p: string) => request<T>("GET", p),
-  post: <T>(p: string, b?: unknown) => request<T>("POST", p, b),
+  get: <T>(p: string, options?: { signal?: AbortSignal }) => request<T>("GET", p, undefined, options),
+  post: <T>(p: string, b?: unknown, options?: { signal?: AbortSignal }) => request<T>("POST", p, b, options),
   put: <T>(p: string, b?: unknown) => request<T>("PUT", p, b),
   patch: <T>(p: string, b?: unknown) => request<T>("PATCH", p, b),
   del: <T>(p: string) => request<T>("DELETE", p),

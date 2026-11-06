@@ -51,6 +51,8 @@ export function LibraryUpload({
     [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [inFlight, setInFlight] = useState(0);
+  const controller = useRef<AbortController | null>(null);
   const ended = !!version && version.status !== "uploading";
   const finished =
     !!version && ["queued", "processing", "ready"].includes(version.status);
@@ -107,6 +109,7 @@ export function LibraryUpload({
   useEffect(
     () => () => {
       pause.current = true;
+      controller.current?.abort();
     },
     [],
   );
@@ -116,6 +119,9 @@ export function LibraryUpload({
     running.current = true;
     setBusy(true);
     setError("");
+    setInFlight(0);
+    controller.current = new AbortController();
+    const controlRequest = () => ({ signal: AbortSignal.any([controller.current!.signal, AbortSignal.timeout(60_000)]) });
     let hasSession = !!version;
     try {
       const kind = fileMediaType(file.name);
@@ -139,8 +145,9 @@ export function LibraryUpload({
         );
       setMessage(zh ? "检查文件…" : "Checking file…");
       const fingerprint = await fileFingerprint(file);
+      if (pause.current) return;
       let current = version
-        ? await api.get<MediaVersion>(`${base}/versions/${version.id}`)
+        ? await api.get<MediaVersion>(`${base}/versions/${version.id}`, controlRequest())
         : undefined;
       if (pause.current) return;
       if (
@@ -166,7 +173,7 @@ export function LibraryUpload({
           fingerprint,
           media_id: mediaId,
           folder_id: folderId,
-        });
+        }, controlRequest());
         setVersion(current);
         hasSession = true;
         onChange();
@@ -214,15 +221,19 @@ export function LibraryUpload({
           ),
           "chunk",
         );
+        const bytes = Math.min(current.chunk_size, file.size - current.uploaded_bytes);
         current = await apiUpload<MediaVersion>(
           `${base}/versions/${current.id}/chunk?offset=${current.uploaded_bytes}`,
           form,
+          { signal: controller.current.signal, onProgress: fraction => setInFlight(Math.floor(bytes * fraction)) },
         );
+        setInFlight(0);
         setVersion(current);
       }
       if (pause.current) return;
+      setMessage(zh ? "文件已传送，正在确认…" : "File transferred. Confirming…");
       setVersion(
-        await api.post<MediaVersion>(`${base}/versions/${current.id}/complete`),
+        await api.post<MediaVersion>(`${base}/versions/${current.id}/complete`, undefined, controlRequest()),
       );
       setMessage(
         zh
@@ -231,6 +242,7 @@ export function LibraryUpload({
       );
       onChange();
     } catch (e) {
+      if (pause.current) return;
       setMessage(
         hasSession
           ? zh
@@ -239,7 +251,9 @@ export function LibraryUpload({
           : "",
       );
       setError(
-        e instanceof TypeError
+        e instanceof DOMException && e.name === "TimeoutError"
+          ? zh ? "服务器暂未响应，请稍后继续上传以同步进度。" : "The server did not respond. Resume to check saved progress."
+          : e instanceof TypeError
           ? zh
             ? "网络连接中断，请检查连接后点击继续上传。"
             : "Connection interrupted. Check your connection and resume the upload."
@@ -247,6 +261,8 @@ export function LibraryUpload({
       );
       onChange();
     } finally {
+      setInFlight(0);
+      controller.current = null;
       running.current = false;
       setBusy(false);
       if (pause.current)
@@ -271,6 +287,7 @@ export function LibraryUpload({
       }
       onClose={() => {
         pause.current = true;
+        controller.current?.abort();
         onClose();
       }}
       width={640}
@@ -406,7 +423,7 @@ export function LibraryUpload({
                 {Math.min(
                   100,
                   Math.floor(
-                    (version.uploaded_bytes / Math.max(1, version.size_bytes)) *
+                    ((version.uploaded_bytes + inFlight) / Math.max(1, version.size_bytes)) *
                       100,
                   ),
                 )}
@@ -415,11 +432,11 @@ export function LibraryUpload({
             </div>
             <progress
               aria-label={zh ? "素材上传进度" : "Media upload progress"}
-              value={version.uploaded_bytes}
+              value={version.uploaded_bytes + inFlight}
               max={Math.max(1, version.size_bytes)}
             />
             <span>
-              {mediaSize(version.uploaded_bytes)} /{" "}
+              {mediaSize(version.uploaded_bytes + inFlight)} /{" "}
               {mediaSize(version.size_bytes)}
             </span>
           </div>
@@ -464,7 +481,7 @@ export function LibraryUpload({
         <footer className="upload-footer">
           <span>
             {zh
-              ? "上传后可在素材库查看处理进度"
+              ? "关闭窗口会暂停，可在素材库的「待完成上传」继续"
               : "Track processing in your media library"}
           </span>
           <div>
@@ -475,8 +492,9 @@ export function LibraryUpload({
                 variant="outline"
                 onClick={() => {
                   pause.current = true;
+                  controller.current?.abort();
                   setMessage(
-                    zh ? "当前分块完成后暂停…" : "Pausing after this chunk…",
+                    zh ? "正在暂停…" : "Pausing…",
                   );
                 }}
               >

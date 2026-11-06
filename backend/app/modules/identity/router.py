@@ -43,14 +43,20 @@ def register(
     return service.register_user(db, data)
 
 
-@router.post("/auth/login", response_model=schemas.TokenOut, tags=["auth"])
+@router.post("/auth/login", response_model=schemas.LoginOut, tags=["auth"])
 def login(
     data: schemas.LoginIn, request: Request, db: Session = Depends(get_db, scope="function")
-) -> schemas.TokenOut:
+) -> schemas.LoginOut:
     from app.core.auth_controls import limit_auth
 
     limit_auth(db, request, "login")
-    return schemas.TokenOut(access_token=service.login(db, data))
+    from app.core.security import create_access_token
+
+    user = service.authenticate(db, data)
+    return schemas.LoginOut(
+        access_token=create_access_token(str(user.id), {"ver": user.auth_version}),
+        me=me(user, db),
+    )
 
 
 @router.post("/auth/logout", status_code=204, tags=["auth"])

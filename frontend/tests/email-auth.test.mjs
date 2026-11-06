@@ -28,6 +28,8 @@ await build({
   plugins: [{
     name: 'omit-decorative-login-background',
     setup(plugin) {
+      plugin.onResolve({ filter: /(?:^|\/)preload-entry$/ }, () => ({ path: 'preload-entry', namespace: 'test-preload' }));
+      plugin.onLoad({ filter: /.*/, namespace: 'test-preload' }, () => ({ contents: 'export function preloadEntry() {}' }));
       plugin.onResolve({ filter: /(?:^|\/)LoginBackground$/ }, () => ({ path: 'LoginBackground', namespace: 'test-background' }));
       plugin.onLoad({ filter: /.*/, namespace: 'test-background' }, () => ({ contents: 'export function LoginBackground() { return null; }' }));
     },
@@ -63,6 +65,7 @@ async function renderLogin(path, handleRequest) {
     requests.push(request);
     if (url.endsWith('/auth/providers')) return response(providers);
     if (url.endsWith('/me')) return response(signedIn);
+    if (url.endsWith('/projects')) return response([]);
     return handleRequest(request);
   };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -142,6 +145,15 @@ test('registration submits two fields then signs in automatically without reques
   ]);
   assert.equal(localStorage.getItem('inspiration_token'), 'email-registration-token');
   assert.equal(page.destination, '/projects');
+});
+
+test('login uses the returned profile and does not wait for a second profile request', async () => {
+  const page = await renderLogin('/login', () => response({ access_token: 'fast-token', me: signedIn }));
+  await fillCredentials(page.view);
+  await submit(page.view);
+  assert.equal(page.destination, '/projects');
+  assert.equal(page.requests.filter(r => r.url.endsWith('/me')).length, 0);
+  assert.equal(localStorage.getItem('inspiration_token'), 'fast-token');
 });
 
 test('an unsuccessful registration preserves the two inputs and shows the server error without logging in', async () => {
