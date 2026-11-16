@@ -4,7 +4,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import MetaData, Table, inspect, text
 from sqlalchemy.orm import Session
 
 from alembic import command
@@ -56,14 +56,18 @@ def test_archive_job_migration_installs_reference_guards(library_migration_schem
 
 
 def seed(conn):
-    from app.models.identity import Project, User
+    from app.models.identity import Project
     from app.models.narrative import Script
 
     with Session(bind=conn, join_transaction_mode="create_savepoint") as db:
-        user = User(username="migration", email="migration@example.test", display_name="Migration")
-        db.add(user)
-        db.flush()
-        project = Project(code="MIG", name="Migration", owner_id=user.id)
+        # This fixture intentionally predates the current user schema.
+        users = Table("user", MetaData(), autoload_with=conn)
+        user_id = uuid.uuid4()
+        db.execute(users.insert().values(
+            id=user_id, username="migration", email="migration@example.test",
+            display_name="Migration", is_active=True,
+        ))
+        project = Project(code="MIG", name="Migration", owner_id=user_id)
         db.add(project)
         db.flush()
         db.add(Script(project_id=project.id, code="SCR-1", title="Existing script"))
