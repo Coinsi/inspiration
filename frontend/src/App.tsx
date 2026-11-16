@@ -12,6 +12,13 @@ const WebsiteAdmin = lazy(() => import("@/pages/WebsiteAdmin"));
 const Blog = lazy(() => import("@/pages/Blog"));
 const BlogArticle = lazy(() => import("@/pages/BlogArticle"));
 const BlogAdmin = lazy(() => import("@/pages/BlogAdmin"));
+const AdminShell = lazy(() => import("@/pages/admin/AdminShell"));
+const AdminOverview = lazy(() => import("@/pages/admin/Overview"));
+const AdminUsers = lazy(() => import("@/pages/admin/Users"));
+const AdminTasks = lazy(() => import("@/pages/admin/Tasks"));
+const AdminQuotas = lazy(() => import("@/pages/admin/Quotas"));
+const AdminSystem = lazy(() => import("@/pages/admin/System"));
+const AdminAudit = lazy(() => import("@/pages/admin/Audit"));
 
 const AssetDetail = lazy(() => import("@/pages/AssetDetail"));
 const Assets = lazy(() => import("@/pages/Assets"));
@@ -65,10 +72,18 @@ export default function App() {
         <Route path="/register" element={<Login />} />
         <Route path="/auth/google/complete" element={<GoogleAuthComplete />} />
         <Route element={<Protected />}>
-          <Route path="/admin/models" element={<ModelAdmin />} />
-          <Route path="/admin/website" element={<WebsiteAdmin />} />
-          <Route path="/admin/blog" element={<BlogAdmin />} />
-          <Route path="/admin/blog/:postId" element={<BlogAdmin />} />
+          <Route path="/admin" element={<AdminShell />}>
+            <Route index element={<AdminOverview />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="models" element={<ModelAdmin />} />
+            <Route path="tasks" element={<AdminTasks />} />
+            <Route path="quotas" element={<AdminQuotas />} />
+            <Route path="system" element={<AdminSystem />} />
+            <Route path="audit" element={<AdminAudit />} />
+            <Route path="website" element={<WebsiteAdmin />} />
+            <Route path="blog" element={<BlogAdmin />} />
+            <Route path="blog/:postId" element={<BlogAdmin />} />
+          </Route>
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<AppShell />}>
             <Route index element={<Navigate to="workbench" replace />} />

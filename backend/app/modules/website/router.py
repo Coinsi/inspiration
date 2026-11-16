@@ -13,8 +13,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from app.core import audit
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.platform_permissions import platform_admin
 from app.core.errors import CapabilityUnsupported, Conflict, Forbidden, NotFound
 from app.models.identity import User
 from app.models.storage import Blob
@@ -24,12 +25,6 @@ from app.storage import cas
 
 router = APIRouter(tags=["website"])
 DB = Depends(get_db, scope="function")
-
-
-def platform_admin(user: User = Depends(get_current_user)):
-    if not user.is_platform_admin:
-        raise Forbidden("仅平台管理员可管理官网，项目管理员没有此权限")
-    return user
 
 
 ADMIN = Depends(platform_admin)
@@ -147,6 +142,7 @@ def save_draft(data: Save, user: User = ADMIN, db: Session = DB):
     row.draft = content
     row.version += 1
     db.flush()
+    audit.record(db, user_id=user.id, action="admin.website.save")
     return out(row, db)
 
 
@@ -165,6 +161,7 @@ def publish(data: Publish, user: User = ADMIN, db: Session = DB):
         )
     )
     db.flush()
+    audit.record(db, user_id=user.id, action="admin.website.publish")
     return out(row, db)
 
 
@@ -192,6 +189,7 @@ def restore(revision: int, data: Restore, user: User = ADMIN, db: Session = DB):
     row.draft = release.content
     row.version += 1
     db.flush()
+    audit.record(db, user_id=user.id, action="admin.website.restore")
     return out(row, db)
 
 

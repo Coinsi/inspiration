@@ -30,6 +30,7 @@ import type {
   SiteState,
 } from "@/components/website/types";
 import "./website-admin.css";
+import { useAdminUnsaved } from "./admin/navigation";
 const groups = [
   { key: "hero", label: "首页与品牌", icon: LayoutTemplate },
   { key: "banners", label: "活动轮播", icon: ImagePlus },
@@ -101,6 +102,7 @@ function Editor() {
   useEffect(() => {
     if (query.data && !state) adopt(query.data);
   }, [query.data]);
+  useAdminUnsaved(dirty);
   useEffect(() => {
     if (!dirty) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -396,11 +398,11 @@ function Editor() {
               <h1>{groups.find((g) => g.key === group)?.label}</h1>
               <span>
                 {group === "hero"
-                  ? "把产品的第一印象，打磨成你想要的样子。"
+                  ? "设置品牌名称与首页展示内容。"
                   : group === "banners"
                     ? "更换活动图片、调整顺序，预览后再发布。"
                   : group === "sections"
-                    ? "固定的精致布局，内容由你掌握。"
+                    ? "调整首页各区块的内容与展示顺序。"
                     : group === "media"
                       ? "专门用于公开展示的素材，与私人项目隔离。"
                       : "每次发布都有记录，恢复后可预览并重新发布。"}

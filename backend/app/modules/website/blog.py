@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound
+from app.core import audit
 from app.models.identity import User
 from app.models.storage import Blob
 from app.models.website import BlogPost, WebsiteMedia
@@ -175,6 +176,7 @@ def create(data: Create, db: Session = DB, user: User = ADMIN):
     except IntegrityError as exc:
         db.rollback()
         raise Conflict("这个文章地址已被使用，请更换；归档文章仍保留地址") from exc
+    audit.record(db, user_id=user.id, action="admin.blog.create", target_type="blog_post", target_id=row.id)
     return admin_out(row)
 
 
@@ -194,6 +196,7 @@ def save(post_id: uuid.UUID, data: Save, db: Session = DB, user: User = ADMIN):
     row.draft = content
     row.version += 1
     db.flush()
+    audit.record(db, user_id=user.id, action="admin.blog.save", target_type="blog_post", target_id=row.id)
     return admin_out(row)
 
 
@@ -225,4 +228,5 @@ def change(
         row.published_at = row.published_at or datetime.now(UTC)
     row.version += 1
     db.flush()
+    audit.record(db, user_id=user.id, action=f"admin.blog.{action}", target_type="blog_post", target_id=row.id)
     return admin_out(row)

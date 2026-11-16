@@ -27,6 +27,7 @@ import {
 import type { SiteAsset } from "@/components/website/types";
 import "./website-admin.css";
 import "./blog-admin.css";
+import { useAdminUnsaved } from "./admin/navigation";
 
 interface Post {
   id: string;
@@ -73,7 +74,7 @@ export default function BlogAdmin() {
 
 function AdminHeader({ children }: { children?: React.ReactNode }) {
   return (
-    <header className="website-admin-header">
+    <header className="website-admin-header blog-local-header">
       <div>
         <BookOpen size={20} />
         <strong>
@@ -262,6 +263,7 @@ function Editor({ id }: { id: string }) {
   useEffect(() => {
     if (query.data && !post) adopt(query.data);
   }, [query.data]);
+  useAdminUnsaved(dirty);
   useEffect(() => {
     if (!dirty) return;
     const handler = (e: BeforeUnloadEvent) => {

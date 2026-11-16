@@ -113,12 +113,14 @@ def list_providers(db: Session, project_id: uuid.UUID, user_id=None) -> list[Pro
 
 # ── 配额 ──
 def set_quota(db: Session, ctx: ProjectContext, data: schemas.QuotaIn) -> Quota:
+    # Serialize creation in the project; existing rows also lock against platform edits.
+    db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     q = db.scalar(
         select(Quota).where(
             Quota.project_id == ctx.project.id,
             Quota.scope == data.scope,
             Quota.user_id == data.user_id,
-        )
+        ).with_for_update().execution_options(populate_existing=True)
     )
     if q is None:
         q = Quota(project_id=ctx.project.id, scope=QuotaScope(data.scope), user_id=data.user_id)

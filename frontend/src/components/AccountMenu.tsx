@@ -1,4 +1,4 @@
-import { Languages, Server, LogOut, UserRound, ChevronDown } from "lucide-react";
+import { Languages, LogOut, UserRound, ChevronDown } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -63,15 +63,9 @@ export function AccountMenu() {
           {zh ? "外观与语言" : "Appearance & language"}
         </button>
         {me?.user.is_platform_admin && (
-          <Link role="menuitem" className={headerMenuItem} to="/admin/website">
+          <Link role="menuitem" className={headerMenuItem} to="/admin">
             <UserRound size={16} />
             {zh ? "平台管理" : "Platform admin"}
-          </Link>
-        )}
-        {me?.user.is_platform_admin && (
-          <Link role="menuitem" className={headerMenuItem} to="/admin/models">
-            <Server size={16} />
-            {zh ? "全局模型配置" : "Platform models"}
           </Link>
         )}
         <Link role="menuitem" className={headerMenuItem} to="/">

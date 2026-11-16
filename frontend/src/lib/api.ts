@@ -193,6 +193,7 @@ export interface Me {
     display_name: string;
     is_active: boolean;
     is_platform_admin: boolean;
+    platform_role?: "super" | "admin" | null;
     avatar_data?: string | null;
     bio: string;
   };

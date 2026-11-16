@@ -5,8 +5,7 @@ from types import SimpleNamespace
 from fastapi import Depends
 from sqlalchemy import select, text
 
-from app.core.deps import get_current_user
-from app.core.errors import Forbidden
+from app.core.platform_permissions import platform_admin
 from app.models.identity import Project
 
 
@@ -18,7 +17,5 @@ def lock_model_scope(db, project_id):
         db.scalar(select(Project).where(Project.id == project_id).with_for_update())
 
 
-def platform_context(user=Depends(get_current_user)):
-    if not user.is_platform_admin:
-        raise Forbidden("仅平台管理员可配置全局模型，项目管理员没有此权限")
+def platform_context(user=Depends(platform_admin)):
     return SimpleNamespace(user=user, project=SimpleNamespace(id=None))

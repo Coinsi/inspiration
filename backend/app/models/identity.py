@@ -1,8 +1,18 @@
 """identity:用户、项目、成员、审计、编码序号。"""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +39,9 @@ class User(Base, TimestampMixin):
     is_platform_admin: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    platform_role: Mapped[str | None] = mapped_column(String(16))
+    admin_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avatar_data: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str] = mapped_column(String(500), default="", server_default="", nullable=False)
     auth_version: Mapped[int] = mapped_column(

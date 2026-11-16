@@ -198,6 +198,9 @@ def exchange(request: Request, db: Session = DB):
             kind="exchange",
         )
         user = google.validate_link_session(db, payload)
+        from datetime import UTC, datetime
+
+        user.last_login_at = datetime.now(UTC)
         result = JSONResponse(
             {
                 "access_token": create_access_token(str(user.id), {"ver": user.auth_version}),

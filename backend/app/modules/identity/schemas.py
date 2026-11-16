@@ -39,6 +39,7 @@ class UserOut(BaseModel):
     display_name: str
     is_active: bool
     is_platform_admin: bool = False
+    platform_role: str | None = None
     avatar_data: str | None = None
     bio: str = ""
 

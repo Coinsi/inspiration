@@ -53,6 +53,9 @@ def login(
     from app.core.security import create_access_token
 
     user = service.authenticate(db, data)
+    from datetime import UTC, datetime
+
+    user.last_login_at = datetime.now(UTC)
     return schemas.LoginOut(
         access_token=create_access_token(str(user.id), {"ver": user.auth_version}),
         me=me(user, db),
