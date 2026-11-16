@@ -46,13 +46,17 @@ def library_migration_schema(monkeypatch):
 
 def seed_legacy_library(conn, schema):
     """Use real FKs and 0027 column metadata, including a pre-upgrade ranged use."""
-    from app.models.identity import Project, User
+    from app.models.identity import Project
 
     with Session(bind=conn, join_transaction_mode="create_savepoint") as db:
-        user = User(username="migration", email="migration@example.test", display_name="Migration")
-        db.add(user)
-        db.flush()
-        project = Project(code="MIGRATION", name="Migration", owner_id=user.id)
+        # Seed the historical user schema, not today's ORM with newer admin columns.
+        users = Table("user", MetaData(), schema=schema, autoload_with=conn)
+        user_id = uuid.uuid4()
+        db.execute(users.insert().values(
+            id=user_id, username="migration", email="migration@example.test",
+            display_name="Migration", is_active=True,
+        ))
+        project = Project(code="MIGRATION", name="Migration", owner_id=user_id)
         db.add(project)
         db.flush()
         # This database is deliberately older than the current ORM models.
