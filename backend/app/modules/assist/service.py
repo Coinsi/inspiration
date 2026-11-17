@@ -92,8 +92,11 @@ def post_message(
 ) -> dict:
     """处理一条用户指令:产出助手回复 + 修改提议(含 dry-run 预览),但不立即应用。"""
     chat = _get_chat(db, ctx.project.id, chat_id)
+    db.refresh(chat, with_for_update=True)
     adapter = get_adapter(chat.target_type)
     _obj, state = adapter.read(db, ctx.project.id, chat.target_id)
+    from app.modules.narrative.tool_tasks import fingerprint
+    base_revision = fingerprint(state)
 
     # S3:剧本对象注入设定库上下文,AI 改稿遵守既定人设/世界观
     if chat.target_type == "script":
@@ -138,6 +141,7 @@ def post_message(
         "content": reply,
         "created_at": _now(),
         "proposal": {
+            "base_revision": base_revision,
             "summary": proposal.summary,
             "ops": ops,
             "needs_clarification": proposal.needs_clarification,
@@ -159,6 +163,7 @@ def apply_message(
 ) -> dict:
     """应用某条助手消息里的修改提议:落库 + 版本快照,标记已应用。"""
     chat = _get_chat(db, ctx.project.id, chat_id)
+    db.refresh(chat, with_for_update=True)
     msgs = list(chat.messages or [])
     target = next((m for m in msgs if m.get("id") == message_id and m.get("role") == "assistant"), None)
     if target is None:
@@ -175,6 +180,12 @@ def apply_message(
     from app.core.permissions import require
 
     require(ctx.role, adapter.edit_action)
+    from app.modules.narrative.tool_tasks import fingerprint
+    obj, _ = adapter.read(db, ctx.project.id, chat.target_id)
+    db.refresh(obj, with_for_update=True)
+    _, current = adapter.read(db, ctx.project.id, chat.target_id)
+    if proposal.get("base_revision") != fingerprint(current):
+        raise Conflict("对象已修改或建议来自旧版本，请重新让助手生成建议")
     try:
         result = adapter.apply(db, ctx, chat.target_id, ops, dry_run=False)
     except OpError as e:

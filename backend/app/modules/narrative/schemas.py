@@ -24,6 +24,16 @@ class NovelOut(BaseModel):
     created_at: datetime
 
 
+class ChapterSummaryOut(BaseModel):
+    id: uuid.UUID
+    ordinal: int
+    title: str | None
+
+
+class NovelDirectoryOut(NovelOut):
+    chapters: list[ChapterSummaryOut] = Field(default_factory=list)
+
+
 class NovelDetailOut(NovelOut):
     chapters: list[ChapterOut] = Field(default_factory=list)
 

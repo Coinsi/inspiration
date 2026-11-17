@@ -44,7 +44,8 @@ import {
   apiUpload,
   type DecomposeResult,
   type Novel,
-  type NovelDetail,
+  type NovelDirectory,
+  type Chapter,
   type Script,
 } from "@/lib/api";
 
@@ -118,13 +119,7 @@ function NarrativeWorkspace() {
   );
   const readingRef = useRef<HTMLDivElement>(null);
   const chapterHeading = useRef<HTMLHeadingElement>(null);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+
 
   const {
     data: novels,
@@ -151,8 +146,9 @@ function NarrativeWorkspace() {
     error: detailError,
     refetch: reloadDetail,
   } = useQuery({
-    queryKey: ["novel", projectId, novelId],
-    queryFn: () => api.get<NovelDetail>(`${base}/novels/${novelId}`),
+    queryKey: ["novel-directory", projectId, novelId],
+    staleTime: 30_000,
+    queryFn: () => api.get<NovelDirectory>(`${base}/novels/${novelId}/directory`),
     enabled: !!novelId,
   });
   const { data: scripts } = useQuery({
@@ -161,10 +157,14 @@ function NarrativeWorkspace() {
     enabled: !!dec,
   });
 
-  // 选中章节从已加载的小说详情里按 id 取(只持久化 id,不存正文)
-  const chapter = !detailError
-    ? (detail?.chapters.find((c) => c.id === chapterId) ?? null)
-    : null;
+  // Keep navigation lightweight; fetch only the selected chapter's body.
+  const chapterQueryResult = useQuery({
+    queryKey: ["chapter-content", projectId, chapterId],
+    queryFn: () => api.get<Chapter>(`${base}/chapters/${chapterId}`),
+    enabled: !!chapterId && !!detail?.chapters.some((item) => item.id === chapterId),
+    staleTime: 60_000,
+  });
+  const chapter = !detailError ? chapterQueryResult.data ?? null : null;
   const chapterIndex =
     detail?.chapters.findIndex((c) => c.id === chapterId) ?? -1;
   const visibleChapters =
@@ -241,7 +241,7 @@ function NarrativeWorkspace() {
       api.patch(`${base}/novels/${id}`, { title }),
     onSuccess: () => {
       setRenamingId(null);
-      void qc.invalidateQueries({ queryKey: ["novel", projectId] });
+      void qc.invalidateQueries({ queryKey: ["novel-directory", projectId] });
       toast.push(tr("nar.novelRenamed"), "success");
       void qc.invalidateQueries({ queryKey: ["novels", projectId] });
     },
@@ -293,19 +293,41 @@ function NarrativeWorkspace() {
       void qc.invalidateQueries({ queryKey: ["scripts", projectId] });
     },
   });
-  // 小说章节 → AI 改编为剧本正文,完成后直接进入剧本编辑器
+  // The durable task, not this component's mutation, owns generation state.
+  type ScriptTask = {
+    id: string;
+    chapter_id: string;
+    status: "queued" | "running" | "succeeded" | "failed";
+    script_id: string | null;
+    error: string | null;
+  };
+  const taskKey = ["chapter-script-task", projectId, chapterId];
+  const scriptTask = useQuery({
+    queryKey: taskKey,
+    queryFn: () => api.get<ScriptTask | null>(`${base}/chapters/${chapterId}/script-task`),
+    enabled: !!chapter,
+    refetchInterval: (query) =>
+      query.state.data && ["queued", "running"].includes(query.state.data.status) ? 2000 : 15_000,
+  });
+  const taskBusy = !!scriptTask.data && ["queued", "running"].includes(scriptTask.data.status);
   const genScript = useMutation({
-    mutationFn: () =>
-      api.post<Script>(`${base}/scripts/from-chapter`, {
+    mutationFn: () => {
+      const retry = scriptTask.data?.status === "failed"
+        ? `?retry_task_id=${scriptTask.data.id}` : "";
+      return api.post<ScriptTask>(`${base}/script-tasks${retry}`, {
         chapter_id: chapter?.id,
         title: chapter?.title ?? detail?.title,
-      }),
-    onSuccess: (s) => {
-      toast.push(tr("nar.scriptGenerated"), "success");
-      void qc.invalidateQueries({ queryKey: ["scripts", projectId] });
-      if (mounted.current) navigate(`${base}/scripts/${s.id}`);
+      });
     },
-    onError: (e) => toast.push((e as Error).message, "error"),
+    onSuccess: (task) => {
+      qc.setQueryData(["chapter-script-task", projectId, task.chapter_id], task);
+      toast.push(task.status === "succeeded" ? "剧本已生成，可点击查看" : "已提交，可离开页面，稍后回来查看进度", "success");
+    },
+    onError: (e) => {
+      // A lost response does not prove submission failed. Reconcile before resubmitting.
+      void qc.invalidateQueries({ queryKey: ["chapter-script-task", projectId] });
+      toast.push((e as Error).message, "error");
+    },
   });
   const applyScenes = useMutation({
     mutationFn: () =>
@@ -671,28 +693,48 @@ function NarrativeWorkspace() {
                       恢复:加回 startDecompose 按钮即可,后端 /novels/decompose 接口仍在 */}
                       <Button
                         size="sm"
-                        disabled={genScript.isPending}
-                        onClick={() => genScript.mutate()}
+                        disabled={genScript.isPending || taskBusy || scriptTask.isPending || scriptTask.isError}
+                        onClick={() => {
+                          if (scriptTask.data?.status === "succeeded" && scriptTask.data.script_id) {
+                            navigate(`${base}/scripts/${scriptTask.data.script_id}`);
+                          } else genScript.mutate();
+                        }}
                       >
-                        {genScript.isPending ? (
+                        {genScript.isPending || taskBusy ? (
                           <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                         ) : (
                           <Sparkles className="mr-1 h-4 w-4" />
                         )}
-                        {genScript.isPending
-                          ? tr("nar.generatingScript")
+                        {genScript.isPending || taskBusy
+                          ? (scriptTask.data?.status === "queued" ? "等待生成…" : tr("nar.generatingScript"))
+                          : scriptTask.data?.status === "succeeded" ? "查看剧本"
+                          : scriptTask.data?.status === "failed" ? "重试生成"
                           : tr("nar.genScript")}
                       </Button>
                     </div>
                   )}
                 </div>
+                {scriptTask.data?.status === "failed" && (
+                  <p role="alert" className="px-6 py-3 text-danger">{scriptTask.data.error}</p>
+                )}
+                {scriptTask.isError && (
+                  <p role="alert" className="px-6 py-3">
+                    无法确认生成状态，请先刷新状态，避免重复生成。
+                    <Button variant="ghost" onClick={() => void scriptTask.refetch()}>刷新状态</Button>
+                  </p>
+                )}
                 <div ref={readingRef} className="story-reader-scroll">
                   {detailError ? (
                     <ReadError
                       error={detailError}
                       retry={() => void reloadDetail()}
                     />
-                  ) : detailLoading && !detail ? (
+                  ) : chapterQueryResult.error ? (
+                    <ReadError
+                      error={chapterQueryResult.error}
+                      retry={() => void chapterQueryResult.refetch()}
+                    />
+                  ) : (detailLoading && !detail) || (!!chapterId && chapterQueryResult.isPending) ? (
                     <p role="status" className="story-state">
                       正在读取正文…
                     </p>

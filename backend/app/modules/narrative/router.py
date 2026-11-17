@@ -25,6 +25,7 @@ def upload_novel_cover(
     db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.narrative.covers import change
+
     return change(db, ctx, "novel", novel_id, file)
 
 
@@ -35,6 +36,7 @@ def remove_novel_cover(
     db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.narrative.covers import change
+
     return change(db, ctx, "novel", novel_id)
 
 
@@ -46,6 +48,7 @@ def upload_script_cover(
     db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.narrative.covers import change
+
     return change(db, ctx, "script", script_id, file)
 
 
@@ -56,6 +59,7 @@ def remove_script_cover(
     db: Session = Depends(get_db, scope="function"),
 ):
     from app.modules.narrative.covers import change
+
     return change(db, ctx, "script", script_id)
 
 
@@ -87,6 +91,30 @@ def list_novel_trash(
     db: Session = Depends(get_db, scope="function"),
 ):
     return service.list_deleted_novels(db, ctx.project.id)
+
+
+@router.get("/novels/{novel_id}/directory", response_model=schemas.NovelDirectoryOut)
+def novel_directory(
+    novel_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    novel = service.get_novel(db, ctx.project.id, novel_id)
+    result = schemas.NovelDirectoryOut.model_validate(novel)
+    result.chapters = [
+        schemas.ChapterSummaryOut.model_validate(row)
+        for row in service.chapter_directory(db, novel_id)
+    ]
+    return result
+
+
+@router.get("/chapters/{chapter_id}", response_model=schemas.ChapterOut)
+def chapter_content(
+    chapter_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service._get_chapter(db, ctx.project.id, chapter_id)
 
 
 @router.get("/novels/{novel_id}", response_model=schemas.NovelDetailOut)
@@ -155,6 +183,30 @@ def list_scripts(
 
 
 # ── 剧本正文(typed blocks):小说→剧本、读取、编辑保存、导出 ──
+@router.get("/chapters/{chapter_id}/script-task")
+def current_script_task(
+    chapter_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from . import tasks
+
+    service._get_chapter(db, ctx.project.id, chapter_id)
+    return tasks.latest(db, ctx.project.id, chapter_id)
+
+
+@router.post("/script-tasks", status_code=202)
+def submit_script_task(
+    data: schemas.GenerateScriptIn,
+    retry_task_id: uuid.UUID | None = None,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from . import tasks
+
+    return tasks.submit(db, ctx, data, retry_task_id)
+
+
 @router.post("/scripts/from-chapter", response_model=schemas.ScriptDetailOut)
 def generate_script_from_chapter(
     data: schemas.GenerateScriptIn,

@@ -268,6 +268,9 @@ export interface Chapter {
   title: string | null;
   content: string;
 }
+export interface NovelDirectory extends Novel {
+  chapters: Omit<Chapter, "content">[];
+}
 export interface NovelDetail extends Novel {
   chapters: Chapter[];
 }

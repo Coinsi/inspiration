@@ -35,7 +35,7 @@ import {
   NEXT_STATUS,
   type ComposeResult,
   type Novel,
-  type NovelDetail,
+  type NovelDirectory,
   type Shot,
 } from "@/lib/api";
 import "./shot-workspace.css";
@@ -123,8 +123,9 @@ function ShotsWorkspace() {
     queryFn: () => api.get<Novel[]>(`${base}/novels`),
   });
   const { data: novelDetail } = useQuery({
-    queryKey: ["novel", projectId, novelId],
-    queryFn: () => api.get<NovelDetail>(`${base}/novels/${novelId}`),
+    queryKey: ["novel-directory", projectId, novelId],
+    staleTime: 30_000,
+    queryFn: () => api.get<NovelDirectory>(`${base}/novels/${novelId}/directory`),
     enabled: !!novelId,
   });
   const chapters = novelDetail?.chapters ?? [];

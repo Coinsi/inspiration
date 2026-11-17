@@ -1,3 +1,4 @@
+import { useCreativeToolTask } from "@/lib/useCreativeToolTask";
 import SkillPicker from "@/components/SkillPicker";
 import type { SkillUse } from "@/lib/skills";
 // 贯穿式 AI 对话助手侧栏:对当前对象多轮对话 → 修改提议(预览)→ 应用(版本快照)。
@@ -43,7 +44,12 @@ export default function AssistPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 复用该对象最近一次会话;没有则首次发送时创建
-  const { data: chats } = useQuery({
+  const {
+    data: chats,
+    isPending: chatsLoading,
+    error: chatsError,
+    refetch: reloadChats,
+  } = useQuery({
     queryKey: ["assist-chats", targetType, targetId],
     queryFn: () =>
       api.get<AssistChat[]>(
@@ -65,31 +71,67 @@ export default function AssistPanel({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages.length]);
 
+  const tool = useCreativeToolTask(projectId, "assist_message", chatId ?? "");
+  const pendingMessage = useRef<{ signature: string; key: string } | null>(
+    null,
+  );
   const send = useMutation({
     mutationFn: async (content: string) => {
       let cid = chatId;
       if (!cid) {
-        const created = await api.post<AssistChat>(`${base}/assist/chats`, {
-          target_type: targetType,
-          target_id: targetId,
-        });
+        const created = await api.post<AssistChat>(
+          `${base}/assist/chats?reuse=true`,
+          {
+            target_type: targetType,
+            target_id: targetId,
+          },
+        );
         cid = created.id;
         setChatId(cid);
       }
-      return api.post(`${base}/assist/chats/${cid}/messages`, {
+      const payload = {
         content,
         skills: skills.map(({ id, revision }) => ({ id, revision })),
+      };
+      const signature = JSON.stringify([projectId, cid, payload]);
+      if (pendingMessage.current?.signature !== signature) {
+        pendingMessage.current = { signature, key: crypto.randomUUID() };
+      }
+      return api.post(`${base}/creative-tool-tasks`, {
+        operation: "assist_message",
+        target_id: cid,
+        request_key: pendingMessage.current.key,
+        ...payload,
       });
     },
-    onSuccess: () => {
-      setInput("");
-      void qc.invalidateQueries({ queryKey: ["assist-chat", chatId] });
+    onSuccess: (_, submitted) => {
+      pendingMessage.current = null;
+      setInput((current) => (current.trim() === submitted ? "" : current));
+      void qc.invalidateQueries({
+        queryKey: ["creative-tool-task", projectId],
+      });
       void qc.invalidateQueries({
         queryKey: ["assist-chats", targetType, targetId],
       });
     },
-    onError: (e) => toast.push((e as Error).message, "error"),
+    onError: (e) => {
+      void qc.invalidateQueries({
+        queryKey: ["creative-tool-task", projectId],
+      });
+      toast.push((e as Error).message, "error");
+    },
   });
+  const busy = send.isPending || tool.busy;
+  const canSend = !chatsLoading && !chatsError && (!chatId || tool.ready);
+  useEffect(() => {
+    if (tool.task?.status === "succeeded") {
+      void qc.invalidateQueries({ queryKey: ["assist-chat", chatId] });
+    }
+  }, [tool.task?.id, tool.task?.status, chatId, qc]);
+  useEffect(() => {
+    setChatId(null);
+    setInput("");
+  }, [targetType, targetId]);
 
   const apply = useMutation({
     mutationFn: (messageId: string) =>
@@ -104,7 +146,7 @@ export default function AssistPanel({
 
   const submit = () => {
     const v = input.trim();
-    if (v && !send.isPending) send.mutate(v);
+    if (v && !busy && canSend) send.mutate(v);
   };
 
   return (
@@ -132,11 +174,44 @@ export default function AssistPanel({
         ref={scrollRef}
         className="min-h-0 flex-1 space-y-3 overflow-auto p-3"
       >
-        {messages.length === 0 && !send.isPending && (
+        {messages.length === 0 && !busy && (
           <div className="flex flex-col items-center gap-2 px-3 py-10 text-center text-muted-foreground">
             <Bot className="h-7 w-7 opacity-40" />
             <p className="text-xs leading-5">{tr("assist.empty")}</p>
           </div>
+        )}
+        {tool.task &&
+          ["queued", "running", "failed"].includes(tool.task.status) && (
+            <p className="rounded-lg bg-muted p-2 text-sm">
+              {tool.task.payload.content}
+            </p>
+          )}
+        {tool.task?.status === "failed" && (
+          <div role="alert" className="text-sm text-danger">
+            {tool.task.error}
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() =>
+                tool.submit.mutate(tool.task?.payload || {}, {
+                  onError: (e) => toast.push(e.message, "error"),
+                })
+              }
+            >
+              重试
+            </Button>
+          </div>
+        )}
+        {(chatsError || tool.query.isError) && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void reloadChats();
+              void tool.query.refetch();
+            }}
+          >
+            重新读取会话状态
+          </Button>
         )}
         {messages.map((m) => (
           <Message
@@ -146,7 +221,7 @@ export default function AssistPanel({
             applying={apply.isPending}
           />
         ))}
-        {send.isPending && (
+        {busy && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
             {tr("assist.thinking")}
@@ -159,7 +234,7 @@ export default function AssistPanel({
           projectId={projectId}
           value={skills}
           onChange={setSkills}
-          disabled={send.isPending}
+          disabled={busy}
         />
         <div className="flex items-end gap-1.5">
           <textarea
@@ -178,7 +253,7 @@ export default function AssistPanel({
           <Button
             size="sm"
             className="h-9 w-9 p-0"
-            disabled={!input.trim() || send.isPending}
+            disabled={!input.trim() || busy || !canSend}
             onClick={submit}
             title={tr("assist.send")}
           >

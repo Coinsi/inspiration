@@ -106,3 +106,38 @@ class Scene(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     __table_args__ = (Index("ix_scene_script_ordinal", "script_id", "ordinal"),)
+
+
+class ScriptGenerationTask(Base, TimestampMixin):
+    """Durable chapter adaptation, independent of the reader page lifetime."""
+    __tablename__ = "script_generation_task"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    chapter_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("chapter.id"))
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("user.id"))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    title: Mapped[str | None] = mapped_column(String(255))
+    strategy: Mapped[str | None] = mapped_column(String(32))
+    script_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("script.id"))
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (Index("ix_script_task_chapter", "project_id", "chapter_id", "created_at"),)
+
+
+class CreativeToolTask(Base, TimestampMixin):
+    """Durable tool receipt and candidate output, scoped to a project object."""
+    __tablename__ = "creative_tool_task"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID)
+    operation: Mapped[str] = mapped_column(String(32))
+    request_key: Mapped[uuid.UUID] = mapped_column(UUID)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("user.id"))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source_revision: Mapped[str] = mapped_column(String(64))
+    result: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        Index("uq_creative_tool_request", "project_id", "request_key", unique=True),
+        Index("ix_creative_tool_target", "project_id", "operation", "target_id", "created_at"),
+    )

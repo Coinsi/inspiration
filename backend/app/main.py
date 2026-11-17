@@ -49,6 +49,7 @@ from app.modules.generation.channel_router import router as channel_router
 from app.modules.generation.model_router import router as creative_model_router
 from app.modules.generation.platform_router import router as platform_model_router
 from app.modules.timeline.router import router as timeline_router
+from app.modules.narrative.tool_tasks import router as creative_tool_router
 
 register_production_tools()
 register_editing_tools()
@@ -67,6 +68,11 @@ async def lifespan(app):
     from app.core.health import background_workers
 
     background_workers.clear()
+    script_stop = None
+    if not settings.celery_eager:
+        from app.modules.narrative.tasks import start as start_scripts
+        script_stop = start_scripts()
+        background_workers["script_generation"] = script_stop.is_alive
     attachment_stop = None
     if settings.attachment_cleanup_enabled and not settings.celery_eager:
         from app.modules.attachments.cleanup import start as start_attachment_cleanup
@@ -122,6 +128,8 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if script_stop:
+            await to_thread(script_stop)
         if attachment_stop:
             await to_thread(attachment_stop)
         if archive_stop:
@@ -187,6 +195,7 @@ app.include_router(activity_router, prefix="/api/v1")
 app.include_router(canvas_router, prefix="/api/v1")
 app.include_router(asset_router, prefix="/api/v1")
 app.include_router(narrative_router, prefix="/api/v1")
+app.include_router(creative_tool_router, prefix="/api/v1")
 app.include_router(prompt_router, prefix="/api/v1")
 app.include_router(shot_router, prefix="/api/v1")
 app.include_router(generation_router, prefix="/api/v1")

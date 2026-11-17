@@ -33,7 +33,7 @@ import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import {
   api,
   type Novel,
-  type NovelDetail,
+  type NovelDirectory,
   type SceneListItem,
   type Shot,
 } from "@/lib/api";
@@ -183,8 +183,9 @@ function StoryboardContent() {
     ? savedNovelId
     : "";
   const novelQuery = useQuery({
-    queryKey: ["novel", projectId, novelId],
-    queryFn: () => api.get<NovelDetail>(`${base}/novels/${novelId}`),
+    queryKey: ["novel-directory", projectId, novelId],
+    staleTime: 30_000,
+    queryFn: () => api.get<NovelDirectory>(`${base}/novels/${novelId}/directory`),
     enabled: !!novelId,
   });
   const chapters = novelQuery.data?.chapters ?? [];
@@ -202,6 +203,7 @@ function StoryboardContent() {
     refetch: retryScenes,
   } = useQuery({
     queryKey: ["scenes-all", projectId, novelId, chapterId],
+    staleTime: 30_000,
     queryFn: () => {
       const p = new URLSearchParams();
       if (novelId) p.set("novel_id", novelId);

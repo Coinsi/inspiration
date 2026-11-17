@@ -1,3 +1,4 @@
+import { useCreativeToolTask } from "@/lib/useCreativeToolTask";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { ScriptNameDialog } from "@/components/ScriptNameDialog";
 import { SearchField } from "@/components/ui/search-field";
@@ -259,21 +260,30 @@ function ScriptEditorWorkspace() {
 
   // ── 派生:场次/镜头 ──
   const [dec, setDec] = useState<DecomposeResult | null>(null);
-  const decompose = useMutation({
-    mutationFn: () =>
-      api.post<DecomposeResult>(`${base}/scripts/${scriptId}/decompose`),
-    onSuccess: (d) => {
-      setDec(d);
-      if (d.scenes.length === 0) toast.push(tr("se.noScenes"), "error");
+  const decomposition = useCreativeToolTask<DecomposeResult>(
+    projectId!,
+    "script_decompose",
+    scriptId!,
+  );
+  const decompose = {
+    isPending: decomposition.busy,
+    mutate: () => {
+      if (decomposition.task?.status === "succeeded")
+        setDec(decomposition.task.result!.output);
+      else
+        decomposition.submit.mutate(
+          {},
+          { onError: (e) => toast.push(e.message, "error") },
+        );
     },
-    onError: (e) => toast.push((e as Error).message, "error"),
-  });
+  };
+  useEffect(() => {
+    if (decomposition.task?.status === "succeeded")
+      setDec(decomposition.task.result!.output);
+    if (decomposition.task?.status === "applied") setDec(null);
+  }, [decomposition.task?.id, decomposition.task?.status]);
   const applyScenes = useMutation({
-    mutationFn: () =>
-      api.post(`${base}/scripts/${scriptId}/apply-scenes`, {
-        chapter_id: script?.source_chapter_id,
-        scenes: dec?.scenes,
-      }),
+    mutationFn: () => decomposition.apply.mutateAsync(undefined),
     onSuccess: () => {
       setDec(null);
       toast.push(tr("se.scenesApplied"), "success");
@@ -286,24 +296,44 @@ function ScriptEditorWorkspace() {
   const [drafts, setDrafts] = useState<
     (EntityDraft & { checked: boolean })[] | null
   >(null);
-  const extract = useMutation({
-    mutationFn: () =>
-      api.post<EntityDraft[]>(`${base}/extract-entities`, {
-        script_id: scriptId,
-      }),
-    onSuccess: (d) => {
-      if (d.length === 0) toast.push(tr("se.noEntities"), "error");
-      else setDrafts(d.map((e) => ({ ...e, checked: true })));
+  const extraction = useCreativeToolTask<EntityDraft[]>(
+    projectId!,
+    "script_entities",
+    scriptId!,
+  );
+  const extract = {
+    isPending: extraction.busy,
+    mutate: () => {
+      if (extraction.task?.status === "succeeded")
+        setDrafts(
+          extraction.task.result!.output.map((item) => ({
+            ...item,
+            checked: true,
+          })),
+        );
+      else
+        extraction.submit.mutate(
+          {},
+          { onError: (e) => toast.push(e.message, "error") },
+        );
     },
-    onError: (e) => toast.push((e as Error).message, "error"),
-  });
+  };
+  useEffect(() => {
+    if (extraction.task?.status === "succeeded") {
+      setDrafts(
+        extraction.task.result!.output.map((item) => ({
+          ...item,
+          checked: true,
+        })),
+      );
+    }
+    if (extraction.task?.status === "applied") setDrafts(null);
+  }, [extraction.task?.id, extraction.task?.status]);
   const applyEntities = useMutation({
     mutationFn: () =>
-      api.post(`${base}/apply-entities`, {
-        entities: drafts
-          ?.filter((d) => d.checked)
-          .map(({ checked: _c, ...e }) => e),
-      }),
+      extraction.apply.mutateAsync(
+        drafts?.flatMap((item, i) => (item.checked ? [i] : [])),
+      ),
     onSuccess: () => {
       setDrafts(null);
       toast.push(tr("se.entitiesApplied"), "success");
@@ -439,9 +469,7 @@ function ScriptEditorWorkspace() {
           </button>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <h1 title={script.title}>
-                {script.title}
-              </h1>
+              <h1 title={script.title}>{script.title}</h1>
               <button
                 type="button"
                 aria-label="重命名剧本"
@@ -453,7 +481,11 @@ function ScriptEditorWorkspace() {
               </button>
             </div>
             <p className="writing-save-state" aria-live="polite">
-              {save.isPending ? "保存中…" : dirty ? "草稿待保存" : "已保存到项目"}
+              {save.isPending
+                ? "保存中…"
+                : dirty
+                  ? "草稿待保存"
+                  : "已保存到项目"}
             </p>
           </div>
         </div>
@@ -496,9 +528,42 @@ function ScriptEditorWorkspace() {
             }}
           >
             <summary>
-              <Clapperboard size={15} />制作工具
+              <Clapperboard size={15} />
+              制作工具
             </summary>
             <div>
+              {(decomposition.task?.status === "succeeded" ||
+                extraction.task?.status === "succeeded") && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={dirty || decomposition.busy || extraction.busy}
+                  onClick={() => {
+                    if (decomposition.task?.status === "succeeded")
+                      decomposition.submit.mutate({});
+                    if (extraction.task?.status === "succeeded")
+                      extraction.submit.mutate({});
+                  }}
+                >
+                  按当前剧本重新分析
+                </Button>
+              )}
+              {(decomposition.task?.error || extraction.task?.error) && (
+                <p role="alert" className="text-sm text-danger">
+                  {decomposition.task?.error || extraction.task?.error}
+                </p>
+              )}
+              {(decomposition.query.isError || extraction.query.isError) && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    void decomposition.query.refetch();
+                    void extraction.query.refetch();
+                  }}
+                >
+                  重新读取任务状态
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">
                 写好并保存正文后，再拆分场景、整理角色或导出。
               </p>
@@ -507,6 +572,7 @@ function ScriptEditorWorkspace() {
                 variant="outline"
                 onClick={() => decompose.mutate()}
                 disabled={
+                  !decomposition.ready ||
                   decompose.isPending ||
                   dirty ||
                   save.isPending ||
@@ -518,14 +584,20 @@ function ScriptEditorWorkspace() {
                 ) : (
                   <Clapperboard className="mr-1 h-4 w-4" />
                 )}
-                {tr("se.decompose")}
+                {decomposition.task?.status === "succeeded"
+                  ? "查看场次建议"
+                  : tr("se.decompose")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => extract.mutate()}
                 disabled={
-                  extract.isPending || dirty || save.isPending || serverChanged
+                  !extraction.ready ||
+                  extract.isPending ||
+                  dirty ||
+                  save.isPending ||
+                  serverChanged
                 }
               >
                 {extract.isPending ? (
@@ -533,7 +605,9 @@ function ScriptEditorWorkspace() {
                 ) : (
                   <Users className="mr-1 h-4 w-4" />
                 )}
-                {tr("se.extract")}
+                {extraction.task?.status === "succeeded"
+                  ? "查看角色与资产建议"
+                  : tr("se.extract")}
               </Button>
               <Button
                 size="sm"
@@ -720,7 +794,11 @@ function ScriptEditorWorkspace() {
                 >
                   {(
                     [
-                      { bt: "scene_heading", icon: Clapperboard, label: "场景" },
+                      {
+                        bt: "scene_heading",
+                        icon: Clapperboard,
+                        label: "场景",
+                      },
                       { bt: "action", icon: Activity, label: "动作" },
                       { bt: "character", icon: UserRound, label: "角色" },
                       { bt: "dialogue", icon: MessageCircle, label: "对白" },
@@ -794,7 +872,10 @@ function ScriptEditorWorkspace() {
                 <span className="writing-word-count">
                   {stats.words.toLocaleString()} 字
                 </span>
-                <span className="writing-save-hint" title="Ctrl / ⌘ + S 保存正文">
+                <span
+                  className="writing-save-hint"
+                  title="Ctrl / ⌘ + S 保存正文"
+                >
                   {dirty ? "草稿保留在当前浏览器" : "Ctrl / ⌘ + S 保存"}
                 </span>
               </footer>
@@ -807,9 +888,7 @@ function ScriptEditorWorkspace() {
           <aside className="writing-assistant" hidden={focusMode}>
             {/* 剧本数据(落库口径,对齐 Laper 右栏) */}
             <div className="writing-production-stats">
-              <div className="writing-stats-heading">
-                {tr("se.dbStats")}
-              </div>
+              <div className="writing-stats-heading">{tr("se.dbStats")}</div>
               {statsError ? (
                 <div role="alert" className="text-xs text-muted-foreground">
                   制作数据读取失败。
@@ -1026,14 +1105,16 @@ function BlockRow({
             title={tr("se.addBlock")}
             className="writing-block-action"
           >
-            <Plus size={15} />在下方添加段落
+            <Plus size={15} />
+            在下方添加段落
           </button>
           <button
             onClick={onRemove}
             title={tr("common.delete")}
             className="writing-block-action is-destructive"
           >
-            <Trash2 size={15} />删除段落
+            <Trash2 size={15} />
+            删除段落
           </button>
         </div>
       </details>

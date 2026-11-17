@@ -1023,7 +1023,7 @@ function GenerationPanelContent({
             <div role="alert" className="studio-empty">
               <p>
                 {zh
-                  ? "作品暂时无法加载，已有版本不会丢失。"
+                  ? "生成记录暂时无法加载，已有版本不会丢失。"
                   : "Results could not be loaded. Your versions are safe."}
               </p>
               <Button
@@ -1037,7 +1037,7 @@ function GenerationPanelContent({
           ) : gensLoading ? (
             <div role="status" className="studio-empty">
               <Loader2 size={20} className="animate-spin" />
-              {zh ? "正在读取作品…" : "Loading results…"}
+              {zh ? "正在读取生成记录…" : "Loading results…"}
             </div>
           ) : gens && gens.length > 0 ? (
             <>

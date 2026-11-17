@@ -26,6 +26,15 @@ def test_import_adapt_setting_scene_link_and_revision(studio, monkeypatch):
     novel = client.get(root + "/novels/" + imported.json()["id"]).json()
     assert len(novel["chapters"]) == 2 and novel["chapters"][0]["title"] == "第一章海边"
     chapter = novel["chapters"][0]["id"]
+    directory = client.get(root + f"/novels/{novel['id']}/directory")
+    assert directory.status_code == 200
+    assert len(directory.json()["chapters"]) == 2
+    assert all("content" not in item for item in directory.json()["chapters"])
+    body = client.get(root + f"/chapters/{chapter}")
+    assert body.status_code == 200
+    assert body.json() == novel["chapters"][0]
+    assert client.get(root + f"/chapters/{uuid.uuid4()}").status_code == 404
+
     post_ok(
         client,
         root + "/settings",
@@ -128,6 +137,9 @@ def test_foreign_or_archived_story_never_reaches_adapter(studio, monkeypatch):
         == 404
     )
     assert client.get(root + f"/scripts/{script_id}/scenes").status_code == 404
+    assert client.get(root + f"/chapters/{chapter_id}").status_code == 404
+    assert client.get(root + f"/chapters/{chapter_id}/script-task").status_code == 404
+    assert client.post(root + "/script-tasks", json={"chapter_id": chapter_id}).status_code == 404
     own = post_ok(client, root + "/settings", {"category": "character", "name": "写作者设定"})
     with sessions() as db:
         from sqlalchemy import select

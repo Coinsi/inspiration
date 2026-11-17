@@ -24,9 +24,18 @@ def list_supported_targets(ctx: ProjectContext = Depends(get_project_context)):
 
 @router.post("/chats", response_model=schemas.ChatDetailOut)
 def create_chat(
-    data: schemas.CreateChatIn, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")
+    data: schemas.CreateChatIn, reuse: bool = Query(False), ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")
 ):
-    chat = service.create_chat(db, ctx, data)
+    if reuse:
+        from sqlalchemy import select
+        from app.models.identity import Project
+        from app.modules.assist.targets import get_adapter
+        get_adapter(data.target_type).read(db, ctx.project.id, data.target_id)
+        db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
+        existing = service.list_chats(db, ctx.project.id, data.target_type, data.target_id)
+        chat = existing[0] if existing else service.create_chat(db, ctx, data)
+    else:
+        chat = service.create_chat(db, ctx, data)
     out = schemas.ChatDetailOut.model_validate(chat)
     out.state = service.get_chat_state(db, ctx.project.id, chat)
     return out

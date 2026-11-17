@@ -113,6 +113,7 @@ function CanvasList({ projectId }: { projectId: string }) {
   const base = `/projects/${projectId}/canvases`,
     list = useQuery({
       queryKey: ["canvases", projectId, offset],
+      staleTime: 30_000,
       queryFn: () => api.get<CanvasDoc[]>(`${base}?offset=${offset}`),
     });
   const selected = params.get("canvas") || list.data?.[0]?.id;
@@ -175,7 +176,7 @@ function CanvasList({ projectId }: { projectId: string }) {
           {error || list.error?.message}
         </p>
       )}
-      {list.isLoading ? (
+      {list.isLoading && !selected ? (
         <p>正在载入画布…</p>
       ) : selected ? (
         <ReactFlowProvider key={selected}>
@@ -314,12 +315,17 @@ function Editor({
   const draftKey = `canvas-draft:${me?.user.id}:${projectId}:${canvasId}`;
   const doc = useQuery({
     queryKey: ["canvas", canvasId],
+    staleTime: 30_000,
     queryFn: () => api.get<CanvasDoc>(path),
   });
   const runs = useQuery({
     queryKey: ["canvas-runs", canvasId, runOffset],
     queryFn: () => api.get<Run[]>(`${path}/runs?offset=${runOffset}`),
-    refetchInterval: 2000,
+    // Keep active runs responsive; still discover runs started from another tab.
+    refetchInterval: (query) =>
+      query.state.data?.some((run) => ["running", "queued"].includes(run.status))
+        ? 2000
+        : 15_000,
     enabled: loaded,
   });
   const history = useQuery({

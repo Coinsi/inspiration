@@ -32,6 +32,7 @@ export function WorkPicker({
   const [script, setScript] = useState("");
   const works = useQuery({
     queryKey: ["works", projectId],
+    staleTime: 30_000,
     queryFn: () => api.get<Work[]>(`${base}/works`),
   });
   const scripts = useQuery({

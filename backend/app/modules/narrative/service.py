@@ -144,6 +144,15 @@ def restore_novel(db: Session, ctx: ProjectContext, novel_id: uuid.UUID) -> Nove
     return n
 
 
+def chapter_directory(db: Session, novel_id: uuid.UUID):
+    """Read navigation metadata without loading chapter bodies."""
+    return db.execute(
+        select(Chapter.id, Chapter.ordinal, Chapter.title)
+        .where(Chapter.novel_id == novel_id)
+        .order_by(Chapter.ordinal)
+    ).mappings().all()
+
+
 def chapters_of(db: Session, novel_id: uuid.UUID) -> list[Chapter]:
     return list(
         db.scalars(select(Chapter).where(Chapter.novel_id == novel_id).order_by(Chapter.ordinal))

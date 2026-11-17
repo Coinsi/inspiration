@@ -56,6 +56,7 @@ export default function Works() {
   const base = `/projects/${projectId}`;
   const works = useQuery({
     queryKey: ["works", projectId],
+    staleTime: 30_000,
     queryFn: () => api.get<Work[]>(`${base}/works`),
   });
   if (workId)
