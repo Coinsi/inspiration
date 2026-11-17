@@ -47,7 +47,8 @@ def _num(v) -> float | None:
 def _chat(system, user, base_url, api_key, model, *, sdk_provider="openai"):
     from app.adapters.model_sdk import chat
 
-    return chat(system, user, base_url, api_key, model, provider=sdk_provider, temperature=0.3)[0]
+    # Keep the model's sampling default: reasoning models may reject overrides.
+    return chat(system, user, base_url, api_key, model, provider=sdk_provider)[0]
 
 
 def _parse_json(text: str) -> dict:
