@@ -1,5 +1,5 @@
 import { SearchField } from "@/components/ui/search-field";
-import { verificationLabel } from "../PersonalModelServices";
+import { verificationLabel } from "@/lib/model-config-scope";
 import {
   useEffect,
   useLayoutEffect,

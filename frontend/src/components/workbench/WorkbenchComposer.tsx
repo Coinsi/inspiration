@@ -37,6 +37,7 @@ import { MaterialVideoCover } from "@/components/MaterialVideoCover";
 
 import { JobStatus, ACTIVE_JOBS, JOB_LABEL } from "@/components/JobStatus";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { PersonalModelsDialog } from "./PersonalModelsDialog";
 import { ComposerParameters } from "./ComposerParameters";
 import { referenceProblem } from "./referenceProblem";
 import { referenceInput } from "./referenceInput";
@@ -46,11 +47,6 @@ import {
   type ComposerReference,
 } from "./ComposerReferences";
 import "./composer.css";
-const Services = lazy(() =>
-  import("@/components/PersonalModelServices").then((m) => ({
-    default: m.PersonalModelServices,
-  })),
-);
 const Agent = lazy(() =>
   import("@/pages/Agent").then((m) => ({ default: m.AgentWorkspace })),
 );
@@ -898,16 +894,9 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
           )}
         </section>
       ) : null}
-      <Modal
-        open={manage}
-        onClose={() => setManage(false)}
-        title="模型服务"
-        width={980}
-      >
-        <Suspense fallback={<p>正在读取服务…</p>}>
-          {manage && <Services projectId={projectId} />}
-        </Suspense>
-      </Modal>
+      {manage && (
+        <PersonalModelsDialog projectId={projectId} purpose={mode} onClose={() => setManage(false)} />
+      )}
       <Modal
         open={references}
         onClose={() => setReferences(false)}

@@ -376,3 +376,39 @@ def test_anthropic_native_stream_is_normalized():
         )
         assert content == "{}" and usage["total_tokens"] == 7
         assert json.loads(calls[0][3])["model"] == "claude-sonnet-4-20250514"
+
+
+@pytest.mark.parametrize(
+    ("vendor", "model", "path"),
+    [
+        ("openrouter", "google/gemini-2.5-flash-image", "/v1/chat/completions"),
+        ("dashscope", "qwen-image-plus", "/v1/services/aigc/multimodal-generation/generation"),
+    ],
+)
+def test_directory_image_sdks_use_configured_channel(vendor, model, path):
+    image_url = "https://media.example/image.png"
+    image_data = "data:image/png;base64," + base64.b64encode(PNG).decode()
+    response = (
+        {
+            "choices": [
+                {"message": {"images": [{"type": "image_url", "image_url": {"url": image_data}}]}}
+            ]
+        }
+        if vendor == "openrouter"
+        else {"output": {"choices": [{"message": {"content": [{"image": image_url}]}}]}}
+    )
+    with upstream(lambda *_: js(response)) as (ep, calls):
+        provider = LiteLLMMediaProvider(
+            ep,
+            "test",
+            {
+                "sdk_provider": vendor,
+                "model": model,
+                "modality": "image",
+            },
+        )
+        handle = provider.submit(GenerationRequest(request_type="image", prompt="garden"))
+        output = provider.poll(handle).outputs[0]
+        assert output.data == PNG if vendor == "openrouter" else output.url == image_url
+        assert [(method, url) for method, url, _, _ in calls] == [("POST", path)]
+        assert json.loads(calls[0][3])["model"] == model

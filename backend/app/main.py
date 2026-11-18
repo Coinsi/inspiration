@@ -48,6 +48,7 @@ from app.modules.shot.router import router as shot_router
 from app.modules.generation.channel_router import router as channel_router
 from app.modules.generation.model_router import router as creative_model_router
 from app.modules.generation.platform_router import router as platform_model_router
+from app.modules.generation.provider_templates import router as provider_template_router
 from app.modules.timeline.router import router as timeline_router
 from app.modules.narrative.tool_tasks import router as creative_tool_router
 
@@ -225,5 +226,9 @@ def ready():
     return JSONResponse(result, status_code=200 if result["status"] == "ok" else 503)
 
 from app.modules.generation.personal import router as personal_model_router
+from app.modules.generation.personal_channels import router as personal_channel_router
 app.include_router(personal_model_router, prefix="/api/v1")
+app.include_router(personal_channel_router, prefix="/api/v1")
 app.include_router(platform_model_router, prefix="/api/v1")
+
+app.include_router(provider_template_router, prefix="/api/v1")

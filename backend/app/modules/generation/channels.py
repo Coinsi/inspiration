@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import select
 
 from app.adapters.generation.litellm_media import SDK_PROVIDERS
+from app.adapters.generation.provider_media import MEDIA_ADAPTERS
 from app.core import audit
 from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
@@ -19,7 +20,30 @@ from app.modules.generation.model_catalog import Price
 from app.modules.generation.model_scope import lock_model_scope
 from app.modules.harness.kernel_modalities import InputCapabilities
 
+MEDIA_BRANDS = {
+    "xai": "xAI",
+    "minimax": "MiniMax",
+    "zhipu": "智谱",
+    "wavespeed": "WaveSpeed",
+    "kling": "可灵",
+    "heygen": "HeyGen",
+    "vidu": "Vidu",
+    "bfl": "Black Forest Labs",
+    "bailian": "阿里云百炼",
+    "openrouter": "OpenRouter",
+}
+
 PROTOCOLS = {
+    **{
+        adapter.name: {
+            "name": MEDIA_BRANDS[adapter.name.rsplit("_", 1)[0]]
+            + (" 图片" if adapter.modality == "image" else " 视频"),
+            "types": [adapter.modality],
+            "parameter_keys": sorted(adapter.allowed_parameters),
+            "max_refs": adapter.max_refs,
+        }
+        for adapter in MEDIA_ADAPTERS
+    },
     "litellm": {
         "name": "LiteLLM 多供应商 SDK",
         "types": ["image", "video"],
@@ -46,6 +70,9 @@ class ChannelIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     endpoint: str = Field(default="", max_length=512)
     token: str | None = Field(default=None, max_length=8192)
+    provider_template_id: str | None = Field(
+        default=None, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]*$"
+    )
     clear_token: bool = False
     enabled: bool = True
     revision: int | None = None
@@ -79,18 +106,7 @@ class ModelIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=100)
     model: str = Field(min_length=1, max_length=128)
-    protocol: Literal[
-        "litellm",
-        "gpt_image",
-        "openai_video",
-        "video_v1",
-        "cloud_llm",
-        "jimeng",
-        "mock",
-        "ark_image",
-        "ark_video",
-        "minimax_video",
-    ]
+    protocol: str = Field(min_length=1, max_length=64)
     sdk_provider: str = Field(default="openai", max_length=40)
     modality: Literal["image", "video", "text"]
     enabled: bool = True
@@ -107,6 +123,8 @@ class ModelIn(BaseModel):
 
     @model_validator(mode="after")
     def supported(self):
+        if self.protocol not in PROTOCOLS:
+            raise ValueError("未接入此协议")
         if self.protocol in ("litellm", "cloud_llm"):
             if self.sdk_provider not in SDK_PROVIDERS[self.modality]:
                 raise ValueError("所选供应商不支持该 SDK 接入用途")
@@ -143,7 +161,8 @@ class ModelIn(BaseModel):
         if self.protocol == "video_v1" and not self.parameters.get("duration"):
             raise ValueError("Video v1 必须配置时长选项，避免使用上游默认时长")
         limits = {"ark_image": 14, "ark_video": 2, "minimax_video": 1}
-        if self.protocol in limits and self.max_reference_images > limits[self.protocol]:
+        limit = PROTOCOLS[self.protocol].get("max_refs", limits.get(self.protocol, 16))
+        if self.max_reference_images > limit:
             raise ValueError("参考图上限超出该接口支持的范围")
         if self.modality == "text" and (self.parameters or self.max_reference_images):
             raise ValueError("文字模型不使用生成参数与参考图上限")
@@ -162,6 +181,7 @@ class ModelIn(BaseModel):
             allowed = {"duration", "resolution", "aspect_ratio"}
         if self.protocol == "minimax_video":
             allowed = {"duration", "resolution"}
+        allowed = set(PROTOCOLS[self.protocol].get("parameter_keys", allowed))
         if set(self.parameters) - allowed:
             raise ValueError("包含当前协议未支持的参数")
         for key, values in self.parameters.items():
@@ -246,6 +266,7 @@ def catalog(db, project_id):
                 "id": r.id,
                 "name": r.name,
                 "endpoint": r.endpoint,
+                "provider_template_id": r.provider_template_id,
                 "enabled": r.enabled,
                 "has_token": bool(r.credentials_encrypted),
                 "revision": r.revision,
@@ -260,6 +281,13 @@ def catalog(db, project_id):
         ),
         "protocols": PROTOCOLS,
     }
+
+
+def require_matching_credential_origin(ch, data):
+    if ch and ch.credentials_encrypted and not data.token and not data.clear_token:
+        old, new = urlsplit(ch.endpoint), urlsplit(data.endpoint)
+        if (old.scheme, old.netloc.lower()) != (new.scheme, new.netloc.lower()):
+            raise CapabilityUnsupported("切换服务地址的域名或协议后，请重新填写密钥")
 
 
 def save_channel(db, ctx, data, channel_id=None):
@@ -279,7 +307,10 @@ def save_channel(db, ctx, data, channel_id=None):
                 return existing
         row = ModelChannel(id=data.request_id or uuid.uuid4(), project_id=ctx.project.id)
         db.add(row)
+    require_matching_credential_origin(row, data)
     row.name, row.endpoint, row.enabled = data.name, data.endpoint, data.enabled
+    if "provider_template_id" in data.model_fields_set:
+        row.provider_template_id = data.provider_template_id
     if data.clear_token:
         row.credentials_encrypted = None
     elif data.token:
@@ -593,36 +624,65 @@ def model_snapshot(db, project_id, name):
     return {}
 
 
-def discover(db, ctx, channel_id):
+def discover(db, ctx, channel_id, purpose=None):
 
     ch = channel(db, ctx.project.id, channel_id)
-    return discover_connection(ch)
+    return discover_connection(ch, discovery_protocol(db, ch.provider_template_id), purpose=purpose)
 
 
 def check_connection(db, ctx, data, channel_id=None):
     ch = channel(db, ctx.project.id, channel_id) if channel_id else None
+    return check_channel_connection(db, ch, data)
+
+
+def check_channel_connection(db, ch, data):
+    require_matching_credential_origin(ch, data)
     credential = (
         encrypt(data.token)
         if data.token
         else (ch.credentials_encrypted if ch and not data.clear_token else None)
     )
     return discover_connection(
-        SimpleNamespace(endpoint=data.endpoint, credentials_encrypted=credential)
+        SimpleNamespace(endpoint=data.endpoint, credentials_encrypted=credential),
+        discovery_protocol(
+            db, data.provider_template_id or (ch.provider_template_id if ch else None)
+        ),
     )
 
 
-def discover_connection(ch):
+def discovery_protocol(db, template_id):
+    from app.modules.generation.provider_templates import listing
+
+    template = next((t for t in listing(db, True) if t["id"] == template_id), None)
+    return template.get("discovery_protocol", "openai") if template else "openai"
+
+
+def discover_connection(ch, protocol="openai", *, purpose=None):
     from app.core.crypto import decrypt
 
     if not ch.endpoint or not ch.credentials_encrypted:
         raise CapabilityUnsupported("请先保存服务地址和密钥")
+    if protocol == "manual":
+        raise CapabilityUnsupported("此服务不提供模型目录，请按供应商文档手动填写模型 ID")
+    token = decrypt(ch.credentials_encrypted)
+    endpoint = ch.endpoint.rstrip("/")
+    headers = {"Authorization": "Bearer " + token}
+    if protocol == "anthropic":
+        endpoint = endpoint if endpoint.endswith("/v1") else endpoint + "/v1"
+        headers = {"x-api-key": token, "anthropic-version": "2023-06-01"}
+    elif protocol == "gemini":
+        endpoint = endpoint if endpoint.endswith(("/v1beta", "/v1")) else endpoint + "/v1beta"
+        headers = {"x-goog-api-key": token}
     try:
         # Never follow redirects with a stored credential; connection test does not generate media.
         with httpx.Client(timeout=15, follow_redirects=False) as client:
             with client.stream(
                 "GET",
-                ch.endpoint + "/models",
-                headers={"Authorization": "Bearer " + decrypt(ch.credentials_encrypted)},
+                endpoint + "/models",
+                params={"output_modalities": purpose}
+                if protocol == "openrouter" and purpose
+                else None,
+                headers=headers,
             ) as response:
                 if response.status_code != 200:
                     raise ProviderError(
@@ -636,19 +696,39 @@ def discover_connection(ch):
         import json
 
         payload = json.loads(data)
-        models = payload.get("data")
+        models = payload.get("models" if protocol == "gemini" else "data")
+        if protocol == "gemini" and isinstance(models, list):
+            models = [
+                {"id": x["name"].removeprefix("models/"), "name": x.get("displayName")}
+                for x in models
+                if isinstance(x, dict) and isinstance(x.get("name"), str)
+            ]
         if not isinstance(models, list):
             raise ValueError()
-        ids = sorted(
-            {
-                x["id"]
-                for x in models
-                if isinstance(x, dict) and isinstance(x.get("id"), str) and 0 < len(x["id"]) <= 128
-            }
-        )
+        details = {}
+        for entry in models:
+            if not isinstance(entry, dict):
+                continue
+            code = entry.get("id")
+            if not isinstance(code, str) or not 0 < len(code) <= 128:
+                continue
+            item = {"id": code}
+            title = entry.get("name") or entry.get("display_name")
+            if isinstance(title, str) and title.strip() and title != code:
+                item["name"] = title.strip()[:160]
+            architecture = entry.get("architecture")
+            outputs = (
+                architecture.get("output_modalities") if isinstance(architecture, dict) else None
+            )
+            if isinstance(outputs, list) and outputs:
+                item["outputs"] = [x for x in outputs if isinstance(x, str)]
+            details[code] = item
+        ids = sorted(details)
         return {
             "models": ids[:1000],
-            "truncated": len(ids) > 1000,
+            "details": [details[k] for k in ids[:1000]],
+            "truncated": len(ids) > 1000
+            or bool(payload.get("nextPageToken") or payload.get("has_more")),
             "message": "目录连接成功；生成能力仍需按协议配置，不代表所有模型均可生成图片或视频",
         }
     except ProviderError:

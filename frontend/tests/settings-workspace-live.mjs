@@ -52,7 +52,7 @@ try {
   await page.goto(`${base}${root}/settings`);
   const nav = page.getByRole("navigation", { name: "设置分类" });
   await nav.waitFor();
-  await page.getByRole("button", { name: "添加渠道", exact: true }).waitFor();
+  await page.getByRole("region", { name: "我的模型服务" }).waitFor();
   await page.screenshot({ path: `${out}/settings-channels-dark.png` });
   await nav.getByRole("button", { name: /项目资料/ }).click();
   await page.getByRole("button", { name: "管理项目封面", exact: true }).click();
@@ -180,6 +180,15 @@ try {
   await page.getByRole("link", { name: "进入资产库", exact: true }).click();
   await page.getByText("迁移入口的海岸", { exact: true }).waitFor();
   assert.equal((await call("get", root + "/assets")).length, 1);
+  await page.goto(`${base}${root}/workbench?view=chat`);
+  const draft = page.getByRole("textbox", { name: "对话消息" });
+  await draft.fill("检查个人模型设置时保留的草稿");
+  await page.getByRole("button", { name: "选择创作模型", exact: true }).click();
+  await page.getByRole("button", { name: "连接或管理模型服务", exact: true }).click();
+  const services = page.getByRole("dialog", { name: "我的模型服务", exact: true });
+  await services.getByRole("navigation", { name: "模型用途" }).waitFor();
+  await services.getByRole("button", { name: "关闭", exact: true }).click();
+  assert.equal(await draft.inputValue(), "检查个人模型设置时保留的草稿");
   await page.goto(`${base}${root}/settings?section=quota`);
   await quota.waitFor();
   await page.route("**/api/v1/me", async (route) => {
@@ -198,10 +207,10 @@ try {
     await page.getByRole("button", { name: "保存配额", exact: true }).count(),
     0,
   );
-  await nav.getByRole("button", { name: /渠道与模型/ }).click();
-  await page.getByText(/渠道、密钥和模型由项目管理员管理/).waitFor();
+  await nav.getByRole("button", { name: /模型服务/ }).click();
+  await page.getByRole("region", { name: "我的模型服务" }).waitFor();
   assert.equal(
-    await page.getByRole("button", { name: "添加渠道", exact: true }).count(),
+    await page.getByRole("button", { name: "项目专用服务", exact: true }).count(),
     0,
   );
   assert.deepEqual(errors, []);

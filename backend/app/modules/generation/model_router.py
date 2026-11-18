@@ -33,6 +33,14 @@ def create_router(prefix, manage):
     ):
         return catalog.import_profiles(db, ctx)
 
+    @router.post("/clear-default")
+    def clear_default(
+        data: catalog.ClearDefaultIn,
+        ctx: ProjectContext = Depends(MANAGE),
+        db: Session = Depends(get_db, scope="function"),
+    ):
+        return catalog.clear_default(db, ctx, data.modality)
+
     @router.post("/select-default")
     def select_default(
         data: catalog.DefaultModelIn,

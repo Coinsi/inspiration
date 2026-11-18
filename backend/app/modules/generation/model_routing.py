@@ -7,12 +7,15 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from app.adapters.contracts import GenerationProvider, JobHandle, generation_registry
+from app.adapters.generation.provider_media import MEDIA_ADAPTERS
 from app.core.crypto import decrypt
 from app.core.errors import CapabilityUnsupported, Conflict, ProviderError
 from app.models.generation import GenerationJob
 from app.modules.generation import model_catalog as catalog
 
-RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video"}
+RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video"} | {
+    adapter.name for adapter in MEDIA_ADAPTERS if adapter.resumable
+}
 
 
 def resumable_profile(profile):

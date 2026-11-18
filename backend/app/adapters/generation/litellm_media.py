@@ -22,7 +22,7 @@ from app.core.errors import CapabilityUnsupported, ProviderError
 # SDK-supported IAM/service-account providers need a separate credential contract.
 SDK_PROVIDERS = {
     "text": ("openai", "anthropic", "gemini", "deepseek", "mistral", "groq", "xai", "openrouter"),
-    "image": ("openai", "gemini", "fal_ai", "recraft", "black_forest_labs"),
+    "image": ("openai", "gemini", "fal_ai", "recraft", "black_forest_labs", "openrouter", "dashscope"),
     "video": ("openai", "gemini", "runwayml", "fal_ai"),
 }
 
@@ -111,6 +111,8 @@ class LiteLLMMediaProvider(GenerationProvider):
     def submit(self, req):
         self.validate_request(req)
         params = connection(self.endpoint, self.token, self.provider)
+        if self.provider == "dashscope" and self.modality == "image" and self.endpoint:
+            params["api_base"] = self.endpoint.rstrip("/") + "/services/aigc/multimodal-generation/generation"
         params.update(model=self.model, prompt=req.prompt)
         params.update({**req.params, **req.provider_params})
         images = [BytesIO(image_file(ref)[1]) for ref in req.references]

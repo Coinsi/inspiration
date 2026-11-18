@@ -86,17 +86,21 @@ export function DefaultModels({
   const [notice, setNotice] = useState("");
   const models = useQuery({
     queryKey: ["creative-models", projectId],
-    queryFn: () => api.get<Model[]>(`${modelConfigRoot(projectId)}/creative-models`),
+    queryFn: () =>
+      api.get<Model[]>(`${modelConfigRoot(projectId)}/creative-models`),
   });
   const shared = useQuery({
     queryKey: ["providers", projectId],
-    queryFn: () => api.get<ProviderConfig[]>(`/projects/${projectId}/providers`),
+    queryFn: () =>
+      api.get<ProviderConfig[]>(`/projects/${projectId}/providers`),
     enabled: projectId !== "platform",
   });
   const channels = useQuery({
     queryKey: ["model-channels", projectId],
     queryFn: () =>
-      api.get<{ channels: Channel[] }>(`${modelConfigRoot(projectId)}/model-channels`),
+      api.get<{ channels: Channel[] }>(
+        `${modelConfigRoot(projectId)}/model-channels`,
+      ),
   });
   const choose = useMutation({
     mutationFn: (item: Choice) =>
@@ -107,11 +111,33 @@ export function DefaultModels({
     onSuccess: async (_, item) => {
       await Promise.all(
         ["creative-models", "model-channels", "providers", "capabilities"].map(
-          (key) => qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) }),
+          (key) =>
+            qc.invalidateQueries({
+              queryKey: modelConfigQueryKey(key, projectId),
+            }),
         ),
       );
       setNotice(
         `已将 ${item.name} 设为默认${groups.find((g) => g.type === item.modality)?.name.slice(2) || "模型"}`,
+      );
+    },
+  });
+  const clearDefault = useMutation({
+    mutationFn: (modality: string) =>
+      api.post(`${modelConfigRoot(projectId)}/creative-models/clear-default`, {
+        modality,
+      }),
+    onSuccess: async () => {
+      await Promise.all(
+        ["creative-models", "model-channels", "providers", "capabilities"].map(
+          (key) =>
+            qc.invalidateQueries({
+              queryKey: modelConfigQueryKey(key, projectId),
+            }),
+        ),
+      );
+      setNotice(
+        "已取消默认选择，模型仍可使用。后续调用遵循平台或可用模型的回退规则。",
       );
     },
   });
@@ -173,12 +199,12 @@ export function DefaultModels({
           <ArrowRight size={14} />
         </Button>
       </header>
-      {(notice || choose.error) && (
+      {(notice || choose.error || clearDefault.error) && (
         <p
           className="model-settings-notice"
-          role={choose.error ? "alert" : "status"}
+          role={choose.error || clearDefault.error ? "alert" : "status"}
         >
-          {choose.error?.message || notice}
+          {choose.error?.message || clearDefault.error?.message || notice}
         </p>
       )}
       {error ? (
@@ -199,8 +225,16 @@ export function DefaultModels({
       ) : (
         groups.map((group) => {
           const items = choices.filter((m) => m.modality === group.type);
-          const inherited = (shared.data || []).filter(m => m.enabled && m.config.scope === "platform" && !m.config.hidden_from_catalog && (m.config.modality || (m.kind === "llm" ? "text" : "image")) === group.type);
-          const platformDefault = inherited.find(m => m.config.is_default) || inherited[0];
+          const inherited = (shared.data || []).filter(
+            (m) =>
+              m.enabled &&
+              m.config.scope === "platform" &&
+              !m.config.hidden_from_catalog &&
+              (m.config.modality || (m.kind === "llm" ? "text" : "image")) ===
+                group.type,
+          );
+          const platformDefault =
+            inherited.find((m) => m.config.is_default) || inherited[0];
           const Icon = group.icon;
           return (
             <section
@@ -217,6 +251,15 @@ export function DefaultModels({
                   <p>{group.description}</p>
                 </div>
                 <small>{items.filter((m) => m.ready).length} 个已配置</small>
+                {items.some((m) => m.selected) && (
+                  <Button
+                    variant="ghost"
+                    disabled={clearDefault.isPending || choose.isPending}
+                    onClick={() => clearDefault.mutate(group.type)}
+                  >
+                    取消默认
+                  </Button>
+                )}
               </header>
               {items.length ? (
                 <div
@@ -238,7 +281,11 @@ export function DefaultModels({
                           ? 0
                           : -1
                       }
-                      disabled={!item.ready || choose.isPending}
+                      disabled={
+                        !item.ready ||
+                        choose.isPending ||
+                        clearDefault.isPending
+                      }
                       onKeyDown={(event) => {
                         if (
                           ![
@@ -297,7 +344,11 @@ export function DefaultModels({
                 </div>
               ) : (
                 <div className="default-model-empty">
-                  <p>{platformDefault ? `使用平台模型：${platformDefault.display_name || platformDefault.provider_name}` : `还没有连接${group.name.slice(2, 4)}模型`}</p>
+                  <p>
+                    {platformDefault
+                      ? `使用平台模型：${platformDefault.display_name || platformDefault.provider_name}`
+                      : `还没有连接${group.name.slice(2, 4)}模型`}
+                  </p>
                   <button onClick={connect}>
                     {platformDefault ? "配置项目专用模型" : "添加模型服务"}
                     <ArrowRight size={13} />
@@ -309,7 +360,9 @@ export function DefaultModels({
         })
       )}
       <p className="model-settings-footnote">
-        {projectId === "platform" ? "全局模型供所有用户使用。项目已有默认配置时优先使用项目配置；已有任务保留原模型。平台承担这些渠道的调用费用。" : "默认选择对当前项目生效，已有任务和画布节点保留原来的模型。模型是否能生成，仍取决于服务权限和余额。"}
+        {projectId === "platform"
+          ? "全局模型供所有用户使用。项目已有默认配置时优先使用项目配置；已有任务保留原模型。平台承担这些渠道的调用费用。"
+          : "默认选择对当前项目生效，已有任务和画布节点保留原来的模型。模型是否能生成，仍取决于服务权限和余额。"}
       </p>
     </section>
   );

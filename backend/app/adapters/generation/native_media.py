@@ -61,7 +61,7 @@ class NativeMedia(GenerationProvider):
                 raise CapabilityUnsupported("当前模型不支持所选参数值，请重新选择")
         if self.modality == "video":
             roles = [r.role for r in req.references]
-            if any(r not in ("ref", "first_frame", "last_frame") for r in roles):
+            if any(r not in ("ref", "reference", "first_frame", "last_frame") for r in roles):
                 raise CapabilityUnsupported("当前视频接口只支持首帧或首尾帧图片")
             if len(roles) == 1 and roles[0] == "last_frame":
                 raise CapabilityUnsupported("请先添加首帧图片，再使用尾帧")
@@ -75,15 +75,18 @@ class NativeMedia(GenerationProvider):
             detail={"pricing": "unknown", "message": "未配置内部积分，实际费用以上游账单为准"},
         )
 
-    def _request(self, method, path, **kwargs):
+    def _headers(self):
+        return {"Authorization": "Bearer " + self.token}
+
+    def _request(self, method, path, *, origin=None, **kwargs):
         if not self.endpoint or not self.token:
             raise ProviderError("请先填写服务密钥")
         try:
             with httpx.Client(timeout=180, follow_redirects=False) as client:
                 with client.stream(
                     method,
-                    self.endpoint + path,
-                    headers={"Authorization": "Bearer " + self.token},
+                    (origin or self.endpoint) + path,
+                    headers=self._headers(),
                     **kwargs,
                 ) as response:
                     if not response.is_success:
@@ -221,7 +224,7 @@ class ArkVideoProvider(NativeMedia):
                 {
                     "type": "image_url",
                     "image_url": {"url": self._image(ref)},
-                    "role": "first_frame" if ref.role == "ref" else ref.role,
+                    "role": "first_frame" if ref.role in ("ref", "reference") else ref.role,
                 }
             )
         body = {"model": self.config["model"], "content": content}

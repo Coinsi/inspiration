@@ -78,6 +78,7 @@ import {
 } from "./ConversationContext";
 import type { SkillUse } from "@/lib/skills";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { PersonalModelsDialog } from "./PersonalModelsDialog";
 import { ConversationTaskState } from "./ConversationTaskState";
 import { ProductionTask } from "./ProductionTask";
 import { ConversationListItem } from "./ConversationListItem";
@@ -191,6 +192,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     [],
   );
   const [contextOpen, setContextOpen] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(false);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [fileDrag, setFileDrag] = useState(false);
   const attachments = useConversationAttachments(projectId, scopeKey);
@@ -1318,6 +1320,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               models={displayedModels || models}
               value={mode === "text" ? selectedProvider : media.provider}
               onChange={mode === "text" ? setProvider : media.choose}
+              manage={() => setModelsOpen(true)}
               disabled={busy}
               loading={providers.isPending}
               error={providers.error?.message}
@@ -1465,6 +1468,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           )}
         </Suspense>
       </Modal>
+      {modelsOpen && (
+        <PersonalModelsDialog projectId={projectId} purpose={mode} onClose={() => setModelsOpen(false)} />
+      )}
     </section>
     </ThreadPrimitive.Root>
     </AssistantConversation>

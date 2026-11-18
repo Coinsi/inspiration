@@ -5,3 +5,5 @@ Source: https://github.com/lobehub/lobe-icons/tree/329f378cbd1a88f45b60cd096b911
 Selected original SVGs from LobeHub Icons, the icon library also used by the reference product. MIT license retained in LICENSE. Brand marks belong to their respective owners and identify compatible models; no affiliation is implied.
 
 Monochrome OpenAI uses a CSS mask to inherit the current theme color; colored marks retain their original colors. Qwen is the Tongyi family mark used for the Wan grouping.
+
+Provider directory additions use the same pinned MIT source: OpenRouter (colored), Bailian, Zhipu, xAI, Kling, Vidu, Black Forest Labs, WaveSpeed and the ByteDance family mark for BytePlus. Icons identify brands only; an icon does not imply that every modality is implemented.

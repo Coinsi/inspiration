@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useDialogFocus } from "./ui/useDialogFocus";
 import { useConfirm } from "./ui/confirm";
 import { useI18n } from "@/lib/i18n";
@@ -54,7 +55,7 @@ export function EditorFrame({
       document.body.style.overflow = overflow;
     };
   }, []);
-  return (
+  return createPortal(
     <div className="model-overlay">
       <section
         className="model-dialog"
@@ -76,6 +77,7 @@ export function EditorFrame({
         </header>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

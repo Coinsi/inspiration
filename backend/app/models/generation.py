@@ -31,6 +31,7 @@ class ModelChannel(Base, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     endpoint: Mapped[str] = mapped_column(String(512), default="")
+    provider_template_id: Mapped[str | None] = mapped_column(String(80))
     credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     revision: Mapped[int] = mapped_column(Integer, default=1)
@@ -155,3 +156,12 @@ class Generation(Base, TimestampMixin):
         embedding = mapped_column(Vector(512), nullable=True)
 
     __table_args__ = (Index("ix_generation_target", "target_type", "target_id"),)
+
+
+class ProviderTemplate(Base, TimestampMixin):
+    """Public onboarding metadata; never stores credentials or executable adapters."""
+
+    __tablename__ = "provider_template"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    definition: Mapped[dict] = mapped_column(JSONB, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=1)

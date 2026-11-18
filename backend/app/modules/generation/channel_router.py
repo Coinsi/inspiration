@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -88,10 +89,11 @@ def create_router(prefix, manage):
     @router.post("/{channel_id}/discover")
     def discover(
         channel_id: uuid.UUID,
+        purpose: Literal["text", "image", "video"] | None = None,
         ctx: ProjectContext = Depends(MANAGE),
         db: Session = Depends(get_db, scope="function"),
     ):
-        return channels.discover(db, ctx, channel_id)
+        return channels.discover(db, ctx, channel_id, purpose)
 
     @router.post("/{channel_id}/models")
     def add_model(

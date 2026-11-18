@@ -1,5 +1,7 @@
+import { useSearchParams } from "react-router-dom";
+import { ProviderWorkspace } from "./ProviderWorkspace";
 import { connectionProtocol } from "@/lib/model-connection";
-import { modelConfigRoot, modelConfigQueryKey } from "@/lib/model-config-scope";
+import { modelConfigRoot, modelConfigQueryKey, type ModelVerification } from "@/lib/model-config-scope";
 import { ModelDirectory, modelSuggestion } from "./ModelDirectory";
 import { SelectField } from "./ui/select-field";
 import { PersonalModelServices } from "./PersonalModelServices";
@@ -22,7 +24,6 @@ import { Input } from "@/components/ui/input";
 import "./model-channels.css";
 import { EditorFrame } from "./ModelEditorFrame";
 import { CreativeModels, PriceFields, type ModelPrice } from "./CreativeModels";
-import { ConnectModelService } from "./ConnectModelService";
 import { DefaultModels } from "./DefaultModels";
 import "./model-settings.css";
 import {
@@ -31,7 +32,7 @@ import {
   type ModelInputCapabilities,
 } from "./ModelInputCapabilities";
 
-type Model = {
+export type Model = {
   id: string;
   provider_name: string;
   name: string;
@@ -49,8 +50,14 @@ type Model = {
   parameters: Record<string, (string | number)[]>;
   price: ModelPrice;
   input_capabilities?: ModelInputCapabilities;
+  verification?: ModelVerification;
 };
-type Channel = {
+export type SuggestedModel = Pick<Model, "name" | "model" | "protocol" | "modality"> &
+  Partial<Pick<Model, "parameters" | "max_reference_images" | "max_reference_videos" | "max_video_seconds">> &
+  { lifecycle_note?: string };
+export type Channel = {
+  provider_template_id?: string | null;
+  preset_id?: string;
   id: string;
   name: string;
   endpoint: string;
@@ -59,10 +66,20 @@ type Channel = {
   revision: number;
   models: Model[];
 };
-type Catalog = {
+export type Catalog = {
   channels: Channel[];
   legacy_count: number;
-  protocols: Record<string, { name: string; types: string[]; sdk_providers?: Record<string, string[]> }>;
+  suggestions?: Record<string, SuggestedModel[]>;
+  protocols: Record<
+    string,
+    {
+      name: string;
+      types: string[];
+      sdk_providers?: Record<string, string[]>;
+      parameter_keys?: string[];
+      max_refs?: number;
+    }
+  >;
 };
 const kinds: Record<string, string> = {
   image: "图片",
@@ -85,20 +102,30 @@ export function ModelChannels({
   initialTab?: "defaults" | "services";
 }) {
   const platform = projectId === "platform";
-  const [tab, setTab] = useState<string>(platform ? initialTab : "personal");
-  const [connecting, setConnecting] = useState(false);
-  const [manualRequest, setManualRequest] = useState(false);
-  const [notice, setNotice] = useState("");
-  const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const requestedTab = params.get("tab");
+  const tabs = platform
+    ? ["defaults", "services", "advanced"]
+    : ["personal", "defaults", "services", "advanced"];
+  const tab = requestedTab && tabs.includes(requestedTab)
+    ? requestedTab
+    : platform ? initialTab : "personal";
+  function setTab(next: "personal" | "defaults" | "services" | "advanced") {
+    const updated = new URLSearchParams(params);
+    updated.set("tab", next);
+    setParams(updated, { replace: true, preventScrollReset: true });
+  }
   return (
     <div className="model-config-workspace">
       <nav className="model-settings-nav" aria-label="模型设置分区">
-        {!platform && <button
-          aria-pressed={tab === "personal"}
-          onClick={() => setTab("personal")}
-        >
-          我的模型服务
-        </button>}
+        {!platform && (
+          <button
+            aria-pressed={tab === "personal"}
+            onClick={() => setTab("personal")}
+          >
+            我的模型服务
+          </button>
+        )}
         <button
           aria-pressed={tab === "defaults"}
           onClick={() => setTab("defaults")}
@@ -118,65 +145,44 @@ export function ModelChannels({
           高级路由
         </button>
       </nav>
-      <button className="text-sm text-muted-foreground underline mb-4" onClick={() => setConnecting(true)}>使用官方服务预设</button>
-      {notice && (
-        <p role="status" className="model-settings-notice">
-          {notice}
-        </p>
-      )}
+
       {tab === "personal" ? (
-        <PersonalModelServices projectId={projectId} />
+        <PersonalModelServices projectId={projectId} inProjectSettings />
       ) : tab === "defaults" ? (
         <DefaultModels
           projectId={projectId}
-          connect={() => { setTab("services"); setManualRequest(true); }}
+          connect={() => {
+            setTab("services");
+          }}
           services={() => setTab("services")}
         />
       ) : tab === "services" ? (
-        <ChannelsPane
-          projectId={projectId}
-          connectService={() => { setTab("services"); setManualRequest(true); }}
-          manualRequest={manualRequest}
-          manualHandled={() => setManualRequest(false)}
-        />
+        <ProviderWorkspace projectId={projectId} />
       ) : (
-        <CreativeModels
-          projectId={projectId}
-          openChannels={() => setTab("services")}
-          connectService={() => { setTab("services"); setManualRequest(true); }}
-        />
-      )}
-      {connecting && (
-        <ConnectModelService
-          projectId={projectId}
-          close={() => setConnecting(false)}
-          custom={() => {
-            setConnecting(false);
-            setTab("services");
-            setManualRequest(true);
-          }}
-          saved={async (message) => {
-            await Promise.all(
-              [
-                "model-channels",
-                "creative-models",
-                "providers",
-                "capabilities",
-              ].map((key) =>
-                qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) }),
-              ),
-            );
-            setNotice(message);
-            setConnecting(false);
-            setTab("defaults");
-          }}
-        />
+        <>
+          <CreativeModels
+            projectId={projectId}
+            openChannels={() => setTab("services")}
+            connectService={() => {
+              setTab("services");
+            }}
+          />
+          <details className="mt-6">
+            <summary>高级连接管理与旧配置导入</summary>
+            <ChannelsPane
+              projectId={projectId}
+              connectService={() => setTab("services")}
+              manualRequest={false}
+              manualHandled={() => {}}
+            />
+          </details>
+        </>
       )}
     </div>
   );
 }
 
-function ChannelsPane({
+export function ChannelsPane({
   projectId,
   connectService,
   manualRequest,
@@ -222,7 +228,9 @@ function ChannelsPane({
       "providers",
       "capabilities",
     ])
-      await qc.invalidateQueries({ queryKey: modelConfigQueryKey(key, projectId) });
+      await qc.invalidateQueries({
+        queryKey: modelConfigQueryKey(key, projectId),
+      });
   };
   const remove = useMutation({
     mutationFn: (channel: Channel) =>
@@ -230,9 +238,7 @@ function ChannelsPane({
     onSuccess: async () => {
       setSelected("");
       setDirectory(null);
-      setNotice(
-        "服务及其模型已删除，作品和历史记录保留。请重新检查默认模型。",
-      );
+      setNotice("服务及其模型已删除，作品和历史记录保留。请重新检查默认模型。");
       await refresh();
     },
   });
@@ -261,15 +267,32 @@ function ChannelsPane({
   });
   const batchIds = useRef(new Map<string, string>());
   const addMany = useMutation({
-    mutationFn: ({channel, items}: {channel: Channel; items: {code: string; modality: string}[]}) => {
-      const models = items.map(item => {
+    mutationFn: ({
+      channel,
+      items,
+    }: {
+      channel: Channel;
+      items: { code: string; modality: string }[];
+    }) => {
+      const models = items.map((item) => {
         const key = `${channel.id}:${item.code}:${item.modality}`;
-        if (!batchIds.current.has(key)) batchIds.current.set(key, crypto.randomUUID());
-        return { name: item.code.slice(0, 100), model: item.code, modality: item.modality, protocol: connectionProtocol(channel.endpoint, item.modality), request_id: batchIds.current.get(key) };
+        if (!batchIds.current.has(key))
+          batchIds.current.set(key, crypto.randomUUID());
+        return {
+          name: item.code.slice(0, 100),
+          model: item.code,
+          modality: item.modality,
+          protocol: connectionProtocol(channel.endpoint, item.modality),
+          request_id: batchIds.current.get(key),
+        };
       });
       return api.post(`${base}/${channel.id}/models/batch`, { models });
     },
-    onSuccess: async () => { await refresh(); setDirectoryOpen(false); setNotice("模型已添加，可在创作中选择；实际生成能力尚未验证。"); },
+    onSuccess: async () => {
+      await refresh();
+      setDirectoryOpen(false);
+      setNotice("模型已添加，可在创作中选择；实际生成能力尚未验证。");
+    },
   });
   const migrate = useMutation({
     mutationFn: () => api.post<{ imported: number }>(`${base}/import-legacy`),
@@ -297,7 +320,11 @@ function ChannelsPane({
       <header className="model-settings-heading">
         <div>
           <h2>服务连接</h2>
-          <p>{projectId === "platform" ? "供所有用户使用的模型服务。一份连接可以提供多个模型。" : "管理当前项目使用的模型服务。一份连接可以提供多个模型。"}</p>
+          <p>
+            {projectId === "platform"
+              ? "供所有用户使用的模型服务。一份连接可以提供多个模型。"
+              : "管理当前项目使用的模型服务。一份连接可以提供多个模型。"}
+          </p>
         </div>
         <Button onClick={connectService}>
           <Plus size={15} />
@@ -493,7 +520,12 @@ function ChannelsPane({
           key={`${directory.channel}-${directoryOpen}`}
           busy={addMany.isPending}
           error={addMany.error?.message}
-          addMany={(items) => addMany.mutate({channel: data.channels.find(c => c.id === directory.channel)!, items})}
+          addMany={(items) =>
+            addMany.mutate({
+              channel: data.channels.find((c) => c.id === directory.channel)!,
+              items,
+            })
+          }
           open={directoryOpen}
           name={data.channels.find((c) => c.id === directory.channel)!.name}
           models={directory.models}
@@ -535,9 +567,7 @@ function ChannelsPane({
             await refresh();
             setDirectoryOpen(!!modelEdit.code);
             setModelEdit(null);
-            setNotice(
-              "模型已保存，可在创作时选择，或在默认模型中设为默认。",
-            );
+            setNotice("模型已保存，可在创作时选择，或在默认模型中设为默认。");
           }}
         />
       )}
@@ -545,7 +575,7 @@ function ChannelsPane({
   );
 }
 
-function ChannelEditor({
+export function ChannelEditor({
   base,
   channel,
   close,
@@ -566,7 +596,16 @@ function ChannelEditor({
   const [requestId] = useState(() => crypto.randomUUID());
   const [readModels, setReadModels] = useState(false);
   const check = useMutation({
-    mutationFn: () => api.post<{message: string}>(`${base}/check${channel ? `?channel_id=${channel.id}` : ""}`, { name: name || "连接检测", endpoint, token: token || null, clear_token: clear }),
+    mutationFn: () =>
+      api.post<{ message: string }>(
+        `${base}/check${channel ? `?channel_id=${channel.id}` : ""}`,
+        {
+          name: name || "连接检测",
+          endpoint,
+          token: token || null,
+          clear_token: clear,
+        },
+      ),
   });
   const save = useMutation({
     mutationFn: () => {
@@ -600,13 +639,19 @@ function ChannelEditor({
       busy={save.isPending || check.isPending}
     >
       <form
-        onChange={() => { setDirty(true); check.reset(); }}
+        onChange={() => {
+          setDirty(true);
+          check.reset();
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           save.mutate();
         }}
       >
-        <fieldset disabled={save.isPending || check.isPending} className="model-form">
+        <fieldset
+          disabled={save.isPending || check.isPending}
+          className="model-form"
+        >
           <label>
             服务名称
             <Input
@@ -627,7 +672,9 @@ function ChannelEditor({
               onChange={(e) => setEndpoint(e.target.value)}
               placeholder="https://你的服务地址/v1"
             />
-            <small>填写服务提供的 API 基础地址，例如 https://example.com/v1。</small>
+            <small>
+              填写服务提供的 API 基础地址，例如 https://example.com/v1。
+            </small>
           </label>
           <label>
             API Key
@@ -669,25 +716,61 @@ function ChannelEditor({
               {save.error.message}
             </p>
           )}
-          {(check.data || check.error) && <p role={check.error ? "alert" : "status"}>{check.error?.message || check.data?.message}</p>}
+          {(check.data || check.error) && (
+            <p role={check.error ? "alert" : "status"}>
+              {check.error?.message || check.data?.message}
+            </p>
+          )}
           <div className="flex flex-wrap gap-3">
-            <Button type="button" variant="outline" disabled={!endpoint.trim() || (!token.trim() && (!channel?.has_token || clear))} onClick={() => check.mutate()}>{check.isPending ? "检测中…" : "检测连接"}</Button>
-            <Button type="submit" variant="outline" disabled={!name.trim()} onClick={() => setReadModels(false)}>保存连接</Button>
-            <Button type="submit" disabled={!name.trim() || !endpoint.trim() || (!token.trim() && (!channel?.has_token || clear))} onClick={() => setReadModels(true)}>{save.isPending ? "保存中…" : "保存并读取模型"}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                !endpoint.trim() ||
+                (!token.trim() && (!channel?.has_token || clear))
+              }
+              onClick={() => check.mutate()}
+            >
+              {check.isPending ? "检测中…" : "检测连接"}
+            </Button>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={!name.trim()}
+              onClick={() => setReadModels(false)}
+            >
+              保存连接
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                !name.trim() ||
+                !endpoint.trim() ||
+                (!token.trim() && (!channel?.has_token || clear))
+              }
+              onClick={() => setReadModels(true)}
+            >
+              {save.isPending ? "保存中…" : "保存并读取模型"}
+            </Button>
           </div>
-          <small>检测只检查地址、鉴权与模型目录，不发起付费生成。无法读取目录时，也可以保存连接后手动添加模型。</small>
+          <small>
+            检测只检查地址、鉴权与模型目录，不发起付费生成。无法读取目录时，也可以保存连接后手动添加模型。
+          </small>
         </fieldset>
       </form>
     </EditorFrame>
   );
 }
 
-function ModelEditor({
+export function ModelEditor({
   base,
   channel,
   model,
   protocols,
   initialCode = "",
+  defaults,
+  suggestion,
+  personal = false,
   close,
   saved,
 }: {
@@ -696,6 +779,9 @@ function ModelEditor({
   model: Model | null;
   protocols: Catalog["protocols"];
   initialCode?: string;
+  defaults?: { modality: string; protocol: string; sdk_provider: string };
+  suggestion?: SuggestedModel;
+  personal?: boolean;
   close: () => void;
   saved: () => Promise<void>;
 }) {
@@ -703,34 +789,45 @@ function ModelEditor({
   const [price, setPrice] = useState<ModelPrice>(
     model?.price || { mode: "unconfigured", amount: "0" },
   );
-  const [name, setName] = useState(model?.name || initialCode.slice(0, 100)),
+  const configured = model ?? suggestion;
+  const [name, setName] = useState(configured?.name || initialCode.slice(0, 100)),
     [code, setCode] = useState(model?.model || initialCode),
     [protocol, setProtocol] = useState(
-      model?.protocol || connectionProtocol(channel.endpoint, modelSuggestion(initialCode).modality),
+      model?.protocol ||
+        defaults?.protocol ||
+        connectionProtocol(
+          channel.endpoint,
+          modelSuggestion(initialCode).modality,
+        ),
     ),
     [modality, setModality] = useState(
-      model?.modality || modelSuggestion(initialCode).modality,
+      model?.modality ||
+        defaults?.modality ||
+        modelSuggestion(initialCode).modality,
     ),
     [enabled, setEnabled] = useState(model?.enabled ?? true),
     [isDefault, setDefault] = useState(model?.is_default ?? false),
-    [refs, setRefs] = useState(model?.max_reference_images ?? 0),
-    [videoRefs, setVideoRefs] = useState(model?.max_reference_videos ?? 0),
+    [refs, setRefs] = useState(configured?.max_reference_images ?? 0),
+    [videoRefs, setVideoRefs] = useState(configured?.max_reference_videos ?? 0),
     [mask, setMask] = useState(model?.mask_editing ?? false),
-    [seconds, setSeconds] = useState(model?.max_video_seconds ?? 12),
+    [seconds, setSeconds] = useState(configured?.max_video_seconds ?? 12),
     [dirty, setDirty] = useState(false);
   const [parameters, setParameters] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      Object.entries(model?.parameters || {}).map(([k, v]) => [
+      Object.entries(configured?.parameters || {}).map(([k, v]) => [
         k,
         v.join(", "),
       ]),
     ),
   );
-  const [sdkProvider, setSdkProvider] = useState(model?.sdk_provider || "openai");
-  const [protocolChosen, setProtocolChosen] = useState(!!model);
+  const [sdkProvider, setSdkProvider] = useState(
+    model?.sdk_provider || defaults?.sdk_provider || "openai",
+  );
+  const [protocolChosen, setProtocolChosen] = useState(!!model || !!defaults);
   const [requestId] = useState(() => crypto.randomUUID());
   const keys =
-    modality === "text"
+    protocols[protocol]?.parameter_keys ??
+    (modality === "text"
       ? []
       : modality === "image"
         ? protocol === "ark_image"
@@ -740,7 +837,7 @@ function ModelEditor({
           ? ["duration", "size"]
           : protocol === "minimax_video"
             ? ["duration", "resolution"]
-            : ["duration", "aspect_ratio", "resolution"];
+            : ["duration", "aspect_ratio", "resolution"]);
   const [inputCapabilities, setInputCapabilities] = useState(
     model?.input_capabilities || textInputCapabilities,
   );
@@ -761,23 +858,31 @@ function ModelEditor({
         name,
         model: code,
         protocol,
-        sdk_provider: protocol === "litellm" || protocol === "cloud_llm" ? sdkProvider : "openai",
+        sdk_provider:
+          protocol === "litellm" || protocol === "cloud_llm"
+            ? sdkProvider
+            : "openai",
         modality,
         enabled,
-        is_default: modality === "text" && isDefault,
+        is_default: !personal && modality === "text" && isDefault,
         revision: model?.revision,
         request_id: requestId,
         max_reference_images: modality === "text" ? 0 : refs,
         max_reference_videos:
           modality === "video" && protocol === "video_v1" ? videoRefs : 0,
-        mask_editing: (protocol === "gpt_image" || (protocol === "litellm" && modality === "image" && sdkProvider === "openai")) && mask,
+        mask_editing:
+          (protocol === "gpt_image" ||
+            (protocol === "litellm" &&
+              modality === "image" &&
+              sdkProvider === "openai")) &&
+          mask,
         max_video_seconds: seconds,
         parameters: params,
         ...(modality === "text"
           ? { input_capabilities: inputCapabilities }
           : {}),
         price:
-          modality === "text" ? { mode: "unconfigured", amount: "0" } : price,
+          personal || modality === "text" ? { mode: "unconfigured", amount: "0" } : price,
       };
       return model
         ? api.put(`${base}/${channel.id}/models/${model.id}`, body)
@@ -786,7 +891,7 @@ function ModelEditor({
     onSuccess: saved,
     onError: (e) => {
       if (e instanceof ApiError && e.code === "VERSION_CONFLICT")
-        void qc.invalidateQueries({ queryKey: ["model-channels"] });
+        void qc.invalidateQueries({ queryKey: [personal ? "personal-model-channels" : "model-channels"] });
     },
   });
   return (
@@ -834,7 +939,9 @@ function ModelEditor({
                       setName(value.slice(0, 100));
                     const hint = modelSuggestion(value);
                     setModality(hint.modality);
-                    setProtocol(connectionProtocol(channel.endpoint, hint.modality));
+                    setProtocol(
+                      connectionProtocol(channel.endpoint, hint.modality),
+                    );
                     setParameters({});
                     setRefs(0);
                     setMask(false);
@@ -846,6 +953,7 @@ function ModelEditor({
               />
             </label>
           </div>
+          <span className="text-sm text-muted-foreground">模型用途</span>
           <SelectField
             label="模型用途"
             value={modality}
@@ -870,71 +978,91 @@ function ModelEditor({
               setDirty(true);
             }}
           />
-          {modality && <p className="text-sm text-muted-foreground">沿用服务地址和密钥。通用服务使用 OpenAI 兼容接口；特殊接口可在高级连接设置中调整。读取模型不代表实际生成能力已验证。</p>}
+          {modality && (
+            <p className="text-sm text-muted-foreground">
+              沿用服务地址和密钥。通用服务使用 OpenAI
+              兼容接口；特殊接口可在高级连接设置中调整。读取模型不代表实际生成能力已验证。
+            </p>
+          )}
           <details className="model-optional-settings">
             <summary>高级连接设置</summary>
-          {modality && (
-            <SelectField
-              label="接口协议"
-              value={protocol}
-              options={[
-                { value: "", label: "请选择接入方式", disabled: true },
-                ...Object.entries(protocols)
-                  .filter(([, p]) => p.types.includes(modality))
-                  .map(([value, p]) => ({ value, label: value === "litellm" ? "其他供应商接口" : p.name })),
-              ]}
-              onChange={(value) => {
-                setProtocol(value);
-                setProtocolChosen(true);
-                setSdkProvider("openai");
-                setParameters({});
-                setRefs(0);
-                setMask(false);
-                setDirty(true);
-              }}
-            />
-          )}
-          {(protocol === "litellm" || protocol === "cloud_llm") && (
-            <>
+            {modality && (
               <SelectField
-                label="服务接口类型"
-                value={sdkProvider}
-                options={(protocols[protocol]?.sdk_providers?.[modality] || ["openai"]).map((value) => ({
-                  value, label: value === "openai" ? "OpenAI / OpenAI 兼容服务" : value,
-                }))}
-                onChange={(value) => { setSdkProvider(value); setMask(false); setDirty(true); }}
+                label="接口协议"
+                value={protocol}
+                options={[
+                  { value: "", label: "请选择接入方式", disabled: true },
+                  ...Object.entries(protocols)
+                    .filter(([, p]) => p.types.includes(modality))
+                    .map(([value, p]) => ({
+                      value,
+                      label: value === "litellm" ? "其他供应商接口" : p.name,
+                    })),
+                ]}
+                onChange={(value) => {
+                  setProtocol(value);
+                  setProtocolChosen(true);
+                  setSdkProvider("openai");
+                  setParameters({});
+                  setRefs(0);
+                  setMask(false);
+                  setDirty(true);
+                }}
               />
+            )}
+            {(protocol === "litellm" || protocol === "cloud_llm") && (
+              <>
+                <SelectField
+                  label="服务接口类型"
+                  value={sdkProvider}
+                  options={(
+                    protocols[protocol]?.sdk_providers?.[modality] || ["openai"]
+                  ).map((value) => ({
+                    value,
+                    label:
+                      value === "openai" ? "OpenAI / OpenAI 兼容服务" : value,
+                  }))}
+                  onChange={(value) => {
+                    setSdkProvider(value);
+                    setMask(false);
+                    setDirty(true);
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  选择服务实际使用的接口类型；第三方 OpenAI 兼容网关请选择
+                  OpenAI。 SDK
+                  视频支持文字或单张起始图片；需要参考视频、混合素材时请保留
+                  Video v1 接入。
+                </p>
+              </>
+            )}
+            {!model && !protocolChosen && modelSuggestion(code).modality && (
               <p className="text-xs text-muted-foreground">
-                选择服务实际使用的接口类型；第三方 OpenAI 兼容网关请选择 OpenAI。
-                SDK 视频支持文字或单张起始图片；需要参考视频、混合素材时请保留 Video v1 接入。
+                用途按模型名称建议，接口按服务地址配置；请以服务说明为准。
               </p>
-            </>
-          )}
-          {!model && !protocolChosen && modelSuggestion(code).modality && (
-            <p className="text-xs text-muted-foreground">
-              用途按模型名称建议，接口按服务地址配置；请以服务说明为准。
-            </p>
-          )}
-          {protocol === "jimeng" && (
-            <p className="model-notice">
-              这是旧版自定义任务接口，不是火山即梦官方签名协议。仅适用于实现
-              /submit 和 /status 的服务。
-            </p>
-          )}
-          {protocol === "openai_video" && (
-            <p className="model-notice">
-              使用 /videos
-              创建、查询和下载视频。每次一个视频；停止本地等待不保证上游停止计费。
-            </p>
-          )}
-          {protocol === "video_v1" && (
-            <p className="model-notice">
-              使用 video.v1 JSON 格式创建视频，参考素材需提供临时公网链接。
-              公网 HTTPS 部署可自动生成；本地使用需由管理员配置可访问当前素材的 HTTPS 入口。
-              请按渠道能力设置图片和视频参考上限，可混合引用；不支持首尾帧角色。
-              请按服务商文档填写时长选项，提示词中的秒数不能代替时长设置。
-            </p>
-          )}
+            )}
+            {protocol === "jimeng" && (
+              <p className="model-notice">
+                这是旧版自定义任务接口，不是火山即梦官方签名协议。仅适用于实现
+                /submit 和 /status 的服务。
+              </p>
+            )}
+            {protocol === "openai_video" && (
+              <p className="model-notice">
+                使用 /videos
+                创建、查询和下载视频。每次一个视频；停止本地等待不保证上游停止计费。
+              </p>
+            )}
+            {protocol === "video_v1" && (
+              <p className="model-notice">
+                使用 video.v1 JSON 格式创建视频，参考素材需提供临时公网链接。
+                公网 HTTPS
+                部署可自动生成；本地使用需由管理员配置可访问当前素材的 HTTPS
+                入口。
+                请按渠道能力设置图片和视频参考上限，可混合引用；不支持首尾帧角色。
+                请按服务商文档填写时长选项，提示词中的秒数不能代替时长设置。
+              </p>
+            )}
           </details>
           {modality === "text" && protocol && (
             <details className="model-optional-settings">
@@ -950,28 +1078,31 @@ function ModelEditor({
           )}
           {modality && protocol && modality !== "text" && (
             <details className="model-optional-settings">
-              <summary>高级选项 · 参考图、生成参数与费用</summary>
+              <summary>{personal ? "高级选项 · 参考图与生成参数" : "高级选项 · 参考图、生成参数与费用"}</summary>
               <div className="model-form">
-                <PriceFields
+                {!personal && <PriceFields
                   value={price}
                   onChange={setPrice}
                   video={modality === "video"}
-                />
+                />}
                 <label>
                   最多参考图片数
                   <Input
                     type="number"
                     min={0}
-                    max={protocol === "litellm" && modality === "video" ? 1 :
-                      (
-                        {
-                          openai_video: 1,
-                          video_v1: 14,
-                          minimax_video: 1,
-                          ark_video: 2,
-                          ark_image: 14,
-                        } as Record<string, number>
-                      )[protocol] ?? 16
+                    max={
+                      protocols[protocol]?.max_refs ??
+                      (protocol === "litellm" && modality === "video"
+                        ? 1
+                        : ((
+                            {
+                              openai_video: 1,
+                              video_v1: 14,
+                              minimax_video: 1,
+                              ark_video: 2,
+                              ark_image: 14,
+                            } as Record<string, number>
+                          )[protocol] ?? 16))
                     }
                     value={refs}
                     onChange={(e) => {
@@ -997,16 +1128,20 @@ function ModelEditor({
                     </small>
                   </label>
                 )}
-                {(protocol === "gpt_image" || (protocol === "litellm" && modality === "image" && sdkProvider === "openai")) && refs > 0 && (
-                  <label className="model-check">
-                    <input
-                      type="checkbox"
-                      checked={mask}
-                      onChange={(e) => setMask(e.target.checked)}
-                    />
-                    支持蒙版局部重绘
-                  </label>
-                )}
+                {(protocol === "gpt_image" ||
+                  (protocol === "litellm" &&
+                    modality === "image" &&
+                    sdkProvider === "openai")) &&
+                  refs > 0 && (
+                    <label className="model-check">
+                      <input
+                        type="checkbox"
+                        checked={mask}
+                        onChange={(e) => setMask(e.target.checked)}
+                      />
+                      支持蒙版局部重绘
+                    </label>
+                  )}
                 {modality === "video" && (
                   <label>
                     最大视频时长（秒）
@@ -1053,7 +1188,7 @@ function ModelEditor({
             />
             启用模型
           </label>
-          {modality === "text" && (
+          {!personal && modality === "text" && (
             <label className="model-check">
               <input
                 type="checkbox"

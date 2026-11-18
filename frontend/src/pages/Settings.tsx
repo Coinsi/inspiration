@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { ModelChannels } from "@/components/ModelChannels";
+import { PersonalModelServices } from "@/components/PersonalModelServices";
 import { ProjectDialog } from "@/components/ProjectDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -159,20 +160,9 @@ function SettingsContent({ projectId }: { projectId: string }) {
             <section hidden={active !== "channels"}>
               {role === "admin" ? (
                 <ModelChannels projectId={projectId} />
-              ) : (
-                <div className="settings-pane">
-                  <h2>渠道与模型</h2>
-                  <p>
-                    渠道、密钥和模型由项目管理员管理。已启用的模型可在创作页面选择。
-                  </p>
-                  <Link
-                    className="studio-link"
-                    to={`/projects/${projectId}/members`}
-                  >
-                    查看项目成员
-                  </Link>
-                </div>
-              )}
+              ) : role ? (
+                <PersonalModelServices projectId={projectId} inProjectSettings />
+              ) : null}
             </section>
           )}
           {(visited.includes("project") || active === "project") && (

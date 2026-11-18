@@ -252,6 +252,39 @@ def import_profiles(db, ctx):
     return {"imported": count}
 
 
+class ClearDefaultIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    modality: Literal["text", "image", "video"]
+
+
+def clear_default(db, ctx, modality):
+    """Clear both routed and legacy defaults without disabling any model."""
+    lock_model_scope(db, ctx.project.id)
+    for row in rows(db, ctx.project.id):
+        if row.modality == modality and row.definition.get("is_default"):
+            row.definition = {**row.definition, "is_default": False}
+            row.revision += 1
+    for profile in db.scalars(
+        select(ProviderConfig).where(ProviderConfig.project_id == ctx.project.id)
+    ):
+        kind = profile.config.get("modality", "text" if profile.kind == "llm" else "image")
+        if kind == modality and profile.config.get("is_default"):
+            profile.config = {
+                **profile.config,
+                "is_default": False,
+                "revision": profile.config.get("revision", 0) + 1,
+            }
+    audit.record(
+        db,
+        action="model.default.clear",
+        user_id=ctx.user.id,
+        project_id=ctx.project.id,
+        detail={"modality": modality},
+    )
+    db.flush()
+    return {"modality": modality, "is_default": False}
+
+
 class DefaultModelIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: uuid.UUID

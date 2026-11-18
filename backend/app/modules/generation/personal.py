@@ -2,6 +2,7 @@
 
 import copy
 import uuid
+from base64 import urlsafe_b64encode
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -9,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.contracts import JobHandle, generation_registry
+from app.adapters.contracts import CostEstimate, JobHandle, generation_registry
 from app.core import audit
 from app.core.crypto import decrypt, encrypt
 from app.core.database import get_db
@@ -19,6 +20,7 @@ from app.models.generation import GenerationJob, ProviderConfig
 from app.models.identity import User
 from app.models.personal_model import PersonalModelService
 from app.modules.generation import presets
+from app.modules.generation.personal_endpoints import validate_endpoint
 from app.modules.harness.kernel_modalities import InputCapabilities
 
 PREFIX = "personal_"
@@ -26,6 +28,16 @@ router = APIRouter(tags=["personal-model-services"])
 DB = Depends(get_db, scope="function")
 USER = Depends(get_current_user)
 MANAGE = Depends(require_action("provider.manage"))
+
+
+def compact_id(value: uuid.UUID) -> str:
+    return urlsafe_b64encode(value.bytes).decode("ascii").rstrip("=")
+
+
+def provider_name(service_id, key):
+    # Jobs store 64 characters. Older imported models use a full UUID as their catalog key.
+    suffix = key if len(key) <= 22 else compact_id(uuid.uuid5(service_id, key))
+    return f"{PREFIX}{service_id.hex}_{suffix}"
 
 
 def profile(spec):
@@ -102,20 +114,19 @@ class Save(BaseModel):
 
 @router.put("/me/model-services/{preset_id}")
 def save(preset_id: str, data: Save, user=USER, db: Session = DB):
+    # This endpoint is also used by older clients which select models from a preset.
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
+    ident = uuid.uuid5(user.id, "personal-model-service:" + preset_id)
+    row = db.get(PersonalModelService, ident, with_for_update=True)
     preset = presets.PRESETS.get(preset_id)
     if not preset and preset_id.startswith("custom-"):
-        saved = owned(db, user.id, uuid.uuid5(user.id, "personal-model-service:" + preset_id))
-        preset = {"name": saved.name, "endpoint": saved.endpoint, "models": saved.models}
-    if (
-        not preset
-        or data.preset_id != preset_id
-        or any(k not in preset["models"] for k in data.models)
-    ):
+        if not row:
+            raise NotFound("个人模型服务不存在或不属于当前账号")
+        preset = {"name": row.name, "endpoint": row.endpoint, "models": row.models}
+    existing_models = row.models if row and row.enabled else {}
+    catalog = {**(preset or {}).get("models", {}), **existing_models}
+    if not preset or data.preset_id != preset_id or any(k not in catalog for k in data.models):
         raise CapabilityUnsupported("请选择目录中支持的模型")
-    ident = uuid.uuid5(user.id, "personal-model-service:" + preset_id)
-    # Serialize first-time saves as well as updates.
-    db.scalar(select(User).where(User.id == user.id).with_for_update())
-    row = db.get(PersonalModelService, ident)
     token = data.token.get_secret_value().strip() if data.token else ""
     if row and row.enabled and data.revision != row.revision:
         raise Conflict("服务已更新，请重新打开后保存")
@@ -137,17 +148,16 @@ def save(preset_id: str, data: Save, user=USER, db: Session = DB):
     if token:
         row.credentials_encrypted = encrypt(token)
         row.verification = {}
-    updated_models = {k: copy.deepcopy(preset["models"][k]) for k in dict.fromkeys(data.models)}
-    if preset_id.startswith("custom-"):
-        # Keep the imported catalog so deselected models can be enabled again.
-        updated_models = {
-            k: {**copy.deepcopy(spec), "enabled": k in data.models}
-            for k, spec in preset["models"].items()
-        }
-    for key, spec in updated_models.items():
-        old = (row.models or {}).get(key, {})
-        if spec.get("modality") == "text" and old.get("input_capabilities"):
-            spec["input_capabilities"] = copy.deepcopy(old["input_capabilities"])
+    updated_models = {}
+    for key in dict.fromkeys([*data.models, *catalog]):
+        spec = catalog[key]
+        if key in data.models:
+            updated_models[key] = copy.deepcopy(spec)
+            if spec.get("enabled") is False:
+                updated_models[key]["enabled"] = True
+        elif preset_id.startswith("custom-") or key not in preset["models"]:
+            # Keep hand-added/imported entries available to re-enable after deselection.
+            updated_models[key] = {**spec, "enabled": False}
     if row.revision and not token and updated_models == row.models:
         return public(row)
     row.models = updated_models
@@ -240,7 +250,7 @@ def adopt(channel_id: uuid.UUID, ctx=MANAGE, db: Session = DB):
     preset_id = preset_id or "custom-" + source.id.hex
     ident = uuid.uuid5(ctx.user.id, "personal-model-service:" + preset_id)
     db.scalar(select(User).where(User.id == ctx.user.id).with_for_update())
-    existing = db.get(PersonalModelService, ident)
+    existing = db.get(PersonalModelService, ident, with_for_update=True)
     if existing and existing.enabled:
         return public(existing)  # Never overwrite an existing personal key with a project key.
     configured = list(
@@ -271,7 +281,10 @@ def adopt(channel_id: uuid.UUID, ctx=MANAGE, db: Session = DB):
         name=presets.PRESETS.get(preset_id, {}).get("name", source.name),
         preset_id=preset_id,
         endpoint=source.endpoint,
+        imported_endpoint=source.endpoint,
         credentials_encrypted=source.credentials_encrypted,
+        provider_template_id=source.provider_template_id
+        or (preset_id if preset_id in presets.PRESETS else None),
         enabled=True,
         revision=(row.revision or 0) + 1,
         models=selected,
@@ -299,7 +312,7 @@ def providers(db, user_id):
             result.append(
                 {
                     "id": uuid.uuid5(row.id, key),
-                    "provider_name": f"{PREFIX}{row.id.hex}_{key}",
+                    "provider_name": provider_name(row.id, key),
                     "kind": "llm" if spec["modality"] == "text" else "generation",
                     "enabled": row.enabled,
                     "endpoint": None,
@@ -323,6 +336,7 @@ def text_config(db, name, user_id):
     spec = row.models[key]
     if spec["modality"] != "text":
         raise CapabilityUnsupported("请选择文字模型")
+    validate_endpoint(db, row.endpoint, row, resolve=True)
     return SimpleNamespace(
         endpoint=row.endpoint,
         credentials_encrypted=row.credentials_encrypted,
@@ -337,6 +351,8 @@ def resolve(db, name, user_id, snapshot=None):
         row = owned(db, user_id, uuid.UUID(ident), lock=True)
     except (ValueError, AttributeError):
         raise NotFound("个人模型不存在") from None
+    if key not in row.models:
+        key = next((k for k in row.models if provider_name(row.id, k) == name), None)
     if not row.enabled or key not in row.models or not row.models[key].get("enabled", True):
         raise CapabilityUnsupported("个人服务或模型已停用，请重新选择")
     frozen = (snapshot or {}).get("personal_service")
@@ -380,6 +396,10 @@ class PersonalProvider:
         caps.max_reference_videos = min(
             caps.max_reference_videos, self.config.get("max_reference_videos", 0)
         )
+        if caps.max_video_seconds is not None:
+            caps.max_video_seconds = min(
+                caps.max_video_seconds, self.config.get("max_video_seconds", caps.max_video_seconds)
+            )
         if not caps.max_reference_images:
             caps.features -= {"reference", "img2img", "inpaint", "first_frame", "last_frame"}
         return caps
@@ -388,7 +408,10 @@ class PersonalProvider:
         return self.adapter.validate_request(req)
 
     def estimate_cost(self, req):
-        return self.adapter.estimate_cost(req)
+        self.validate_request(req)
+        return CostEstimate(
+            points=0, detail={"pricing": "personal", "message": "使用个人供应商额度"}
+        )
 
     def bind_job(self, job_id):
         self.job_id = job_id
@@ -428,6 +451,7 @@ class PersonalProvider:
             if resume:
                 self.phase("accepted", resume["external_job_id"])
                 return JobHandle(external_job_id=resume["external_job_id"])
+        validate_endpoint(self.db, self.row.endpoint, self.row, resolve=True)
         self.phase("dispatching")
         try:
             handle = self.adapter.submit(req)
@@ -441,6 +465,7 @@ class PersonalProvider:
         return handle
 
     def poll(self, handle):
+        validate_endpoint(self.db, self.row.endpoint, self.row, resolve=True)
         result = self.adapter.poll(handle)
         if result.status == "failed":
             self.phase("upstream_failed")
@@ -449,6 +474,7 @@ class PersonalProvider:
         return result
 
     def cancel(self, handle):
+        validate_endpoint(self.db, self.row.endpoint, self.row, resolve=True)
         return self.adapter.cancel(handle)
 
 
