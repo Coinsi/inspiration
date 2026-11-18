@@ -98,6 +98,8 @@ def test_minimax_catalog_and_manual_entry_respect_output(studio, monkeypatch):
     ]
     assert client.post(path + "/discover?purpose=text").json()["models"] == ["MiniMax-M3"]
     assert client.post(path + "/discover?purpose=image").json()["models"] == ["MiniMax-H3-Image"]
+    # A gateway using the same template can expose a different catalog.
+    assert client.post(path + "/discover?purpose=image").json()["documented_models"] == []
     body = {"name": "测试", "model": "MiniMax-M3", "modality": "video", "protocol": "minimax_video"}
     assert client.post(path + "/models", json=body).status_code == 422
     assert client.post(path + "/models", json={**body, "model": "custom-id"}).status_code == 200
@@ -107,6 +109,67 @@ def test_minimax_catalog_and_manual_entry_respect_output(studio, monkeypatch):
         ).status_code
         == 200
     )
+
+
+def test_minimax_official_media_when_account_catalog_lists_only_text(studio, monkeypatch):
+    import httpx
+
+    from app.modules.generation import channels, minimax_models
+
+    client, _, ids = studio
+    # Legacy connections created before templates also use the official endpoint.
+    base, channel = setup(client, ids["project"], endpoint="https://api.minimax.cn/v1")
+    path = f"{base}/model-channels/{channel}/discover"
+    payload = {"data": [{"id": "MiniMax-M3.1-Flash"}, {"id": "MiniMax-M3"}]}
+    status = 200
+    upstream = httpx.Client
+
+    def directory(request):
+        assert request.method == "GET" and str(request.url) == "https://api.minimax.cn/v1/models"
+        return httpx.Response(status, json=payload)
+
+    monkeypatch.setattr(
+        channels.httpx,
+        "Client",
+        lambda **kw: upstream(transport=httpx.MockTransport(directory), **kw),
+    )
+    for purpose, known in (
+        ("image", {"image-01", "image-01-live", "MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"}),
+        (
+            "video",
+            {"MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast", "MiniMax-Hailuo-02", "MiniMax-H3"},
+        ),
+    ):
+        result = client.post(path, params={"purpose": purpose}).json()
+        assert result["models"] == result["details"] == []
+        assert result["documentation_url"] == minimax_models.DOCUMENTATION_URL
+        assert {item["id"] for item in result["documented_models"]} == known
+        assert all(item["outputs"] == [purpose] for item in result["documented_models"])
+    text = client.post(path, params={"purpose": "text"}).json()
+    assert text["models"] == ["MiniMax-M3", "MiniMax-M3.1-Flash"]
+    assert text["documented_models"] == []
+
+    # A model that the API later reports must appear only in the live results.
+    payload["data"].extend(
+        [
+            {"id": "MiniMax-H3"},
+            {"id": "MiniMax-Hailuo-02", "architecture": {"output_modalities": ["text"]}},
+        ]
+    )
+    mixed = client.post(path, params={"purpose": "video"}).json()
+    assert mixed["models"] == ["MiniMax-H3"]
+    assert "新版" in mixed["details"][0]["note"]
+    assert {item["id"] for item in mixed["documented_models"]} == {
+        "MiniMax-Hailuo-2.3",
+        "MiniMax-Hailuo-2.3-Fast",
+    }
+    all_models = client.post(path).json()
+    assert len(all_models["models"]) == 4 and len(all_models["documented_models"]) == 6
+
+    payload = {"base_resp": {"status_code": 1004}, "data": []}
+    assert client.post(path, params={"purpose": "image"}).is_error
+    status = 401
+    assert client.post(path, params={"purpose": "video"}).is_error
 
 
 def test_existing_duplicates_keep_their_ids_and_can_be_edited(studio):

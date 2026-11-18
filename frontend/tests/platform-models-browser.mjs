@@ -45,7 +45,13 @@ try {
     if (path === '/admin/models/creative-models/select-default') { models.forEach(m => { if (m.id === mutations.at(-1).data.id) m.is_default = true; }); return ok(models.find(m => m.id === mutations.at(-1).data.id)); }
     if (path === '/admin/models/creative-models') return ok(models);
     if (path === '/admin/models/model-channels/check') return ok({message: '地址与鉴权通过，模型目录可读取；尚未验证实际生成能力', model_count: 2});
-    if (path === '/admin/models/model-channels/channel/discover') return ok({models: ['gpt-text-test', 'seedream-test'], truncated: false});
+    if (path === '/admin/models/model-channels/channel/discover') {
+      if (channel.provider_template_id === 'minimax') return ok({
+        models: ['MiniMax-M3'], details: [{id: 'MiniMax-M3', outputs: ['text']}], truncated: false,
+        documented_models: [{id: 'image-01', outputs: ['image']}, {id: 'MiniMax-Hailuo-2.3', outputs: ['video']}],
+      });
+      return ok({models: ['gpt-text-test', 'seedream-test'], truncated: false});
+    }
     if (path === '/admin/models/model-channels/channel' && method === 'PUT') {
       channel.name = mutations.at(-1).data.name;
       channel.revision++;
@@ -54,7 +60,14 @@ try {
     if (path === '/admin/models/model-channels/channel/models/batch') { channel.models = mutations.at(-1).data.models.map((m,i) => ({...m, id: `profile-${i}`, enabled: true, revision: 1})); return ok(channel.models); }
     if (path.startsWith('/admin/models/model-channels/channel/models/') && method === 'PUT') return ok({});
     if (path === '/admin/models/model-channels' && method === 'POST') return ok({id: channel.id});
-    if (path === '/admin/models/model-channels') return ok({ channels: [channel], legacy_count: 0, protocols: { cloud_llm: {name: '文字兼容', types: ['text']}, gpt_image: {name: 'OpenAI Images 兼容', types: ['image']}, ark_image: {name: '火山方舟图片', types: ['image']} } });
+    if (path === '/admin/models/model-channels') return ok({
+      channels: [channel], legacy_count: 0,
+      protocols: {
+        cloud_llm: {name: '文字兼容', types: ['text']}, gpt_image: {name: 'OpenAI Images 兼容', types: ['image']},
+        ark_image: {name: '火山方舟图片', types: ['image']}, minimax_image: {name: 'MiniMax 图片', types: ['image']},
+        minimax_video: {name: 'MiniMax 视频', types: ['video']},
+      },
+    });
     if (path === '/admin/models/model-channels/presets') return ok([]);
     return route.fulfill({ status: 404, json: { error: { message: `Unexpected fixture request: ${path}` } } });
   });
@@ -97,6 +110,23 @@ try {
   await page.getByRole('button', {name: '保存模型', exact: true}).click();
   await page.getByRole('dialog').waitFor({state: 'hidden'});
   assert.equal(mutations.at(-1).data.protocol, 'gpt_image');
+  Object.assign(channel, {name: 'MiniMax', endpoint: 'https://api.minimax.cn/v1', provider_template_id: 'minimax', models: []});
+  await page.reload();
+  await page.getByText('高级连接管理与旧配置导入', {exact: true}).click();
+  await page.getByRole('button', {name: '管理模型', exact: true}).click();
+  await page.getByRole('button', {name: '读取模型', exact: true}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByText(/接口返回 1 个 · 官方文档 2 个/).waitFor();
+  const imageRow = dialog.locator('.model-directory-row').filter({has: page.getByText('image-01', {exact: true})});
+  await imageRow.getByRole('button', {name: '单独配置'}).click();
+  await dialog.getByText('高级连接设置', {exact: true}).click();
+  assert.match(await dialog.getByRole('button', {name: '接口协议', exact: true}).innerText(), /MiniMax 图片/);
+  await page.getByRole('button', {name: '关闭编辑'}).click();
+  await dialog.getByRole('checkbox', {name: '选择 image-01', exact: true}).check();
+  await dialog.getByRole('checkbox', {name: '选择 MiniMax-Hailuo-2.3', exact: true}).check();
+  await dialog.getByRole('button', {name: '添加已选模型（2）'}).click();
+  await dialog.waitFor({state: 'hidden'});
+  assert.deepEqual(channel.models.map(m => [m.modality, m.protocol]), [['image', 'minimax_image'], ['video', 'minimax_video']]);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: '全局默认模型', exact: true }).click();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Mobile overflow');

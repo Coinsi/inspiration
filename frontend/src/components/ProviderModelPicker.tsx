@@ -10,8 +10,8 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search } from "lucide-react";
 import { Input } from "./ui/input";
 import { ModelBrandIcon } from "./workbench/ModelBrandIcon";
+import type { ModelListItem } from "@/lib/model-connection";
 
-export type ModelListItem = { id: string; name?: string; outputs?: string[] };
 type Props = {
   codes: ModelListItem[];
   value: string;
@@ -74,6 +74,7 @@ export function ProviderModelPicker({
     );
   }, [codes, filter]);
   const exactMatch = matches.length === 1 && matches[0].id === filter.trim();
+  const showSource = codes.some((model) => model.source === "documentation");
   const expanded = open && codes.length > 0 && !exactMatch;
   useLayoutEffect(() => {
     if (!expanded || !field.current || !menu.current) return;
@@ -228,6 +229,7 @@ export function ProviderModelPicker({
                   }}
                   role="option"
                   aria-label={model.id}
+                  aria-description={model.source === "documentation" ? "官方文档型号，账号权限待验证" : undefined}
                   aria-selected={model.id === value}
                   data-active={index === active}
                   onClick={() => choose(model.id)}
@@ -241,6 +243,11 @@ export function ProviderModelPicker({
                       <small>{model.id}</small>
                     )}
                   </span>
+                  {showSource && (
+                    <small className="provider-option-state">
+                      {model.source === "documentation" ? "官方文档" : "接口返回"}
+                    </small>
+                  )}
                   {configuredIds.has(model.id) && (
                     <small className="provider-option-state">已配置</small>
                   )}

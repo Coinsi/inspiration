@@ -89,6 +89,18 @@ let templates = [
       { modality: "video", protocol: "openai_video", sdk_provider: "openai" },
     ],
   },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    icon: "minimax",
+    endpoint: "https://api.minimax.cn/v1",
+    enabled: true,
+    revision: 0,
+    routes: [
+      { modality: "image", protocol: "minimax_image", sdk_provider: "openai" },
+      { modality: "video", protocol: "minimax_video", sdk_provider: "openai" },
+    ],
+  },
 ];
 if (process.env.PROVIDER_FIXTURE_CATALOG) {
   templates = JSON.parse(
@@ -265,6 +277,17 @@ try {
           openai_video: { name: "OpenAI Videos", types: ["video"] },
         },
       });
+    if (path.endsWith("/minimax-fixture/discover")) {
+      const purpose = new URL(route.request().url()).searchParams.get("purpose");
+      const documented = purpose === "image"
+        ? [{ id: "image-01" }, { id: "MiniMax-H3-Image" }]
+        : [{ id: "MiniMax-Hailuo-2.3" }, { id: "MiniMax-H3", note: "H3 使用新版视频接口" }];
+      return ok({
+        models: [], details: [], truncated: false,
+        documented_models: documented.map((item) => ({ ...item, outputs: [purpose] })),
+        documentation_url: "https://platform.minimax.cn/docs/guides/models-intro",
+      });
+    }
     if (path.endsWith("/discover"))
       return ok({
         models: ["my-text-model", "studio/artist", "studio/vision"],
@@ -369,6 +392,24 @@ try {
     .getByRole("button", { name: "编辑 MiniMax-M3", exact: true })
     .getByText("属于「文字与理解」，请更正用途")
     .waitFor();
+  await page.getByRole("button", { name: "读取模型列表" }).click();
+  await page.getByRole("status").filter({ hasText: "接口返回 0 个视频生成模型" }).waitFor();
+  const h3 = page.getByRole("option", { name: "MiniMax-H3", exact: true });
+  await h3.getByText("官方文档").waitFor();
+  assert.equal(await page.getByRole("option", { name: "MiniMax-M3", exact: true }).count(), 0);
+  await h3.click();
+  await page.getByText("H3 使用新版视频接口", { exact: true }).waitFor();
+
+  await page.getByRole("button", { name: "图片生成", exact: true }).click();
+  await directory.getByRole("button", { name: "MiniMax", exact: true }).click();
+  await page.getByRole("button", { name: "读取模型列表" }).click();
+  await page.getByRole("status").filter({ hasText: "接口返回 0 个图片生成模型" }).waitFor();
+  await page.getByRole("option", { name: "image-01", exact: true }).getByText("官方文档").waitFor();
+  assert.equal(await page.getByRole("option", { name: "MiniMax-H3", exact: true }).count(), 0);
+  await picker.press("Escape");
+  assert.equal(generations, 0);
+  await page.getByRole("button", { name: "视频生成", exact: true }).click();
+  await directory.getByRole("button", { name: "MiniMax", exact: true }).click();
   await picker.fill("MiniMax-M3.1-Flash");
   assert.equal(
     await page

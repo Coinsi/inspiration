@@ -1,5 +1,5 @@
 import { ProviderMediaTest } from "./ProviderMediaTest";
-import { ProviderModelPicker, type ModelListItem } from "./ProviderModelPicker";
+import { ProviderModelPicker } from "./ProviderModelPicker";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +16,11 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import {
+  directoryEntries,
+  type ModelDirectoryResult,
+  type ModelListItem,
+} from "@/lib/model-connection";
 import { modelConfigRoot, verificationLabel } from "@/lib/model-config-scope";
 import { useAuth } from "@/lib/auth";
 import { Button } from "./ui/button";
@@ -478,6 +483,7 @@ function ProviderConnection({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   const defaults = template?.routes.find((r) => r.modality === purpose);
+  const purposeName = purposes.find((p) => p.id === purpose)!.name;
   const configured =
     channel?.models.filter((model) => model.modality === purpose) ?? [];
   const matchingConfigured = configured.filter(
@@ -493,6 +499,8 @@ function ProviderConnection({
     (m) => m.modality === purpose && m.protocol === defaults?.protocol,
   );
   const selectedSuggestion = suggested.find((m) => m.model === code.trim());
+  const selectedDirectoryModel = codes?.find((model) => model.id === code.trim());
+  const documentedCount = codes?.filter((model) => model.source === "documentation").length ?? 0;
   const save = useMutation({
     mutationFn: () =>
       channel
@@ -515,6 +523,9 @@ function ProviderConnection({
     onSuccess: async (r) => {
       setToken("");
       setAccessKey("");
+      setCodes(null);
+      setCode("");
+      discover.reset();
       await refresh();
       select(r.id);
       setNotice("连接已保存。读取模型，或填写模型 ID 后添加。");
@@ -536,24 +547,17 @@ function ProviderConnection({
   });
   const discover = useMutation({
     mutationFn: () =>
-      api.post<{
-        models: string[];
-        details?: ModelListItem[];
-        message: string;
-      }>(`${base}/${channel!.id}/discover?purpose=${purpose}`),
+      api.post<ModelDirectoryResult>(`${base}/${channel!.id}/discover?purpose=${purpose}`),
+    onMutate: () => {
+      setCodes([]);
+      setNotice("");
+    },
     onSuccess: (r) => {
-      const entries =
-        r.details ?? r.models.map((id) => ({ id }) as ModelListItem);
-      const matching = entries.filter(
+      const matching = directoryEntries(r).filter(
         (m) => !m.outputs?.length || m.outputs.includes(purpose),
       );
       setCodes(matching);
       if (matching.length) setListRevision((revision) => revision + 1);
-      setNotice(
-        matching.length
-          ? "已读取 " + matching.length + " 个候选模型。"
-          : "没有读到此用途的模型，可手动填写模型 ID。",
-      );
     },
   });
   const remove = useMutation({
@@ -564,7 +568,7 @@ function ProviderConnection({
       select("");
     },
   });
-  const error = save.error || check.error || discover.error || remove.error;
+  const error = save.error || check.error || remove.error;
   const busy =
     save.isPending || check.isPending || discover.isPending || remove.isPending;
   return (
@@ -700,6 +704,25 @@ function ProviderConnection({
               )}
             </div>
             {(!channel || dirty) && <small>先保存连接，再添加模型。</small>}
+            {discover.error && <small role="alert">{discover.error.message}</small>}
+            {discover.isSuccess && codes && (
+              <small role="status">
+                {documentedCount ? (
+                  <>
+                    接口返回 {codes.length - documentedCount} 个{purposeName}模型。
+                    另有 {documentedCount} 个来自
+                    {discover.data.documentation_url ? (
+                      <a href={discover.data.documentation_url} target="_blank" rel="noreferrer">官方文档</a>
+                    ) : "官方文档"}
+                    ，账号权限待验证。
+                  </>
+                ) : codes.length ? (
+                  `已读取 ${codes.length} 个候选模型。`
+                ) : (
+                  "没有读到此用途的模型，可手动填写模型 ID。"
+                )}
+              </small>
+            )}
             {template?.discovery_protocol === "manual" && (
               <small>
                 {suggested.length
@@ -709,6 +732,9 @@ function ProviderConnection({
             )}
             {selectedSuggestion?.lifecycle_note && (
               <small>{selectedSuggestion.lifecycle_note}</small>
+            )}
+            {selectedDirectoryModel?.note && (
+              <small>{selectedDirectoryModel.note}</small>
             )}
             {selectedOtherPurpose && (
               <small role="status">
@@ -728,7 +754,7 @@ function ProviderConnection({
             >
               {matchingConfigured.length
                 ? "编辑已配置模型"
-                : `添加到${purposes.find((p) => p.id === purpose)?.name}`}
+                : `添加到${purposeName}`}
             </Button>
             {matchingConfigured.length > 1 && (
               <small>

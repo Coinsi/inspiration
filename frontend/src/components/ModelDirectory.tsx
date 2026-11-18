@@ -3,6 +3,7 @@ import { SelectField } from "./ui/select-field";
 import { Modal } from "./ui/modal";
 import { SearchField } from "./ui/search-field";
 import { Button } from "./ui/button";
+import type { ModelListItem } from "@/lib/model-connection";
 
 // Suggestions make adding familiar IDs easier; they are not capability verification.
 export function modelSuggestion(id: string) {
@@ -40,11 +41,11 @@ export function ModelDirectory({
 }: {
   open: boolean;
   name: string;
-  models: string[];
+  models: ModelListItem[];
   added: string[];
   truncated: boolean;
   close: () => void;
-  select: (code: string) => void;
+  select: (code: string, modality: string) => void;
   manual: () => void;
   addMany: (items: {code: string; modality: string}[]) => void;
   busy: boolean;
@@ -52,9 +53,11 @@ export function ModelDirectory({
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Record<string, string>>({});
-  const matches = models.filter((id) =>
-    id.toLowerCase().includes(query.trim().toLowerCase()),
+  const term = query.trim().toLowerCase();
+  const matches = models.filter((model) =>
+    (model.id + " " + (model.name ?? "")).toLowerCase().includes(term),
   );
+  const documentedCount = matches.filter((model) => model.source === "documentation").length;
   return (
     <Modal open={open} title={`选择模型 · ${name}`} width={680} onClose={() => { if (!busy) close(); }}>
       <div className="service-model-picker">
@@ -66,22 +69,33 @@ export function ModelDirectory({
           placeholder="搜索模型名称或编号"
         />
         <div className="service-model-picker-count" role="status">
-          {matches.length} 个模型 · 此服务已添加{" "}
-          {models.filter((id) => added.includes(id)).length} 个
+          {documentedCount
+            ? `接口返回 ${matches.length - documentedCount} 个 · 官方文档 ${documentedCount} 个`
+            : `${matches.length} 个模型`} · 此服务已添加{" "}
+          {models.filter((model) => added.includes(model.id)).length} 个
           {truncated ? " · 目录仅显示前1000项" : ""}
         </div>
         <div className="service-model-picker-list">
-          {matches.map((id) => {
+          {matches.map((model) => {
+            const id = model.id;
             const installed = added.includes(id);
-            const type = modelSuggestion(id).modality;
+            const outputs = model.outputs?.filter((output) => ["text", "image", "video"].includes(output)) ?? [];
+            const type = outputs.length === 1 ? outputs[0] : modelSuggestion(id).modality;
             return (
               <div key={id} className="model-directory-row">
                 <label className="flex items-center gap-3 min-w-0 flex-1">
                   <input type="checkbox" aria-label={`选择 ${id}`} disabled={installed || busy} checked={installed || Object.prototype.hasOwnProperty.call(selected, id)} onChange={e => setSelected(current => { if (e.target.checked) return {...current, [id]: type}; const next = {...current}; delete next[id]; return next; })} />
-                  <span className="min-w-0"><strong className="break-all">{id}</strong><small>{installed ? "已添加到此服务" : "待验证 · 沿用服务连接"}</small></span>
+                  <span className="min-w-0">
+                    <strong className="break-all">{id}</strong>
+                    <small>
+                      {model.source === "documentation" && "官方文档 · "}
+                      {installed ? "已添加到此服务" : "账号权限待验证"}
+                    </small>
+                    {model.note && <small>{model.note}</small>}
+                  </span>
                 </label>
                 {!installed && Object.prototype.hasOwnProperty.call(selected, id) && <SelectField disabled={busy} label={`${id} 用途`} value={selected[id]} options={[{value: "", label: "选择用途", disabled: true}, {value: "text", label: "文字对话"}, {value: "image", label: "图片生成"}, {value: "video", label: "视频生成"}]} onChange={value => setSelected(current => ({...current, [id]: value}))} />}
-                {!installed && <button type="button" disabled={busy} onClick={() => select(id)}>单独配置</button>}
+                {!installed && <button type="button" disabled={busy} onClick={() => select(id, type)}>单独配置</button>}
               </div>
             );
           })}

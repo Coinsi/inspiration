@@ -1,6 +1,11 @@
 import { useSearchParams } from "react-router-dom";
 import { ProviderWorkspace } from "./ProviderWorkspace";
-import { connectionProtocol } from "@/lib/model-connection";
+import {
+  connectionProtocol,
+  directoryEntries,
+  type ModelDirectoryResult,
+  type ModelListItem,
+} from "@/lib/model-connection";
 import { modelConfigRoot, modelConfigQueryKey, type ModelVerification } from "@/lib/model-config-scope";
 import { ModelDirectory, modelSuggestion } from "./ModelDirectory";
 import { SelectField } from "./ui/select-field";
@@ -207,6 +212,7 @@ export function ChannelsPane({
     channel: Channel;
     model: Model | null;
     code?: string;
+    modality?: string;
   } | null>(null);
   useEffect(() => {
     if (manualRequest) {
@@ -218,7 +224,7 @@ export function ChannelsPane({
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [directory, setDirectory] = useState<{
     channel: string;
-    models: string[];
+    models: ModelListItem[];
     truncated: boolean;
   } | null>(null);
 
@@ -256,12 +262,12 @@ export function ChannelsPane({
   }
   const discover = useMutation({
     mutationFn: (id: string) =>
-      api.post<{ models: string[]; truncated: boolean; message: string }>(
+      api.post<ModelDirectoryResult>(
         `${base}/${id}/discover`,
       ),
     onSuccess: (r, id) => {
       addMany.reset();
-      setDirectory({ channel: id, ...r });
+      setDirectory({ channel: id, models: directoryEntries(r), truncated: r.truncated });
       setDirectoryOpen(true);
       setNotice("");
     },
@@ -448,7 +454,7 @@ export function ChannelsPane({
                 </div>
                 {directory?.channel === channel.id && (
                   <p className="model-settings-footnote">
-                    已读取 {directory.models.length} 个模型。
+                    共 {directory.models.length} 个候选模型。
                     <button
                       className="text-primary"
                       onClick={() => setDirectoryOpen(true)}
@@ -535,12 +541,13 @@ export function ChannelsPane({
             .models.map((m) => m.model)}
           truncated={directory.truncated}
           close={() => setDirectoryOpen(false)}
-          select={(code) => {
+          select={(code, modality) => {
             setDirectoryOpen(false);
             setModelEdit({
               channel: data.channels.find((c) => c.id === directory.channel)!,
               model: null,
               code,
+              modality,
             });
           }}
           manual={() => {
@@ -560,6 +567,7 @@ export function ChannelsPane({
           model={modelEdit.model}
           protocols={data.protocols}
           initialCode={modelEdit.code}
+          initialModality={modelEdit.modality}
           close={() => {
             setDirectoryOpen(!!modelEdit.code);
             setModelEdit(null);
@@ -769,6 +777,7 @@ export function ModelEditor({
   model,
   protocols,
   initialCode = "",
+  initialModality,
   defaults,
   routes,
   suggestion,
@@ -781,6 +790,7 @@ export function ModelEditor({
   model: Model | null;
   protocols: Catalog["protocols"];
   initialCode?: string;
+  initialModality?: string;
   defaults?: { modality: string; protocol: string; sdk_provider: string };
   routes?: { modality: string; protocol: string; sdk_provider: string }[];
   suggestion?: SuggestedModel;
@@ -793,20 +803,17 @@ export function ModelEditor({
     model?.price || { mode: "unconfigured", amount: "0" },
   );
   const configured = model ?? suggestion;
+  const suggestedModality =
+    defaults?.modality || initialModality || modelSuggestion(initialCode).modality;
   const [name, setName] = useState(configured?.name || initialCode.slice(0, 100)),
     [code, setCode] = useState(model?.model || initialCode),
     [protocol, setProtocol] = useState(
       model?.protocol ||
         defaults?.protocol ||
-        connectionProtocol(
-          channel.endpoint,
-          modelSuggestion(initialCode).modality,
-        ),
+        connectionProtocol(channel.endpoint, suggestedModality),
     ),
     [modality, setModality] = useState(
-      model?.modality ||
-        defaults?.modality ||
-        modelSuggestion(initialCode).modality,
+      model?.modality || suggestedModality,
     ),
     [enabled, setEnabled] = useState(model?.enabled ?? true),
     [isDefault, setDefault] = useState(model?.is_default ?? false),

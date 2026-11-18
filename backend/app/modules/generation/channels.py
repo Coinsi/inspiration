@@ -702,6 +702,8 @@ def discover_connection(ch, protocol="openai", *, purpose=None):
     token = decrypt(ch.credentials_encrypted)
     template_id = getattr(ch, "provider_template_id", None) or getattr(ch, "preset_id", None)
     endpoint = ch.endpoint.rstrip("/")
+    official_minimax = protocol == "openai" and endpoint in minimax_models.OFFICIAL_ENDPOINTS
+    minimax_catalog = official_minimax or template_id == "minimax"
     headers = {"Authorization": "Bearer " + token}
     if protocol == "anthropic":
         endpoint = endpoint if endpoint.endswith("/v1") else endpoint + "/v1"
@@ -732,6 +734,10 @@ def discover_connection(ch, protocol="openai", *, purpose=None):
         import json
 
         payload = json.loads(data)
+        if minimax_catalog and (
+            payload.get("error") or (payload.get("base_resp") or {}).get("status_code", 0) != 0
+        ):
+            raise ProviderError("MiniMax 模型目录读取失败，请检查密钥和账号权限")
         models = payload.get("models" if protocol == "gemini" else "data")
         if protocol == "gemini" and isinstance(models, list):
             models = [
@@ -758,18 +764,23 @@ def discover_connection(ch, protocol="openai", *, purpose=None):
             )
             if isinstance(outputs, list) and outputs:
                 item["outputs"] = [x for x in outputs if isinstance(x, str)]
-            elif template_id == "minimax":
-                output = minimax_models.expected_output(code, template_id=template_id)
+            elif minimax_catalog:
+                output = minimax_models.MODEL_OUTPUTS.get(code)
                 if output:
                     item["outputs"] = [output]
-            if purpose and template_id == "minimax" and purpose not in item.get("outputs", []):
-                # Unclassified IDs remain available by manual entry.
-                continue
+            if official_minimax and code in minimax_models.MEDIA_NOTES:
+                item["note"] = minimax_models.MEDIA_NOTES[code]
             details[code] = item
         ids = sorted(details)
+        if minimax_catalog and purpose:
+            ids = [code for code in ids if purpose in details[code].get("outputs", [])]
         return {
             "models": ids[:1000],
             "details": [details[k] for k in ids[:1000]],
+            "documented_models": minimax_models.documented_media(details, purpose)
+            if official_minimax
+            else [],
+            "documentation_url": minimax_models.DOCUMENTATION_URL if official_minimax else None,
             "truncated": len(ids) > 1000
             or bool(payload.get("nextPageToken") or payload.get("has_more")),
             "message": "目录连接成功；生成能力仍需按协议配置，不代表所有模型均可生成图片或视频",
