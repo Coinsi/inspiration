@@ -13,6 +13,7 @@ from app.core.crypto import decrypt
 from app.core.errors import CapabilityUnsupported, Conflict
 from app.models.generation import CreativeModel, ModelChannel, ProviderConfig
 from app.modules.generation import channels, model_catalog
+from app.modules.generation.minimax_models import H3_PROTOCOL, H3_RATIOS, H3_VIDEO_MODELS
 from app.modules.generation.model_scope import lock_model_scope
 
 PRESETS = {
@@ -53,7 +54,7 @@ PRESETS = {
         "description": "文字或一张参考图，生成海螺视频。",
         "endpoint": "https://api.minimax.cn/v1",
         "key_url": "https://platform.minimax.cn/user-center/basic-information/interface-key",
-        "note": "使用 MiniMax 开放平台 API Key，并确认账户已开通视频生成。1080P 支持 6 秒。",
+        "note": "使用 MiniMax 开放平台 API Key，并确认账户已开通所选视频模型。",
         "models": {
             "hailuo-2.3": {
                 "name": "Hailuo 2.3",
@@ -67,6 +68,21 @@ PRESETS = {
         },
     },
 }
+
+for h3_model, (min_duration, resolutions) in H3_VIDEO_MODELS.items():
+    PRESETS["minimax"]["models"][h3_model.lower()] = {
+        "name": h3_model,
+        "model": h3_model,
+        "protocol": H3_PROTOCOL,
+        "modality": "video",
+        "max_reference_images": 2,
+        "max_video_seconds": 15,
+        "parameters": {
+            "duration": list(range(min_duration, 16)),
+            "resolution": resolutions,
+            "aspect_ratio": H3_RATIOS,
+        },
+    }
 
 
 # Official IDs and conservative controls verified against Ark's model list and

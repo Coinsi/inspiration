@@ -253,7 +253,7 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=N
         r = resolved(db, pc)
         if not r.enabled or pc.kind != "generation":
             raise CapabilityUnsupported("该生成供应商已停用")
-        config = (snapshot or {}).get("model_profile") or pc.config
+        config = (snapshot or {}).get("model_profile") or r.config
         if config.get("channel_id") != pc.config.get("channel_id"):
             raise CapabilityUnsupported("模型渠道已改变，请重新提交创作")
         adapter_name = config.get("protocol", name)

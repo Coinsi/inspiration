@@ -12,8 +12,9 @@ from app.core.crypto import decrypt
 from app.core.errors import CapabilityUnsupported, Conflict, ProviderError
 from app.models.generation import GenerationJob
 from app.modules.generation import model_catalog as catalog
+from app.modules.generation.minimax_models import H3_PROTOCOL
 
-RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video"} | {
+RESUMABLE_PROTOCOLS = {"openai_video", "video_v1", "ark_video", "minimax_video", H3_PROTOCOL} | {
     adapter.name for adapter in MEDIA_ADAPTERS if adapter.resumable
 }
 

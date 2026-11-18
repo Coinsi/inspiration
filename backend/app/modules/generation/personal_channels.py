@@ -39,7 +39,11 @@ def public_model(row, key):
             provider_name=personal.provider_name(row.id, key),
             enabled=spec.get("enabled", True),
             kind="llm" if spec["modality"] == "text" else "generation",
-            config={**personal.profile(spec), "revision": row.revision, "is_default": False},
+            config={
+                **personal.profile(spec, row.endpoint),
+                "revision": row.revision,
+                "is_default": False,
+            },
         )
     )
     model["verification"] = row.verification.get(key, {"status": "unverified"})
@@ -199,6 +203,7 @@ def write_model(db, row, key, data, *, editing):
     spec = data.model_dump(
         mode="json", exclude={"request_id", "revision", "is_default", "price"}, exclude_none=True
     )
+    spec["protocol"] = minimax_models.video_protocol(row.endpoint, data.model, data.protocol)
     # Older presets omit defaults. Opening and saving them must not invalidate in-flight jobs.
     if previous is not None:
         current = public_model(row, key)

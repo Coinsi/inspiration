@@ -56,6 +56,12 @@ PROTOCOLS = {
     "ark_image": {"name": "火山方舟图片", "types": ["image"]},
     "ark_video": {"name": "火山方舟视频", "types": ["video"]},
     "minimax_video": {"name": "MiniMax 海螺视频", "types": ["video"]},
+    minimax_models.H3_PROTOCOL: {
+        "name": "MiniMax H3 视频",
+        "types": ["video"],
+        "parameter_keys": ["duration", "resolution", "aspect_ratio"],
+        "max_refs": 2,
+    },
     "cloud_llm": {
         "name": "文字模型 · LiteLLM（含 OpenAI 兼容）",
         "types": ["text"],
@@ -227,8 +233,8 @@ def profile_modality(row):
     return row.config.get("modality") or ("text" if row.kind == "llm" else "image")
 
 
-def public_model(row):
-    c = row.config or {}
+def public_model(row, endpoint=None):
+    c = minimax_models.video_profile(row.config or {}, endpoint)
     return {
         "id": row.id,
         "provider_name": row.provider_name,
@@ -279,7 +285,9 @@ def catalog(db, project_id):
                 "has_token": bool(r.credentials_encrypted),
                 "revision": r.revision,
                 "models": [
-                    public_model(p) for p in models if p.config.get("channel_id") == str(r.id)
+                    public_model(p, r.endpoint)
+                    for p in models
+                    if p.config.get("channel_id") == str(r.id)
                 ],
             }
             for r in rows
@@ -423,7 +431,7 @@ def save_model(db, ctx, channel_id, data, model_id=None):
         "channel_id": str(ch.id),
         "display_name": data.name,
         "model": data.model,
-        "protocol": data.protocol,
+        "protocol": minimax_models.video_protocol(ch.endpoint, data.model, data.protocol),
         "sdk_provider": data.sdk_provider,
         "modality": data.modality,
         "input_capabilities": (
@@ -542,7 +550,7 @@ def resolved(db, row):
             provider_name=row.provider_name,
             endpoint=row.endpoint,
             credentials_encrypted=row.credentials_encrypted,
-            config=c,
+            config=minimax_models.video_profile(c, row.endpoint),
             enabled=row.enabled,
             channel_name="",
         )
@@ -552,7 +560,7 @@ def resolved(db, row):
         provider_name=row.provider_name,
         endpoint=ch.endpoint,
         credentials_encrypted=ch.credentials_encrypted,
-        config=c,
+        config=minimax_models.video_profile(c, ch.endpoint),
         enabled=row.enabled and ch.enabled,
         channel_name=ch.name,
     )
@@ -564,6 +572,7 @@ def provider_view(db, row):
     result = ProviderConfigOut.model_validate(row).model_dump()
     r = resolved(db, row)
     result.update(
+        config=r.config,
         enabled=r.enabled,
         endpoint=r.endpoint,
         display_name=row.config.get("display_name", row.provider_name),
@@ -655,7 +664,7 @@ def model_snapshot(db, project_id, name):
         )
     )
     if row and row.config.get("channel_id"):
-        return {"model_profile": copy.deepcopy(row.config)}
+        return {"model_profile": copy.deepcopy(resolved(db, row).config)}
     return {}
 
 

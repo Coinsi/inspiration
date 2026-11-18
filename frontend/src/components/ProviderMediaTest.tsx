@@ -143,9 +143,10 @@ function TestForm({
   );
   const framePair =
     purpose === "video" &&
-    ["ark_video", "openrouter_video", "zhipu_video", "bfl_video"].includes(
+    ["ark_video", "openrouter_video", "zhipu_video", "bfl_video", "minimax_h3_video"].includes(
       model?.protocol ?? "",
     );
+  const ratioFromFrame = model?.protocol === "minimax_h3_video" && files.references.length > 0;
   const [expanded, setExpanded] = useState("");
   const [submitted, setSubmitted] = useState<GenJob>();
   const pending = useRef({ fingerprint: "", key: "" });
@@ -181,7 +182,9 @@ function TestForm({
         provider: model.provider_name,
         request_type: model.modality,
         prompt_override: prompt.trim(),
-        provider_params: params,
+        provider_params: ratioFromFrame
+          ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== "aspect_ratio"))
+          : params,
         count: 1,
         use_references: false,
         references:
@@ -246,7 +249,7 @@ function TestForm({
             ),
           )}
         {Object.entries(model?.parameters ?? {})
-          .filter(([, values]) => values.length)
+          .filter(([key, values]) => values.length && !(ratioFromFrame && key === "aspect_ratio"))
           .map(([key, values]) => (
             <label key={key}>
               {parameterLabels[key] ?? key}
@@ -273,6 +276,7 @@ function TestForm({
             </label>
           ))}
       </div>
+      {ratioFromFrame && <small>视频比例沿用参考图。</small>}
       {(!model ||
         model.max_reference_images > 0 ||
         !!model.max_reference_videos) && (

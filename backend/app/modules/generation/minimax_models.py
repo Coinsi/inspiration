@@ -8,6 +8,54 @@ OFFICIAL_ENDPOINTS = {
     "https://api.minimaxi.com/v1",
     "https://api.minimax.io/v1",
 }
+_VIDEO_BASES = {
+    base.removesuffix("/v1") + suffix
+    for base in OFFICIAL_ENDPOINTS
+    for suffix in ("", "/v1", "/v2")
+}
+
+H3_PROTOCOL = "minimax_h3_video"
+# Minimum duration and supported output resolutions from the V2 video contract.
+H3_VIDEO_MODELS = {
+    "MiniMax-H3": (4, ["768P", "2K"]),
+    "MiniMax-H3-Highspeed": (4, ["480P", "768P"]),
+    "MiniMax-H3-Lite": (4, ["480P", "768P"]),
+    "MiniMax-H3-Max": (5, ["480P", "768P"]),
+}
+H3_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
+
+
+def video_protocol(endpoint, model, protocol):
+    if model not in H3_VIDEO_MODELS:
+        return protocol
+    base = (endpoint or "").rstrip("/")
+    if protocol == "minimax_video" or (protocol == "openai_video" and base in _VIDEO_BASES):
+        return H3_PROTOCOL
+    return protocol
+
+
+def video_profile(config, endpoint):
+    """Resolve live profiles before freezing jobs. Old receipts keep their original protocol."""
+    if config.get("modality") != "video":
+        return config
+    model = config.get("model")
+    protocol = video_protocol(endpoint, model, config.get("protocol"))
+    if protocol != H3_PROTOCOL:
+        return config
+    minimum, resolutions = H3_VIDEO_MODELS.get(model, H3_VIDEO_MODELS["MiniMax-H3"])
+    maximum = min(int(config.get("max_video_seconds", 15)), 15)
+    supported = {
+        "duration": list(range(minimum, maximum + 1)),
+        "resolution": resolutions,
+        "aspect_ratio": H3_RATIOS,
+    }
+    configured = config.get("param_schema") or {}
+    schema = {}
+    for key, supported_values in supported.items():
+        values = configured.get(key, {}).get("enum", supported_values)
+        schema[key] = {"enum": [value for value in values if value in supported_values]}
+    return {**config, "protocol": protocol, "max_video_seconds": maximum, "param_schema": schema}
+
 
 MODEL_OUTPUTS = {
     "MiniMax-M3": "text",
@@ -22,7 +70,7 @@ MODEL_OUTPUTS = {
     "MiniMax-Hailuo-2.3": "video",
     "MiniMax-Hailuo-2.3-Fast": "video",
     "MiniMax-Hailuo-02": "video",
-    "MiniMax-H3": "video",
+    **dict.fromkeys(H3_VIDEO_MODELS, "video"),
     "image-01": "image",
     "image-01-live": "image",
     "MiniMax-H3-Image": "image",
@@ -31,7 +79,7 @@ MODEL_OUTPUTS = {
 
 _H3_IMAGE_NOTE = "H3 图片模型使用新版接口，当前内置 MiniMax 图片连接支持 image-01 系列。"
 MEDIA_NOTES = {
-    "MiniMax-H3": "H3 使用新版视频接口，当前内置 MiniMax 视频连接支持海螺 2.3 和 02 系列。",
+    **dict.fromkeys(H3_VIDEO_MODELS, "使用 MiniMax 新版视频接口，支持文字和首尾帧图片。"),
     "MiniMax-H3-Image": _H3_IMAGE_NOTE,
     "MiniMax-H3-Image-Highspeed": _H3_IMAGE_NOTE,
     "MiniMax-Hailuo-2.3-Fast": "图生视频，需要一张首帧图片。",
@@ -53,6 +101,6 @@ def documented_media(reported_ids, purpose):
 
 
 def expected_output(model, *, template_id=None, protocol=None):
-    if template_id == "minimax" or protocol in ("minimax_image", "minimax_video"):
+    if template_id == "minimax" or protocol in ("minimax_image", "minimax_video", H3_PROTOCOL):
         return MODEL_OUTPUTS.get(model)
     return None

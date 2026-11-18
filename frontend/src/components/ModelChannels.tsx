@@ -289,7 +289,7 @@ export function ChannelsPane({
           name: item.code.slice(0, 100),
           model: item.code,
           modality: item.modality,
-          protocol: connectionProtocol(channel.endpoint, item.modality),
+          protocol: connectionProtocol(channel.endpoint, item.modality, item.code),
           request_id: batchIds.current.get(key),
         };
       });
@@ -809,8 +809,7 @@ export function ModelEditor({
     [code, setCode] = useState(model?.model || initialCode),
     [protocol, setProtocol] = useState(
       model?.protocol ||
-        defaults?.protocol ||
-        connectionProtocol(channel.endpoint, suggestedModality),
+        connectionProtocol(channel.endpoint, suggestedModality, initialCode, defaults?.protocol),
     ),
     [modality, setModality] = useState(
       model?.modality || suggestedModality,
@@ -964,7 +963,7 @@ export function ModelEditor({
                     const hint = modelSuggestion(value);
                     setModality(hint.modality);
                     setProtocol(
-                      connectionProtocol(channel.endpoint, hint.modality),
+                      connectionProtocol(channel.endpoint, hint.modality, value),
                     );
                     setParameters({});
                     setRefs(0);
@@ -994,7 +993,7 @@ export function ModelEditor({
               setProtocolChosen(true);
               setSdkProvider(route?.sdk_provider ?? "openai");
               setInputCapabilities(textInputCapabilities);
-              setProtocol(route?.protocol ?? connectionProtocol(channel.endpoint, value));
+              setProtocol(connectionProtocol(channel.endpoint, value, code, route?.protocol));
               setParameters({});
               setRefs(0);
               setMask(false);

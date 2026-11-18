@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
+  connectionProtocol,
   directoryEntries,
   type ModelDirectoryResult,
   type ModelListItem,
@@ -496,7 +497,8 @@ function ProviderConnection({
       ?.name;
   const selectedOtherPurpose = otherPurpose(code);
   const suggested = suggestions.filter(
-    (m) => m.modality === purpose && m.protocol === defaults?.protocol,
+    (m) => m.modality === purpose && m.protocol ===
+      connectionProtocol(endpoint, purpose, m.model, defaults?.protocol),
   );
   const selectedSuggestion = suggested.find((m) => m.model === code.trim());
   const selectedDirectoryModel = codes?.find((model) => model.id === code.trim());
@@ -858,12 +860,7 @@ function ProviderConnection({
           defaults={
             defaults || {
               modality: purpose,
-              protocol:
-                purpose === "text"
-                  ? "cloud_llm"
-                  : purpose === "image"
-                    ? "gpt_image"
-                    : "openai_video",
+              protocol: connectionProtocol(channel.endpoint, purpose, code),
               sdk_provider: "openai",
             }
           }

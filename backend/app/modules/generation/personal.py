@@ -19,7 +19,7 @@ from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.models.generation import GenerationJob, ProviderConfig
 from app.models.identity import User
 from app.models.personal_model import PersonalModelService
-from app.modules.generation import presets
+from app.modules.generation import minimax_models, presets
 from app.modules.generation.personal_endpoints import validate_endpoint
 from app.modules.harness.kernel_modalities import InputCapabilities
 
@@ -40,12 +40,13 @@ def provider_name(service_id, key):
     return f"{PREFIX}{service_id.hex}_{suffix}"
 
 
-def profile(spec):
-    return {
+def profile(spec, endpoint=None):
+    config = {
         **spec,
         "display_name": spec["name"],
         "param_schema": {k: {"enum": v} for k, v in spec.get("parameters", {}).items()},
     }
+    return minimax_models.video_profile(config, endpoint)
 
 
 def owned(db, user_id, ident, lock=False):
@@ -260,7 +261,7 @@ def adopt(channel_id: uuid.UUID, ctx=MANAGE, db: Session = DB):
     for p in configured:
         if not p.enabled or p.config.get("channel_id") != str(source.id):
             continue
-        spec = public_model(p)
+        spec = public_model(p, source.endpoint)
         key = next(
             (
                 k
@@ -320,7 +321,7 @@ def providers(db, user_id):
                     "channel_name": row.name + " · 个人服务",
                     "capabilities": {},
                     "config": {
-                        **profile(spec),
+                        **profile(spec, row.endpoint),
                         "scope": "personal",
                         "verification": row.verification.get(key, {"status": "unverified"}),
                     },
@@ -367,7 +368,9 @@ class PersonalProvider:
         self.db, self.name, self.user_id = db, name, user_id
         self.row, self.key = resolve(db, name, user_id, snapshot)
         self.revision = self.row.revision
-        self.config = profile(self.row.models[self.key])
+        self.config = (snapshot or {}).get("model_profile") or profile(
+            self.row.models[self.key], self.row.endpoint
+        )
         self.adapter = generation_registry.create(
             self.config["protocol"],
             endpoint=self.row.endpoint,

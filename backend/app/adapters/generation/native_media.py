@@ -21,6 +21,7 @@ class NativeMedia(GenerationProvider):
     modality = "video"
     allowed_parameters = set()
     max_refs = 1
+    supports_single_last_frame = False
 
     def __init__(self, endpoint=None, token=None, config=None, **_):
         self.endpoint = (endpoint or "").rstrip("/")
@@ -32,7 +33,7 @@ class NativeMedia(GenerationProvider):
         features = {"reference", "img2img"} if refs else set()
         if refs and self.modality == "video":
             features.add("first_frame")
-        if refs > 1 and self.modality == "video":
+        if refs and (refs > 1 or self.supports_single_last_frame) and self.modality == "video":
             features.add("last_frame")
         return Capabilities(
             modalities={self.modality},
@@ -63,7 +64,7 @@ class NativeMedia(GenerationProvider):
             roles = [r.role for r in req.references]
             if any(r not in ("ref", "reference", "first_frame", "last_frame") for r in roles):
                 raise CapabilityUnsupported("当前视频接口只支持首帧或首尾帧图片")
-            if len(roles) == 1 and roles[0] == "last_frame":
+            if roles == ["last_frame"] and not self.supports_single_last_frame:
                 raise CapabilityUnsupported("请先添加首帧图片，再使用尾帧")
             if len(roles) == 2 and sorted(roles) != ["first_frame", "last_frame"]:
                 raise CapabilityUnsupported("两张参考图需要分别指定为首帧和尾帧")
@@ -91,9 +92,12 @@ class NativeMedia(GenerationProvider):
                 ) as response:
                     if not response.is_success:
                         messages = {
+                            400: "供应商拒绝了生成参数，请核对模型、提示词和参考素材",
                             401: "密钥无效，请更换服务密钥",
+                            402: "供应商账户余额不足，请检查该服务的可用额度",
                             403: "此密钥没有模型权限，请到供应商开通模型",
                             404: "未找到模型或接口，请核对模型名称和服务地址",
+                            422: "供应商拒绝了输入内容，请检查提示词和参考素材",
                             429: "服务额度不足或请求过于频繁，请检查余额并稍后再试",
                         }
                         # Preserve a bounded vendor error code, never echo raw bodies or keys.
@@ -135,6 +139,7 @@ class NativeMedia(GenerationProvider):
                         if method == "POST" and response.status_code in (
                             400,
                             401,
+                            402,
                             403,
                             404,
                             422,

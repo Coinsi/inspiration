@@ -24,9 +24,26 @@ export function directoryEntries(result: ModelDirectoryResult): ModelListItem[] 
 
 // Infer transport from a recognized service host, never from a model's brand name.
 // Unknown services start with the documented OpenAI-compatible convention.
-export function connectionProtocol(endpoint: string, modality: string) {
+export function connectionProtocol(
+  endpoint: string,
+  modality: string,
+  model = "",
+  preferred?: string,
+) {
   let host = "";
-  try { host = new URL(endpoint).hostname.toLowerCase(); } catch { /* incomplete form */ }
+  let officialMiniMaxVideo = false;
+  try {
+    const url = new URL(endpoint);
+    host = url.hostname.toLowerCase();
+    officialMiniMaxVideo =
+      ["api.minimax.cn", "api.minimax.io", "api.minimaxi.com"].includes(host) &&
+      url.protocol === "https:" && !url.port && /^\/(v[12]\/?)?$/.test(url.pathname);
+  } catch { /* incomplete form */ }
+  const nativeMiniMax =
+    preferred === "minimax_video" || (officialMiniMaxVideo && (!preferred || preferred === "openai_video"));
+  if (nativeMiniMax && modality === "video" && /^MiniMax-H3(?:-Highspeed|-Lite|-Max)?$/.test(model.trim()))
+    return "minimax_h3_video";
+  if (preferred) return preferred;
   if (host === "ark.cn-beijing.volces.com")
     return { text: "cloud_llm", image: "ark_image", video: "ark_video" }[modality] || "";
   if (["api.minimax.cn", "api.minimax.io", "api.minimaxi.com"].includes(host))

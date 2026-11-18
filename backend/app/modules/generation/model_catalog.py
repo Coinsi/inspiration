@@ -340,6 +340,7 @@ def select_default(db, ctx, data):
 
 
 def all_candidates(db, row):
+    from app.modules.generation.minimax_models import video_profile
     from app.modules.generation.service import _provider_instance
 
     candidates, rejected = [], []
@@ -365,7 +366,7 @@ def all_candidates(db, row):
                 "channel_revision": ch.revision,
                 "endpoint_hash": hashlib.sha256(ch.endpoint.encode()).hexdigest(),
                 "model_name": p.config.get("display_name", p.provider_name),
-                "model_profile": copy.deepcopy(p.config),
+                "model_profile": copy.deepcopy(video_profile(p.config, ch.endpoint)),
                 "capabilities": caps.model_dump(mode="json") if caps else None,
             }
         )

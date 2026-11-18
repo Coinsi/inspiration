@@ -137,7 +137,15 @@ def test_minimax_official_media_when_account_catalog_lists_only_text(studio, mon
         ("image", {"image-01", "image-01-live", "MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"}),
         (
             "video",
-            {"MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast", "MiniMax-Hailuo-02", "MiniMax-H3"},
+            {
+                "MiniMax-Hailuo-2.3",
+                "MiniMax-Hailuo-2.3-Fast",
+                "MiniMax-Hailuo-02",
+                "MiniMax-H3",
+                "MiniMax-H3-Highspeed",
+                "MiniMax-H3-Lite",
+                "MiniMax-H3-Max",
+            },
         ),
     ):
         result = client.post(path, params={"purpose": purpose}).json()
@@ -162,9 +170,12 @@ def test_minimax_official_media_when_account_catalog_lists_only_text(studio, mon
     assert {item["id"] for item in mixed["documented_models"]} == {
         "MiniMax-Hailuo-2.3",
         "MiniMax-Hailuo-2.3-Fast",
+        "MiniMax-H3-Highspeed",
+        "MiniMax-H3-Lite",
+        "MiniMax-H3-Max",
     }
     all_models = client.post(path).json()
-    assert len(all_models["models"]) == 4 and len(all_models["documented_models"]) == 6
+    assert len(all_models["models"]) == 4 and len(all_models["documented_models"]) == 9
 
     payload = {"base_resp": {"status_code": 1004}, "data": []}
     assert client.post(path, params={"purpose": "image"}).is_error
