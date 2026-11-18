@@ -24,6 +24,7 @@ import { Lightbox } from "@/components/ImageViewer";
 import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
 import { ComposerParameters } from "./ComposerParameters";
+import { composerParameters, type MediaCapabilities } from "./mediaParameters";
 import { referenceProblem } from "./referenceProblem";
 import { referenceInput } from "./referenceInput";
 import {
@@ -52,20 +53,12 @@ type ResultActions = {
   /** Reference an existing result in a text discussion; ranges do not edit the file. */
   onReference?: (output: MediaOutput, selection: MediaReferenceSelection) => void;
 };
-type Caps = {
-  modalities: string[];
-  features: string[];
-  max_reference_images: number;
-  max_reference_videos?: number;
-  reference_unavailable_reason?: string | null;
-  param_schema: Record<string, { enum?: (string | number)[] }>;
-};
-
 export function useConversationMedia(
   projectId: string,
   key: string,
   mode: CreationMode,
   providers: ProviderConfig[],
+  attachments: ReadonlyArray<{ kind?: string }>,
 ) {
   const [choices, setChoices] = usePersistentState<Record<string, string>>(
     `${key}.mediaModels`,
@@ -96,22 +89,16 @@ export function useConversationMedia(
   const caps = useQuery({
     queryKey: ["capabilities", projectId, provider],
     queryFn: () =>
-      api.get<Caps>(
+      api.get<MediaCapabilities>(
         `/projects/${projectId}/providers/${provider}/capabilities`,
       ),
     enabled: mode !== "text" && !!provider,
   });
   const paramKey = `${mode}:${provider}`;
-  const schema = caps.data?.param_schema || {};
-  const controls = Object.fromEntries(
-    Object.entries(schema)
-      .filter(([, spec]) => spec.enum?.length)
-      .map(([name, spec]) => [
-        name,
-        spec.enum!.includes(parameters[paramKey]?.[name])
-          ? parameters[paramKey][name]
-          : spec.enum![0],
-      ]),
+  const { schema, controls, ratioFromImage } = composerParameters(
+    mode === "text" ? undefined : caps.data,
+    parameters[paramKey],
+    [...refs, ...attachments],
   );
   const references = refs.map((r) =>
     referenceInput(r, mode === "image" ? "reference" : r.role),
@@ -140,6 +127,7 @@ export function useConversationMedia(
     capabilitiesError: caps.error?.message || (unavailable ? "原来选择的模型已不可用，请重新选择模型后发送。" : null),
     videoReferencesAvailable: mode === "video" && !!caps.data?.features.includes("video_reference"),
     controls,
+    ratioFromImage,
     choose: (value: string) => setChoices((v) => ({ ...v, [mode]: value })),
     parameter: (name: string, value: string | number) =>
       setParameters((v) => ({
@@ -182,6 +170,7 @@ export function ConversationMediaControls({
       <ComposerParameters
         controls={media.controls}
         schema={media.schema}
+        ratioFromImage={media.ratioFromImage}
         disabled={disabled}
         onChange={media.parameter}
       />

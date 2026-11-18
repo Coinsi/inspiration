@@ -1,6 +1,7 @@
 """H3 V2 contracts and the shared settings-to-video regression."""
 
 # ruff: noqa: F811
+import base64
 import io
 import json
 import urllib.request
@@ -16,12 +17,31 @@ from app.models.generation import GenerationJob, ProviderConfig
 from app.modules.generation import media_engine, service
 from app.modules.generation.minimax_models import H3_PROTOCOL, video_profile
 from app.modules.generation.model_routing import SubmissionRejected
+from tests.test_creative_models import group
 from tests.test_media_workflow import studio  # noqa: F401
+from tests.test_model_channels import add, setup
 from tests.test_model_presets import adapter, transport
 from tests.test_platform_models import ROOT, admin
+from tests.test_workbench import body
 
 
-def test_legacy_platform_profile_generates_a_playable_video(studio, monkeypatch, tmp_path):
+@pytest.fixture
+def result_video(tmp_path, monkeypatch):
+    video = tmp_path / "test.mp4"
+    media_engine.run(
+        ["-f", "lavfi", "-i", "color=c=green:s=160x90:d=1", "-c:v", "libx264", str(video)]
+    )
+    data = video.read_bytes()
+
+    def download(url, **_):
+        assert url == "https://cdn.example.test/output.mp4"
+        return io.BytesIO(data)
+
+    monkeypatch.setattr(urllib.request, "urlopen", download)
+    return data
+
+
+def test_legacy_platform_profile_generates_a_playable_video(studio, monkeypatch, result_video):
     client, sessions, ids = studio
     admin(sessions, ids)
     endpoint = "https://api.minimax.cn/v1"
@@ -51,16 +71,6 @@ def test_legacy_platform_profile_generates_a_playable_video(studio, monkeypatch,
     assert displayed["id"] == profile["id"]
     assert displayed["protocol"] == H3_PROTOCOL and displayed["parameters"]["duration"][-1] == 12
 
-    video = tmp_path / "test.mp4"
-    media_engine.run(
-        ["-f", "lavfi", "-i", "color=c=green:s=160x90:d=1", "-c:v", "libx264", str(video)]
-    )
-
-    def download(url, **_):
-        assert url == "https://cdn.example.test/output.mp4"
-        return io.BytesIO(video.read_bytes())
-
-    monkeypatch.setattr(urllib.request, "urlopen", download)
     seen = []
 
     def upstream(request):
@@ -108,7 +118,114 @@ def test_legacy_platform_profile_generates_a_playable_video(studio, monkeypatch,
         )
     assert seen == [("POST", "/v2/video_generation"), ("GET", "/v2/query/video_generation/test-h3")]
     output = client.get(root + "/workbench/creations").json()[0]["outputs"][0]
-    assert client.get(root + "/blobs/" + output["output_blob_hash"]).content == video.read_bytes()
+    assert client.get(root + "/blobs/" + output["output_blob_hash"]).content == result_video
+
+
+def test_library_frame_on_routed_h3_uses_image_ratio(studio, monkeypatch, result_video):
+    client, sessions, ids = studio
+    admin(sessions, ids)
+    project = f"/api/v1/projects/{ids['project']}"
+    image_job = client.post(project + "/workbench/generate", json=body()).json()
+    assert image_job["status"] == "succeeded"
+    image = client.get(project + "/workbench/creations").json()[0]["outputs"][0]
+    image_bytes = client.get(project + "/blobs/" + image["output_blob_hash"]).content
+    channel = client.post(
+        ROOT + "/model-channels",
+        json={"name": "MiniMax", "endpoint": "https://api.minimax.cn/v1", "token": "fixture"},
+    ).json()["id"]
+    profile = add(
+        client,
+        ROOT,
+        channel,
+        modality="video",
+        protocol=H3_PROTOCOL,
+        model="MiniMax-H3",
+        max_reference_images=1,
+    )
+    routed = group(client, ROOT, [profile], modality="video")
+    provider = routed["provider_name"]
+    caps = client.get(f"{project}/providers/{provider}/capabilities").json()
+    assert caps["aspect_ratio_from_image"] and "first_frame" in caps["features"]
+
+    submitted = []
+
+    def upstream(request):
+        if request.method == "POST":
+            submitted.append(json.loads(request.content))
+            return httpx.Response(200, json={"task_id": "with-frame"})
+        assert request.url.path == "/v2/query/video_generation/with-frame"
+        return httpx.Response(
+            200,
+            json={
+                "task": {
+                    "id": "with-frame",
+                    "status": "succeeded",
+                    "content": {"url": "https://cdn.example.test/output.mp4"},
+                }
+            },
+        )
+
+    transport(monkeypatch, upstream)
+    params = {"duration": 4, "resolution": "768P", "aspect_ratio": "16:9"}
+    request = body(
+        provider=provider,
+        request_type="video",
+        provider_params=params,
+        references=[{"generation_id": image["id"], "role": "first_frame"}],
+    )
+    error = client.post(project + "/workbench/estimate", json={**request, "count": 2}).json()[
+        "error"
+    ]
+    assert "数量设为 1" in error["message"]
+    assert client.post(project + "/workbench/estimate", json=request).status_code == 200
+    assert not submitted
+    response = client.post(project + "/workbench/generate", json=request)
+    assert response.status_code == 200, response.text
+    job = response.json()
+    assert job["status"] == "succeeded", job.get("error")
+    assert job["input_snapshot"]["provider_params"] == {"duration": 4, "resolution": "768P"}
+    assert client.post(project + "/workbench/generate", json=request).json()["id"] == job["id"]
+    assert len(submitted) == 1 and submitted[0]["ratio"] == "adaptive"
+    sent_frame = submitted[0]["content"][1]
+    assert sent_frame["role"] == "first_frame"
+    assert base64.b64decode(sent_frame["image_url"]["url"].split(",")[1]) == image_bytes
+
+
+def test_mixed_routes_keep_selectable_frame_ratio(studio):
+    client, _, ids = studio
+    root, channel = setup(client, ids["project"])
+    h3 = add(
+        client,
+        root,
+        channel,
+        modality="video",
+        protocol=H3_PROTOCOL,
+        model="MiniMax-H3",
+        max_reference_images=1,
+    )
+    fixed = add(
+        client,
+        root,
+        channel,
+        modality="video",
+        protocol="ark_video",
+        model="seedance",
+        max_reference_images=1,
+        parameters={"aspect_ratio": ["9:16"]},
+    )
+    model = group(client, root, [h3, fixed], modality="video")
+    caps = client.get(f"{root}/providers/{model['provider_name']}/capabilities").json()
+    assert not caps["aspect_ratio_from_image"]
+    simulated = client.post(
+        f"{root}/creative-models/{model['id']}/simulate",
+        json={
+            "request_type": "video",
+            "prompt": "sunset",
+            "references": [{"blob_hash": "ref", "role": "first_frame"}],
+            "provider_params": {"aspect_ratio": "9:16"},
+        },
+    ).json()
+    assert [c["profile_id"] for c in simulated["candidates"]] == [fixed["id"]]
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "failed", "cancelled", "unknown"])

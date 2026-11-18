@@ -7,7 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import app.adapters.generation  # noqa: F401  触发供应商注册
-from app.adapters.contracts import GenerationRequest, ReferenceImage, generation_registry
+from app.adapters.contracts import (
+    Capabilities,
+    GenerationRequest,
+    ReferenceImage,
+    generation_registry,
+)
 from app.core import audit
 from app.core.crypto import decrypt, encrypt
 from app.core.deps import ProjectContext
@@ -400,7 +405,11 @@ def _build_request(
 
 
 # ── 成本预估 ──
-def _validate_controls(data, caps):
+def _validated_input(
+    data: schemas.GenerateIn, caps: Capabilities, references: list[ReferenceImage]
+) -> schemas.GenerateIn:
+    params = caps.parameters_for_references(data.provider_params, references)
+    data = data.model_copy(update={"provider_params": params})
     if data.request_type.value not in caps.modalities:
         raise CapabilityUnsupported("供应商不支持该媒体类型")
     if caps.strict_parameters:
@@ -415,6 +424,7 @@ def _validate_controls(data, caps):
             allowed = caps.param_schema.get(name, {}).get("enum", [])
             if data.provider_params[name] not in allowed:
                 raise CapabilityUnsupported(f"供应商不支持该参数：{name}")
+    return data
 
 
 def _explicit_references(db, project_id, data, caps):
@@ -455,8 +465,8 @@ def estimate(
 
     prompt, used_skills = compose_skills(db, ctx.project.id, gen_in.skills, prompt)
     caps = provider.capabilities()
-    _validate_controls(gen_in, caps)
     refs = _explicit_references(db, ctx.project.id, gen_in, caps)
+    gen_in = _validated_input(gen_in, caps, refs)
     est = provider.estimate_cost(_build_request(prompt, gen_in, refs))
     return schemas.EstimateOut(points=est.points, detail=est.detail)
 
@@ -518,7 +528,7 @@ def submit(
 
     if problem := reference_error(refs, caps):
         raise CapabilityUnsupported(problem)
-    _validate_controls(gen_in, caps)
+    gen_in = _validated_input(gen_in, caps, refs)
     req = _build_request(prompt, gen_in, refs)
     req.mask = mask
     est = provider.estimate_cost(req)

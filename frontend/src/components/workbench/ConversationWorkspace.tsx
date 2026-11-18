@@ -278,6 +278,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     scopeKey,
     mode,
     providers.data || [],
+    attachments.items,
   );
   const displayedModels = mode === "text" ? null : media.models;
   const workId = selected ? detail.data?.work_id || "" : draftWork;
@@ -746,7 +747,13 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     setParams(next, { replace: true });
   }, [importId, imported.data]);
   function rememberComposer(notice: string) {
-    setComposerUndo({ draft, mode, provider, targets, skills, references: media.refs, attachments: attachments.items, mediaProvider: media.provider, mediaParameters: media.controls });
+    setComposerUndo({
+      draft, mode, provider, targets, skills,
+      references: media.refs,
+      attachments: attachments.items,
+      mediaProvider: media.provider,
+      mediaParameters: media.parameters[`${mode}:${media.provider}`] ?? {},
+    });
     setComposerNotice(notice);
   }
   const undoComposer = () => {

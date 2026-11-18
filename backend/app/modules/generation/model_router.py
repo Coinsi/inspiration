@@ -65,7 +65,12 @@ def create_router(prefix, manage):
         ctx: ProjectContext = Depends(MANAGE),
         db: Session = Depends(get_db, scope="function"),
     ):
-        plan = catalog.plan(db, catalog.get_model(db, ctx.project.id, model_id), data)
+        model = catalog.get_model(db, ctx.project.id, model_id)
+        if data.references and "aspect_ratio" in data.provider_params:
+            caps = catalog.aggregate(db, model)
+            params = caps.parameters_for_references(data.provider_params, data.references)
+            data = data.model_copy(update={"provider_params": params})
+        plan = catalog.plan(db, model, data)
         return {
             "estimate": catalog.estimate_plan(plan),
             "candidates": [

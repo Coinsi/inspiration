@@ -11,11 +11,13 @@ const labels: Record<string, string> = {
 export function ComposerParameters({
   controls,
   schema,
+  ratioFromImage,
   disabled,
   onChange,
 }: {
   controls: Record<string, string | number>;
   schema: Record<string, { enum?: (string | number)[] }>;
+  ratioFromImage: boolean;
   disabled: boolean;
   onChange: (key: string, value: string | number) => void;
 }) {
@@ -34,6 +36,8 @@ export function ComposerParameters({
     };
   }, [open]);
   const picture = Object.keys(controls).filter((key) => key !== "duration");
+  const pictureLabels = picture.map((key) => controls[key]);
+  if (ratioFromImage) pictureLabels.push("沿用图片比例");
   const selected = open === "duration" ? ["duration"] : picture;
   return (
     <div
@@ -50,7 +54,7 @@ export function ComposerParameters({
         }
       }}
     >
-      {picture.length > 0 && (
+      {(picture.length > 0 || ratioFromImage) && (
         <button
           type="button"
           data-parameter="picture"
@@ -61,7 +65,7 @@ export function ComposerParameters({
           onClick={() => setOpen(open === "picture" ? null : "picture")}
         >
           <SlidersHorizontal size={16} />
-          <span>{picture.map((key) => controls[key]).join(" · ")}</span>
+          <span>{pictureLabels.join(" · ")}</span>
           <ChevronDown size={13} />
         </button>
       )}
@@ -86,6 +90,9 @@ export function ComposerParameters({
           role="group"
           aria-label={open === "picture" ? "画面参数" : "视频时长"}
         >
+          {open === "picture" && ratioFromImage && (
+            <small>画面比例沿用参考图</small>
+          )}
           {selected
             .filter((key) => schema[key]?.enum?.length)
             .map((key) => (

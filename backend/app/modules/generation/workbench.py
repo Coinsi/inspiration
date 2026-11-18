@@ -50,7 +50,6 @@ def prepare(db, ctx, data):
         raise CapabilityUnsupported("工作台媒体创作支持图片与视频")
     provider = service._provider_instance(db, ctx.project.id, data.provider, user_id=ctx.user.id)
     caps = provider.capabilities()
-    service._validate_controls(data, caps)
     if data.request_type.value not in caps.modalities:
         raise CapabilityUnsupported("模型不支持当前创作类型")
     refs = []
@@ -79,7 +78,7 @@ def prepare(db, ctx, data):
     # The composer exposes one reference path. Avoid combining hidden legacy fields.
     if any((gen.source_generation_id, gen.first_frame_id, gen.last_frame_id)):
         raise CapabilityUnsupported("请通过参考内容选择图片")
-    return provider, gen, refs
+    return provider, service._validated_input(gen, caps, refs), refs
 
 
 @router.post("/estimate")

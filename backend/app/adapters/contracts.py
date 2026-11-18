@@ -19,10 +19,17 @@ class Capabilities(BaseModel):
     features: set[str] = Field(default_factory=set)  # img2img/inpaint/controlnet/reference/lora
     max_reference_images: int = 0
     max_reference_videos: int = 0
+    aspect_ratio_from_image: bool = False
     reference_unavailable_reason: str | None = None
     reference_transports: dict[str, list[Literal["multipart", "data_url", "public_url", "file_id"]]] = Field(default_factory=dict)
     max_video_seconds: float | None = None
     param_schema: dict = Field(default_factory=dict)
+
+    def parameters_for_references(self, params: dict, refs: list["ReferenceImage"]) -> dict:
+        # Older clients may send a text-to-video ratio even when the frame determines it.
+        if self.aspect_ratio_from_image and any(ref.kind == "image" for ref in refs):
+            return {key: value for key, value in params.items() if key != "aspect_ratio"}
+        return params
 
 
 class ReferenceImage(BaseModel):

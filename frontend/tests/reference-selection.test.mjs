@@ -13,13 +13,13 @@ const cache = new URL('../node_modules/.cache/reference-selection/', import.meta
 await mkdir(cache, { recursive: true });
 const output = new URL('components.mjs', cache);
 await build({
-  stdin: { contents: `export * from './src/components/workbench/referenceProblem'; export * from './src/components/workbench/attachmentSelection'; export * from './src/components/workbench/ConversationAttachments'; export * from './src/lib/i18n';`, resolveDir: root, loader: 'ts' },
+  stdin: { contents: `export * from './src/components/workbench/referenceProblem'; export * from './src/components/workbench/attachmentSelection'; export * from './src/components/workbench/ConversationAttachments'; export * from './src/components/workbench/mediaParameters'; export * from './src/lib/i18n';`, resolveDir: root, loader: 'ts' },
   outfile: fileURLToPath(output), bundle: true, packages: 'external', platform: 'node', format: 'esm', jsx: 'automatic',
   alias: { '@': fileURLToPath(new URL('../src', import.meta.url)) }, loader: { '.css': 'empty' },
   // Component tests exercise content and callbacks; real portals are covered by the browser suite.
   plugins: [{ name: 'inline-dialog', setup(builder) { builder.onLoad({ filter: /[\\/]ui[\\/]modal\.tsx$/ }, () => ({ contents: 'export function Modal({open, children}) { return open ? <div role="dialog">{children}</div> : null; }', loader: 'tsx' })); } }],
 });
-const { referenceProblem, referencePickState, referenceSelectionHint, preflightAttachmentFiles, ConversationAttachmentPicker, MessageAttachments, I18nProvider } = await import(output.href);
+const { referenceProblem, referencePickState, referenceSelectionHint, preflightAttachmentFiles, ConversationAttachmentPicker, MessageAttachments, composerParameters, I18nProvider } = await import(output.href);
 globalThis.window = globalThis;
 globalThis.document = { documentElement: {} };
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
@@ -30,6 +30,23 @@ const audio = { id: 'audio', source_type: 'media_version', title: '对白音频'
 const caps = { features: ['reference', 'video_reference'], max_reference_images: 2, max_reference_videos: 1 };
 const saved = (item, id = item.id) => ({ ...item, id, filename: `${id}.file`, status: 'ready', size_bytes: 100, uploaded_bytes: 100, chunk_size: 100, saved_at: '2026-10-30T00:00:00Z' });
 const draft = item => ({ client_id: item.id, filename: item.filename, kind: item.kind, role: item.role, state: 'ready', attachment: item });
+
+test('image-driven video ratios follow the current references while preserving the text-only preference', () => {
+  const model = {
+    aspect_ratio_from_image: true,
+    param_schema: { aspect_ratio: { enum: ['16:9', '9:16'] }, duration: { enum: [4, 6] } },
+  };
+  const preferences = Object.freeze({ aspect_ratio: '9:16', duration: 6 });
+  for (const ref of [image, { ...image, role: 'first_frame' }, { role: 'last_frame' }, draft(saved(image))]) {
+    const { ratioFromImage, controls } = composerParameters(model, preferences, [ref]);
+    assert.equal(ratioFromImage, true);
+    assert.deepEqual(controls, { duration: 6 });
+  }
+  assert.deepEqual(composerParameters(model, preferences, []).controls, preferences);
+  assert.deepEqual(composerParameters(model, preferences, [video]).controls, preferences);
+  const mixed = { ...model, aspect_ratio_from_image: false };
+  assert.deepEqual(composerParameters(mixed, preferences, [image]).controls, preferences);
+});
 
 test('ordinary img2img and frame-only inputs follow the backend capability contract', () => {
   assert.equal(referenceProblem({ features: ['img2img'], max_reference_images: 1 }, [image]), '');

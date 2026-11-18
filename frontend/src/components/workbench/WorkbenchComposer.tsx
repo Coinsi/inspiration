@@ -39,6 +39,7 @@ import { JobStatus, ACTIVE_JOBS, JOB_LABEL } from "@/components/JobStatus";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { PersonalModelsDialog } from "./PersonalModelsDialog";
 import { ComposerParameters } from "./ComposerParameters";
+import { composerParameters, type MediaCapabilities } from "./mediaParameters";
 import { referenceProblem } from "./referenceProblem";
 import { referenceInput } from "./referenceInput";
 import {
@@ -51,14 +52,6 @@ const Agent = lazy(() =>
   import("@/pages/Agent").then((m) => ({ default: m.AgentWorkspace })),
 );
 type Mode = "image" | "video" | "text";
-type Caps = {
-  max_reference_videos?: number;
-  reference_unavailable_reason?: string | null;
-  modalities: string[];
-  features: string[];
-  max_reference_images: number;
-  param_schema: Record<string, { enum?: (string | number)[] }>;
-};
 type Creation = {
   id: string;
   title: string;
@@ -217,28 +210,15 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
   const current = options.find((p) => p.provider_name === provider);
   const caps = useQuery({
     queryKey: ["capabilities", projectId, provider],
-    queryFn: () => api.get<Caps>(`${base}/providers/${provider}/capabilities`),
+    queryFn: () => api.get<MediaCapabilities>(`${base}/providers/${provider}/capabilities`),
     enabled: mode !== "text" && !!provider && !!current?.enabled,
   });
   const paramKey = `${mode}:${provider}`;
-  const schema = mode === "text" ? {} : caps.data?.param_schema || {};
-  const controls = Object.fromEntries(
-    Object.entries(schema)
-      .filter(
-        ([key, spec]) =>
-          spec.enum?.length &&
-          !(
-            mode === "image" &&
-            ["duration", "resolution", "aspect_ratio"].includes(key) &&
-            provider === "mock"
-          ),
-      )
-      .map(([key, spec]) => [
-        key,
-        spec.enum!.includes(parameters[paramKey]?.[key])
-          ? parameters[paramKey][key]
-          : spec.enum![0],
-      ]),
+  const { schema, controls, ratioFromImage } = composerParameters(
+    mode === "text" ? undefined : caps.data,
+    parameters[paramKey],
+    refs,
+    mode === "image" && provider === "mock" ? ["duration", "resolution", "aspect_ratio"] : [],
   );
   const activeRefs =
     mode === "text"
@@ -576,6 +556,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
               key={paramKey}
               controls={controls}
               schema={schema}
+              ratioFromImage={ratioFromImage}
               disabled={busy}
               onChange={(key, value) =>
                 setParameters((all) => ({

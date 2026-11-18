@@ -27,6 +27,11 @@ class MiniMaxH3VideoProvider(NativeMedia):
                 self.endpoint = self.endpoint.rsplit("/", 1)[0]
             self.endpoint += "/v2"
 
+    def capabilities(self):
+        caps = super().capabilities()
+        caps.aspect_ratio_from_image = caps.max_reference_images > 0
+        return caps
+
     def validate_request(self, req):
         super().validate_request(req)
         if not req.prompt.strip():
@@ -34,7 +39,8 @@ class MiniMaxH3VideoProvider(NativeMedia):
         if any(ref.kind != "image" for ref in req.references):
             raise CapabilityUnsupported("当前 H3 视频接入支持首帧和尾帧图片")
         schema = self.config["param_schema"]
-        if any(not schema[key]["enum"] for key in self.allowed_parameters):
+        required = ("duration", "resolution") if req.references else self.allowed_parameters
+        if any(not schema[key]["enum"] for key in required):
             raise CapabilityUnsupported(
                 "已配置的时长、清晰度或比例与 H3 模型不匹配，请编辑模型参数"
             )

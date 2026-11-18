@@ -24,6 +24,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const png = await readFile(resolve('public/images/studio-scenes.webp'));
 const uploads = new Map(); const conversations = new Map(); const sends = []; const errors = [];
+const libraryFrame = { id: 'sunset-frame', source_type: 'generation', kind: 'image', title: '落日', blob_hash: 'fixture-image' };
 let failChunk = false;
 let deferLookup = false, finishLookup, lookupStarted;
 let retryInput = null;
@@ -36,9 +37,13 @@ try {
     const data = method === 'POST' && !path.includes('/chunk') ? route.request().postDataJSON() : null;
     const ok = json => route.fulfill({ json });
     if (path === '/providers') return ok([{ provider_name: 'text-model', kind: 'llm', enabled: true, config: { is_default: true, label: '文字模型', model: 'text' } }, { provider_name: 'video-model', kind: 'generation', enabled: true, config: { modality: 'video', model: 'video' } }]);
-    if (path.endsWith('/capabilities')) return ok({ modalities: ['video'], features: ['reference', 'first_frame'], max_reference_images: 2, max_reference_videos: 0, param_schema: {} });
+    if (path.endsWith('/capabilities')) return ok({
+      modalities: ['video'], features: ['reference', 'first_frame'], max_reference_images: 2,
+      max_reference_videos: 0, aspect_ratio_from_image: true,
+      param_schema: { aspect_ratio: { enum: ['16:9', '9:16'] }, resolution: { enum: ['768P'] }, duration: { enum: [4] } },
+    });
     if (path === '/works') return ok([]);
-    if (path === '/workbench/references') return ok({ items: [], has_more: false });
+    if (path === '/workbench/references') return ok({ items: [libraryFrame], has_more: false });
     if (path === '/conversations') { if (method === 'POST') { const c = { id: data.id, title: '新的对话', work_id: null, archived: false, updated_at: new Date().toISOString(), messages: [], has_older: false }; conversations.set(c.id, c); return ok(c); } return ok([...conversations.values()]); }
     if (path.startsWith('/conversations/')) { const id = path.split('/')[2]; const c = conversations.get(id); if (path.endsWith('/retry-input')) return ok(retryInput); if (path.endsWith('/messages')) { sends.push(data); c.messages = [{ id: crypto.randomUUID(), ordinal: 1, role: 'user', content: data.content || '请分析附件', status: 'completed', created_at: new Date().toISOString(), context: { attachments: data.attachments.map(r => { const a = uploads.get(r.attachment_id); a.saved_at = new Date().toISOString(); return { ...a, role: r.role }; }), references: [] }, progress: [] }]; return ok(c); } return ok(c); }
     if (path === '/attachments/uploads') { const a = { ...data, id: data.request_key, title: data.filename, filename: data.filename, kind: data.filename.endsWith('.mp3') ? 'audio' : data.filename.endsWith('.mp4') ? 'video' : 'image', status: 'uploading', uploaded_bytes: 0, chunk_size: 8 * 1024 * 1024, blob_hash: null, chunk_hashes: [] }; uploads.set(a.id, a); return ok(a); }
@@ -118,12 +123,33 @@ try {
   assert.equal(await page.getByRole('textbox', { name: '对话消息' }).inputValue(), retryInput.content);
   uploads.set('other-attachment', { ...uploads.get(attachmentId), id: 'other-attachment', filename: 'other.webp', title: 'other' });
   conversations.set('retry-video', fixtureConversation('retry-video'));
-  retryInput = { content: '按这两张参考图生成', model_provider: null, scope: [], skills: [], attachments: [{ attachment_id: attachmentId, role: 'reference' }], references: [], media: { provider: 'video-model', request_type: 'video', provider_params: {}, references: [{ attachment_id: attachmentId, role: 'reference' }, { attachment_id: 'other-attachment', role: 'first_frame' }] } };
+  retryInput = { content: '按这两张参考图生成', model_provider: null, scope: [], skills: [], attachments: [{ attachment_id: attachmentId, role: 'reference' }], references: [], media: { provider: 'video-model', request_type: 'video', provider_params: { aspect_ratio: '9:16' }, references: [{ attachment_id: attachmentId, role: 'reference' }, { attachment_id: 'other-attachment', role: 'first_frame' }] } };
   await page.goto(`http://127.0.0.1:${server.address().port}/projects/fixture/workbench?conversation=retry-video`);
   await page.getByRole('button', { name: '修改后重试', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.conversation-attachment-card').length === 2);
   // Saved attachments display the editable title, keeping the filename in metadata.
   assert.equal(await page.getByRole('button', { name: '预览 other', exact: true }).count(), 1);
+  const picture = page.getByRole('button', { name: '画面参数', exact: true });
+  assert.match(await picture.innerText(), /沿用图片比例/);
+  await page.getByRole('button', { name: '移除 other', exact: true }).click();
+  await page.getByRole('button', { name: '移除 character.webp', exact: true }).click();
+  assert.match(await picture.innerText(), /9:16/);
+  await page.getByRole('button', { name: '添加内容', exact: true }).click();
+  await page.getByRole('menuitem', { name: '已有素材与对话附件' }).click();
+  await page.getByRole('button', { name: '引用 落日', exact: true }).click();
+  await page.getByRole('button', { name: '完成', exact: true }).click();
+  await page.getByRole('button', { name: '参考用途' }).click();
+  await page.getByRole('option', { name: '首帧', exact: true }).click();
+  await picture.click();
+  await page.getByText('画面比例沿用参考图', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '9:16', exact: true }).count(), 0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('textbox', { name: '对话消息' }).fill('让落日画面微微动起来');
+  const sent = page.waitForResponse(r => r.url().endsWith('/messages') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: '发送消息' }).click();
+  await sent;
+  assert.deepEqual(sends.at(-1).media.references, [{ generation_id: libraryFrame.id, role: 'first_frame' }]);
+  assert.deepEqual(sends.at(-1).media.provider_params, { duration: 4, resolution: '768P' });
   assert.deepEqual(errors, []);
-  console.log('Attachment-only send, history preview, paste/drop, saved reuse, failed-draft refresh/resume, preserved audio capability error, light/dark and mobile menu bounds passed.');
+  console.log('Attachment upload, reuse, retries, mobile layout and library first-frame video submission passed.');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

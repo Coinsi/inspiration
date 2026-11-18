@@ -442,9 +442,13 @@ def plan(db, row, req):
             continue
         eligible.append({**c, "cost_points": amount})
     if not eligible:
-        raise CapabilityUnsupported(
-            "当前模型没有能满足这组输入与参数的可用线路", {"routes": rejected}
-        )
+        reasons = list(dict.fromkeys(route["reason"] for route in rejected))
+        message = "当前模型没有可用的生成线路"
+        if len(reasons) == 1:
+            message = reasons[0]
+        elif reasons:
+            message = "当前模型无法使用这组输入。" + "。".join(reasons[:3])
+        raise CapabilityUnsupported(message, {"routes": rejected})
     return {
         "model_id": str(row.id),
         "name": row.name,
@@ -459,10 +463,13 @@ def aggregate(db, row):
     caps = Capabilities(
         modalities={row.modality} if row.modality != "text" else set(), strict_parameters=True
     )
+    image_ratio_policies: set[bool] = set()
     for item in candidates:
         if not item["capabilities"]:
             continue
         c = Capabilities(**item["capabilities"])
+        if c.max_reference_images:
+            image_ratio_policies.add(c.aspect_ratio_from_image)
         if c.reference_unavailable_reason:
             caps.reference_unavailable_reason = c.reference_unavailable_reason
         caps.features |= c.features
@@ -478,6 +485,8 @@ def aggregate(db, row):
             current.extend(v for v in spec.get("enum", []) if v not in current)
     if "reference" in caps.features or "video_reference" in caps.features:
         caps.reference_unavailable_reason = None
+    # A fixed ratio must still be routable when another image-capable channel accepts it.
+    caps.aspect_ratio_from_image = image_ratio_policies == {True}
     return caps
 
 
