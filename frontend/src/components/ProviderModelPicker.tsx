@@ -17,6 +17,7 @@ type Props = {
   value: string;
   brand: string;
   listRevision: number;
+  configuredIds: ReadonlySet<string>;
   onChange: (value: string) => void;
 };
 
@@ -48,6 +49,7 @@ export function ProviderModelPicker({
   value,
   brand,
   listRevision,
+  configuredIds,
   onChange,
 }: Props) {
   const id = useId();
@@ -239,6 +241,9 @@ export function ProviderModelPicker({
                       <small>{model.id}</small>
                     )}
                   </span>
+                  {configuredIds.has(model.id) && (
+                    <small className="provider-option-state">已配置</small>
+                  )}
                   {model.id === value && <Check size={15} />}
                 </div>
               ))}

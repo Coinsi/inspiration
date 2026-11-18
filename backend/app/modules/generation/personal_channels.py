@@ -11,7 +11,7 @@ from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.models.identity import User
 from app.models.personal_model import PersonalModelService
-from app.modules.generation import channels, personal, presets
+from app.modules.generation import channels, minimax_models, personal, presets
 from app.modules.generation.personal_endpoints import validate_endpoint
 from app.modules.generation.provider_templates import listing
 
@@ -60,6 +60,9 @@ def catalog(user=USER, db=DB):
                 "name": row.name,
                 "endpoint": row.endpoint,
                 "provider_template_id": template_id(row),
+                "known_outputs": minimax_models.MODEL_OUTPUTS
+                if template_id(row) == "minimax"
+                else {},
                 "preset_id": row.preset_id,
                 "has_token": bool(row.credentials_encrypted),
                 "enabled": row.enabled,
@@ -166,7 +169,9 @@ def discover(
     row = active_service(db, user.id, channel_id)
     validate_endpoint(db, row.endpoint, row, resolve=True)
     return channels.discover_connection(
-        row, channels.discovery_protocol(db, template_id(row)), purpose=purpose
+        row,
+        channels.discovery_protocol(db, template_id(row)),
+        purpose=purpose,
     )
 
 
@@ -182,19 +187,15 @@ def write_model(db, row, key, data, *, editing):
     elif previous is not None:
         return public_model(row, key)
 
-    identity = (data.model, data.modality, data.protocol, data.sdk_provider)
-    for other, spec in row.models.items():
-        if (
-            other != key
-            and (
-                spec["model"],
-                spec["modality"],
-                spec["protocol"],
-                spec.get("sdk_provider", "openai"),
-            )
-            == identity
+    channels.validate_model_output(data, template_id(row))
+    identity = (data.model, data.modality)
+    if not previous or (previous["model"].strip(), previous["modality"]) != identity:
+        if any(
+            (spec["model"].strip(), spec["modality"]) == identity
+            for other, spec in row.models.items()
+            if other != key
         ):
-            raise Conflict("这个模型已在个人连接中，请直接编辑已配置模型")
+            raise Conflict("这个模型已配置到当前用途，请编辑已有配置")
     spec = data.model_dump(
         mode="json", exclude={"request_id", "revision", "is_default", "price"}, exclude_none=True
     )

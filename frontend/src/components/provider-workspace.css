@@ -529,18 +529,45 @@
   gap: 6px;
 }
 .provider-model-list button {
-  display: grid;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   text-align: left;
-  padding: 9px 10px;
-  border-radius: 7px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: hsl(var(--bg));
   overflow-wrap: anywhere;
 }
-.provider-model-list strong {
-  font-size: 13px;
+.provider-model-list button:hover:not(:disabled) {
+  border-color: hsl(var(--border));
+  background: hsl(var(--elevated));
 }
-.provider-model-list span {
+.provider-model-identity {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.provider-model-identity strong {
+  font-size: 13px;
+  color: hsl(var(--fg));
+}
+.provider-model-identity small,
+.provider-model-state,
+.provider-option-state {
   font-size: 12px;
+  color: hsl(var(--muted));
+}
+.provider-model-list .provider-model-warning {
+  color: hsl(var(--danger));
+}
+.provider-model-state:empty {
+  display: none;
+}
+.provider-model-list button > svg {
+  flex-shrink: 0;
   color: hsl(var(--muted));
 }
 .provider-result {
@@ -593,12 +620,6 @@
 }
 .provider-detail :is([role="alert"]) {
   color: hsl(var(--danger));
-}
-.provider-template-route {
-  display: grid;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid hsl(var(--border));
 }
 .provider-detail .provider-change {
   display: none;

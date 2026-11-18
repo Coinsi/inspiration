@@ -13,6 +13,7 @@ import {
   MessageSquare,
   RefreshCw,
   SlidersHorizontal,
+  ChevronRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { modelConfigRoot, verificationLabel } from "@/lib/model-config-scope";
@@ -54,7 +55,10 @@ const purposes = [
   { id: "image", name: "图片生成", icon: ImageIcon },
   { id: "video", name: "视频生成", icon: Clapperboard },
 ];
-type WorkspaceProps = { syncPurpose?: boolean; initialPurpose?: CreationMode } & (
+type WorkspaceProps = {
+  syncPurpose?: boolean;
+  initialPurpose?: CreationMode;
+} & (
   | { personal?: false; projectId: string }
   | { personal: true; projectId?: string }
 );
@@ -396,6 +400,7 @@ export function ProviderWorkspace({
         {templateEdit !== undefined && (
           <ProviderTemplateEditor
             template={templateEdit}
+            initialPurpose={purpose}
             protocols={query.data?.protocols || {}}
             close={() => setTemplateEdit(undefined)}
             saved={async () => {
@@ -473,6 +478,17 @@ function ProviderConnection({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   const defaults = template?.routes.find((r) => r.modality === purpose);
+  const configured =
+    channel?.models.filter((model) => model.modality === purpose) ?? [];
+  const matchingConfigured = configured.filter(
+    (model) => model.model.trim() === code.trim(),
+  );
+  const configuredIds = new Set(configured.map((model) => model.model.trim()));
+  const outputs = new Map(Object.entries(channel?.known_outputs ?? {}));
+  const otherPurpose = (id: string) =>
+    purposes.find((p) => p.id === outputs.get(id.trim()) && p.id !== purpose)
+      ?.name;
+  const selectedOtherPurpose = otherPurpose(code);
   const suggested = suggestions.filter(
     (m) => m.modality === purpose && m.protocol === defaults?.protocol,
   );
@@ -662,6 +678,7 @@ function ProviderConnection({
             <div className="provider-model-entry">
               <ProviderModelPicker
                 listRevision={listRevision}
+                configuredIds={configuredIds}
                 brand={template?.icon || channel?.name || "AI"}
                 codes={
                   codes ?? suggested.map((m) => ({ id: m.model, name: m.name }))
@@ -693,12 +710,31 @@ function ProviderConnection({
             {selectedSuggestion?.lifecycle_note && (
               <small>{selectedSuggestion.lifecycle_note}</small>
             )}
+            {selectedOtherPurpose && (
+              <small role="status">
+                此型号属于「{selectedOtherPurpose}」。
+              </small>
+            )}
             <Button
-              disabled={!channel || dirty || !code.trim() || busy}
-              onClick={() => setEditing(null)}
+              disabled={
+                !channel ||
+                dirty ||
+                !code.trim() ||
+                busy ||
+                matchingConfigured.length > 1 ||
+                (!matchingConfigured.length && !!selectedOtherPurpose)
+              }
+              onClick={() => setEditing(matchingConfigured[0] ?? null)}
             >
-              添加到{purposes.find((p) => p.id === purpose)?.name}
+              {matchingConfigured.length
+                ? "编辑已配置模型"
+                : `添加到${purposes.find((p) => p.id === purpose)?.name}`}
             </Button>
+            {matchingConfigured.length > 1 && (
+              <small>
+                这里有多条历史配置，请在「已配置模型」中选择要编辑的一条。
+              </small>
+            )}
           </section>
           {template?.note && <p className="provider-note">{template.note}</p>}
           {channel && (
@@ -730,47 +766,51 @@ function ProviderConnection({
               projectId={projectId}
               personal={personal}
               purpose={purpose}
-              models={
-                channel?.models.filter(
-                  (m) => m.enabled && m.modality === purpose,
-                ) ?? []
-              }
+              models={configured.filter(
+                (m) => m.enabled && !otherPurpose(m.model),
+              )}
               disabled={
                 dirty || busy || !channel?.enabled || !channel.has_token
               }
             />
           )}
-          {(purpose === "text" ||
-            channel?.models.some((m) => m.modality === purpose)) && (
+          {(purpose === "text" || configured.length > 0) && (
             <section className="provider-models">
               <h3>已配置模型</h3>
-              {!channel?.models.some((m) => m.modality === purpose) && (
-                <p>此用途还没有添加模型。</p>
-              )}
+              {!configured.length && <p>此用途还没有添加模型。</p>}
               <div className="provider-model-list">
-                {channel?.models
-                  .filter((m) => m.modality === purpose)
-                  .map((m) => (
-                    <button
-                      key={m.id}
-                      disabled={dirty || busy}
-                      onClick={() => setEditing(m)}
-                    >
+                {configured.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    aria-label={`编辑 ${m.name}`}
+                    disabled={dirty || busy}
+                    onClick={() => setEditing(m)}
+                  >
+                    <span className="provider-model-identity">
                       <strong>{m.name}</strong>
-                      <span>{m.model}</span>
-                      <small>
-                        {!m.enabled
-                          ? "已停用"
-                          : personal && m.modality !== "text"
-                            ? verificationLabel(m.verification)
-                            : "已配置"}{" "}
-                        · 编辑能力与参数
-                      </small>
+                      {m.name.trim() !== m.model.trim() && (
+                        <small>{m.model}</small>
+                      )}
+                      {otherPurpose(m.model) && (
+                        <small className="provider-model-warning">
+                          属于「{otherPurpose(m.model)}」，请更正用途
+                        </small>
+                      )}
                       {m.verification?.status === "failed" && (
                         <small>{m.verification.message}</small>
                       )}
-                    </button>
-                  ))}
+                    </span>
+                    <span className="provider-model-state">
+                      {!m.enabled
+                        ? "已停用"
+                        : personal && purpose !== "text"
+                          ? verificationLabel(m.verification)
+                          : ""}
+                    </span>
+                    <ChevronRight size={15} aria-hidden="true" />
+                  </button>
+                ))}
               </div>
             </section>
           )}
@@ -802,6 +842,7 @@ function ProviderConnection({
             }
           }
           protocols={protocols}
+          routes={template?.routes}
           close={() => setEditing(undefined)}
           saved={async () => {
             await refresh();

@@ -221,8 +221,14 @@ try {
       method === "PUT"
     ) {
       const b = route.request().postDataJSON();
-      templates.push({ ...b, id: path.split("/").at(-1), revision: 1 });
-      return ok(templates.at(-1));
+      const id = path.split("/").at(-1);
+      const current = templates.find((template) => template.id === id);
+      const saved = { ...b, id, revision: (current?.revision ?? 0) + 1 };
+      templates = [
+        ...templates.filter((template) => template.id !== id),
+        saved,
+      ];
+      return ok(saved);
     }
     if (path === "/admin/models/model-channels/check")
       return ok({ message: "连接通过；尚未验证生成。" });
@@ -316,13 +322,64 @@ try {
     fullPage: true,
   });
   await page.getByRole("button", { name: "保存模型", exact: true }).click();
-  await page.getByText("已配置 · 编辑能力与参数").waitFor();
+  const configuredRow = page.getByRole("button", {
+    name: "编辑 my-text-model",
+    exact: true,
+  });
+  await configuredRow.waitFor();
+  assert.equal(
+    (await configuredRow.innerText()).match(/my-text-model/g)?.length,
+    1,
+  );
   assert.equal(channels[0].models[0].model, "my-text-model");
+  await picker.fill("my-text-model");
+  await page
+    .getByRole("button", { name: "编辑已配置模型", exact: true })
+    .click();
+  await page.getByRole("dialog", { name: "编辑模型" }).waitFor();
+  assert.equal(channels[0].models.length, 1);
+  await page.getByRole("button", { name: "关闭编辑" }).click();
   const directory = page.locator(".provider-directory");
+  channels.push({
+    ...channels[0],
+    id: "minimax-fixture",
+    name: "MiniMax",
+    provider_template_id: "minimax",
+    endpoint: "https://api.minimax.cn/v1",
+    known_outputs: {
+      "MiniMax-M3": "text",
+      "MiniMax-M3.1-Flash": "text",
+      "MiniMax-H3": "video",
+    },
+    models: ["MiniMax-H3", "MiniMax-M3"].map((id) => ({
+      ...channels[0].models[0],
+      id,
+      name: id,
+      model: id,
+      modality: "video",
+      protocol: "minimax_video",
+    })),
+  });
   await page.getByRole("button", { name: "视频生成", exact: true }).click();
   assert.equal(new URL(page.url()).searchParams.get("purpose"), "video");
   await page.reload();
   await page.getByRole("button", { name: "视频生成", pressed: true }).waitFor();
+  await directory.getByRole("button", { name: "MiniMax", exact: true }).click();
+  await page
+    .getByRole("button", { name: "编辑 MiniMax-M3", exact: true })
+    .getByText("属于「文字与理解」，请更正用途")
+    .waitFor();
+  await picker.fill("MiniMax-M3.1-Flash");
+  assert.equal(
+    await page
+      .getByRole("button", { name: "添加到视频生成", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await picker.fill("");
+  await page
+    .locator(".provider-model-list")
+    .screenshot({ path: resolve(out, "configured-minimax.png") });
   assert.equal(
     await directory.getByText("Anthropic", { exact: true }).count(),
     0,
@@ -379,16 +436,114 @@ try {
     .click();
   await page.getByLabel("模板标识", { exact: true }).fill("gateway");
   await page.getByLabel("显示名称", { exact: true }).fill("团队网关");
+  const template = page.getByRole("dialog", { name: "新增供应商模板" });
+  const icon = template.getByRole("button", {
+    name: "供应商图标",
+    exact: true,
+  });
+  await icon.click();
+  const search = template.getByRole("combobox", { name: "搜索供应商图标" });
+  await search.fill("no-such-provider");
+  await template.getByText("没有匹配项", { exact: true }).waitFor();
+  await search.fill("minimax");
+  await search.press("Enter");
+  assert.match(await icon.innerText(), /MiniMax/);
+  const directoryMethod = template.getByRole("button", {
+    name: "模型列表读取方式",
+    exact: true,
+  });
+  await directoryMethod.click();
+  await template
+    .getByRole("option", { name: "手动填写模型 ID", exact: true })
+    .click();
+  await directoryMethod.press("ArrowDown");
+  await template
+    .getByRole("listbox", { name: "模型列表读取方式" })
+    .press("Escape");
+  assert.equal(await directoryMethod.getAttribute("aria-expanded"), "false");
+  const capability = template.getByRole("group", { name: "配置用途" });
+  await capability.getByRole("button", { name: /视频生成/ }).click();
+  await template.getByLabel("启用视频生成", { exact: true }).check();
+  await template
+    .getByRole("button", { name: "视频生成接入协议", exact: true })
+    .click();
+  await template
+    .getByRole("option", { name: "OpenAI Videos", exact: true })
+    .click();
+  await template.screenshot({
+    path: resolve(out, "template-dark.png"),
+    animations: "disabled",
+  });
+  await page.evaluate(() => (document.documentElement.className = "light"));
+  await template.screenshot({
+    path: resolve(out, "template-after.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await icon.click();
+  const iconMenu = template.getByRole("listbox", { name: "供应商图标" });
+  const iconBounds = await iconMenu.boundingBox();
+  assert.ok(
+    iconBounds && iconBounds.x >= 0 && iconBounds.x + iconBounds.width <= 390,
+  );
+  await page.screenshot({ path: resolve(out, "template-menu-mobile.png") });
+  await search.press("Tab");
+  assert.equal(await icon.getAttribute("aria-expanded"), "false");
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page
     .getByLabel("默认 Base URL", { exact: true })
     .fill("https://gateway.example/v1");
   await page.getByRole("button", { name: "保存模板", exact: true }).click();
   await page.getByRole("button", { name: "团队网关", exact: true }).waitFor();
+  const savedTemplate = templates.find((t) => t.id === "gateway");
+  assert.equal(savedTemplate.icon, "minimax");
+  assert.equal(savedTemplate.discovery_protocol, "manual");
+  assert.deepEqual(savedTemplate.routes.map((r) => r.modality).sort(), [
+    "text",
+    "video",
+  ]);
   await page.reload();
   await page.getByRole("button", { name: "全局模型服务", exact: true }).click();
   await page.getByRole("button", { name: "团队网关", exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "团队网关", exact: true }).click();
+  await page.getByRole("button", { name: "编辑模板", exact: true }).click();
+  const existingTemplate = page.getByRole("dialog", { name: "编辑供应商模板" });
+  assert.equal(
+    await existingTemplate.getByLabel("模板标识", { exact: true }).isEditable(),
+    false,
+  );
+  await existingTemplate
+    .getByRole("button", { name: "模型列表读取方式", exact: true })
+    .click();
+  await existingTemplate
+    .getByRole("option", { name: "OpenAI 兼容", exact: true })
+    .click();
+  await existingTemplate
+    .getByText("密钥链接与接入说明", { exact: true })
+    .click();
+  await existingTemplate
+    .getByLabel("接入说明", { exact: true })
+    .fill("使用供应商密钥");
+  await existingTemplate
+    .getByRole("button", { name: "保存模板", exact: true })
+    .click();
+  await existingTemplate.waitFor({ state: "hidden" });
+  assert.equal(
+    templates.find((t) => t.id === "gateway").discovery_protocol,
+    "openai",
+  );
+  await page.getByRole("button", { name: "编辑模板", exact: true }).click();
+  await existingTemplate
+    .getByText("密钥链接与接入说明", { exact: true })
+    .click();
+  assert.equal(
+    await existingTemplate.getByLabel("接入说明", { exact: true }).inputValue(),
+    "使用供应商密钥",
+  );
+  await existingTemplate
+    .getByRole("button", { name: "关闭编辑", exact: true })
+    .click();
   await page.screenshot({
     path: resolve(out, "providers-mobile.png"),
     fullPage: true,

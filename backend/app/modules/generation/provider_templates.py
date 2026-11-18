@@ -191,8 +191,7 @@ BUILTINS = {
             ("image", "minimax_image", "openai"),
             ("video", "minimax_video", "openai"),
         ],
-        "使用 MiniMax 开放平台密钥。图片可填写 image-01；视频使用账号已开通的海螺模型 ID。",
-        discovery="manual",
+        "可拉取官方目录，也可手动填写已开通的模型 ID。视频生成与文字理解分别配置。",
     ),
     "openrouter": seed(
         "OpenRouter",

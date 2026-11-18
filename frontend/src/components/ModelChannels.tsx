@@ -57,6 +57,7 @@ export type SuggestedModel = Pick<Model, "name" | "model" | "protocol" | "modali
   { lifecycle_note?: string };
 export type Channel = {
   provider_template_id?: string | null;
+  known_outputs?: Record<string, string>;
   preset_id?: string;
   id: string;
   name: string;
@@ -769,6 +770,7 @@ export function ModelEditor({
   protocols,
   initialCode = "",
   defaults,
+  routes,
   suggestion,
   personal = false,
   close,
@@ -780,6 +782,7 @@ export function ModelEditor({
   protocols: Catalog["protocols"];
   initialCode?: string;
   defaults?: { modality: string; protocol: string; sdk_provider: string };
+  routes?: { modality: string; protocol: string; sdk_provider: string }[];
   suggestion?: SuggestedModel;
   personal?: boolean;
   close: () => void;
@@ -825,6 +828,20 @@ export function ModelEditor({
   );
   const [protocolChosen, setProtocolChosen] = useState(!!model || !!defaults);
   const [requestId] = useState(() => crypto.randomUUID());
+  const identityChanged =
+    !model || model.model.trim() !== code.trim() || model.modality !== modality;
+  const duplicate = identityChanged && channel.models.some(
+    (other) =>
+      other.id !== model?.id &&
+      other.modality === modality &&
+      other.model.trim() === code.trim(),
+  );
+  const expectedOutput = new Map(Object.entries(channel.known_outputs ?? {})).get(
+    code.trim(),
+  );
+  const wrongPurpose = enabled && expectedOutput && expectedOutput !== modality;
+  const canSave =
+    !duplicate && !wrongPurpose && !!name.trim() && !!code.trim() && !!modality && !!protocol;
   const keys =
     protocols[protocol]?.parameter_keys ??
     (modality === "text"
@@ -905,7 +922,7 @@ export function ModelEditor({
         onChange={() => setDirty(true)}
         onSubmit={(e) => {
           e.preventDefault();
-          save.mutate();
+          if (canSave && !save.isPending) save.mutate();
         }}
       >
         <fieldset className="model-form" disabled={save.isPending}>
@@ -965,11 +982,12 @@ export function ModelEditor({
               })),
             ]}
             onChange={(value) => {
+              const route = routes?.find((r) => r.modality === value);
               setModality(value);
               setProtocolChosen(true);
-              setSdkProvider("openai");
+              setSdkProvider(route?.sdk_provider ?? "openai");
               setInputCapabilities(textInputCapabilities);
-              setProtocol(connectionProtocol(channel.endpoint, value));
+              setProtocol(route?.protocol ?? connectionProtocol(channel.endpoint, value));
               setParameters({});
               setRefs(0);
               setMask(false);
@@ -1203,9 +1221,15 @@ export function ModelEditor({
               {save.error.message}
             </p>
           )}
+          {duplicate && (
+            <p role="status">这个模型已配置到当前用途，请编辑已有配置。</p>
+          )}
+          {wrongPurpose && (
+            <p role="status">此型号用于{kinds[expectedOutput]}，请更正模型用途。</p>
+          )}
           <Button
             type="submit"
-            disabled={!name.trim() || !code.trim() || !modality || !protocol}
+            disabled={!canSave}
           >
             {save.isPending ? "保存中…" : "保存模型"}
           </Button>

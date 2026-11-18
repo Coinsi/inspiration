@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.adapters.generation.litellm_media import SDK_PROVIDERS
 from app.adapters.generation.provider_media import MEDIA_ADAPTERS
@@ -16,6 +16,7 @@ from app.core import audit
 from app.core.crypto import encrypt
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
 from app.models.generation import CreativeModel, GenerationJob, ModelChannel, ProviderConfig
+from app.modules.generation import minimax_models
 from app.modules.generation.model_catalog import Price
 from app.modules.generation.model_scope import lock_model_scope
 from app.modules.harness.kernel_modalities import InputCapabilities
@@ -222,6 +223,10 @@ def profile(db, project_id, model_id):
     return row
 
 
+def profile_modality(row):
+    return row.config.get("modality") or ("text" if row.kind == "llm" else "image")
+
+
 def public_model(row):
     c = row.config or {}
     return {
@@ -231,7 +236,7 @@ def public_model(row):
         "model": c.get("model", ""),
         "protocol": c.get("protocol", row.provider_name),
         "sdk_provider": c.get("sdk_provider", "openai"),
-        "modality": c.get("modality", "text" if row.kind == "llm" else "image"),
+        "modality": profile_modality(row),
         "enabled": row.enabled,
         "is_default": bool(c.get("is_default")),
         "revision": c.get("revision", 1),
@@ -267,6 +272,9 @@ def catalog(db, project_id):
                 "name": r.name,
                 "endpoint": r.endpoint,
                 "provider_template_id": r.provider_template_id,
+                "known_outputs": minimax_models.MODEL_OUTPUTS
+                if r.provider_template_id == "minimax"
+                else {},
                 "enabled": r.enabled,
                 "has_token": bool(r.credentials_encrypted),
                 "revision": r.revision,
@@ -332,6 +340,15 @@ def save_channel(db, ctx, data, channel_id=None):
     return row
 
 
+def validate_model_output(data, template_id):
+    expected = minimax_models.expected_output(
+        data.model, template_id=template_id, protocol=data.protocol
+    )
+    if expected and data.enabled and data.modality != expected:
+        purpose = {"text": "文字与理解", "image": "图片生成", "video": "视频生成"}[expected]
+        raise CapabilityUnsupported(f"{data.model} 属于「{purpose}」，请更正模型用途")
+
+
 def save_model(db, ctx, channel_id, data, model_id=None):
     lock_model_scope(db, ctx.project.id)
     ch = channel(db, ctx.project.id, channel_id, True)
@@ -356,6 +373,24 @@ def save_model(db, ctx, channel_id, data, model_id=None):
             provider_name=("platform_" if ctx.project.id is None else "model_") + uuid.uuid4().hex,
             config={},
         )
+    validate_model_output(data, ch.provider_template_id)
+    # Channel and scope locks also cover batch writes and concurrent administrators.
+    # Existing duplicates retain their IDs so linked defaults and jobs can still be edited.
+    if ((row.config.get("model") or "").strip(), profile_modality(row)) != (
+        data.model,
+        data.modality,
+    ):
+        matches = db.scalars(
+            select(ProviderConfig).where(
+                ProviderConfig.project_id == ctx.project.id,
+                ProviderConfig.config["channel_id"].astext == str(ch.id),
+                func.btrim(ProviderConfig.config["model"].astext) == data.model,
+                ProviderConfig.id != row.id,
+            )
+        )
+        if any(profile_modality(other) == data.modality for other in matches):
+            raise Conflict("这个模型已配置到当前用途，请编辑已有配置")
+    if not model_id:
         db.add(row)
     if data.is_default:
         if not data.enabled or not ch.enabled:
@@ -665,6 +700,7 @@ def discover_connection(ch, protocol="openai", *, purpose=None):
     if protocol == "manual":
         raise CapabilityUnsupported("此服务不提供模型目录，请按供应商文档手动填写模型 ID")
     token = decrypt(ch.credentials_encrypted)
+    template_id = getattr(ch, "provider_template_id", None) or getattr(ch, "preset_id", None)
     endpoint = ch.endpoint.rstrip("/")
     headers = {"Authorization": "Bearer " + token}
     if protocol == "anthropic":
@@ -722,6 +758,13 @@ def discover_connection(ch, protocol="openai", *, purpose=None):
             )
             if isinstance(outputs, list) and outputs:
                 item["outputs"] = [x for x in outputs if isinstance(x, str)]
+            elif template_id == "minimax":
+                output = minimax_models.expected_output(code, template_id=template_id)
+                if output:
+                    item["outputs"] = [output]
+            if purpose and template_id == "minimax" and purpose not in item.get("outputs", []):
+                # Unclassified IDs remain available by manual entry.
+                continue
             details[code] = item
         ids = sorted(details)
         return {

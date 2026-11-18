@@ -1,6 +1,10 @@
 """Provider directory permissions and default clearing regressions."""
 
 # ruff: noqa: F811
+import uuid
+
+import pytest
+
 from app.models.generation import ProviderConfig
 from app.modules.generation.provider_templates import BUILTINS, TemplateIn
 from tests.test_creative_models import group
@@ -12,6 +16,119 @@ from tests.test_platform_models import admin
 def test_builtins_validate():
     for value in BUILTINS.values():
         TemplateIn.model_validate(value)
+
+
+@pytest.mark.parametrize("scope", ["project", "platform", "personal"])
+def test_model_identity_is_scoped_to_connection_and_purpose(studio, scope):
+    client, sessions, ids = studio
+    admin(sessions, ids)
+    base = {
+        "project": f"/api/v1/projects/{ids['project']}/model-channels",
+        "platform": "/api/v1/admin/models/model-channels",
+        "personal": "/api/v1/me/model-channels",
+    }[scope]
+    connection = {"name": "连接一", "endpoint": "https://api.openai.com/v1", "token": "fixture"}
+    channel = client.post(base, json=connection).json()["id"]
+    path = f"{base}/{channel}/models"
+    body = {"name": "别名", "model": "example", "modality": "image", "protocol": "gpt_image"}
+    first = {**body, "request_id": str(uuid.uuid4())}
+    saved = client.post(path, json=first).json()
+    assert client.post(path, json=first).json()["id"] == saved["id"]
+    assert (
+        client.post(
+            path, json={**body, "name": "另一个名字", "model": " example ", "protocol": "mock"}
+        ).status_code
+        == 409
+    )
+    other = client.post(path, json={**body, "model": "example-two"}).json()
+    assert (
+        client.put(
+            f"{path}/{other['id']}", json={**body, "revision": other["revision"]}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(path, json={**body, "modality": "video", "protocol": "mock"}).status_code == 200
+    )
+    other_channel = client.post(base, json={**connection, "name": "连接二"}).json()["id"]
+    assert client.post(f"{base}/{other_channel}/models", json=body).status_code == 200
+    models = next(c["models"] for c in client.get(base).json()["channels"] if c["id"] == channel)
+    assert len(models) == 3
+    original = next(m for m in models if m["id"] == saved["id"])
+    assert (
+        client.put(
+            f"{path}/{saved['id']}",
+            json={**body, "name": "新名称", "revision": original["revision"]},
+        ).status_code
+        == 200
+    )
+
+
+def test_minimax_catalog_and_manual_entry_respect_output(studio, monkeypatch):
+    import httpx
+
+    from app.modules.generation import channels
+
+    client, _, ids = studio
+    base, channel = setup(client, ids["project"], provider_template_id="minimax")
+    path = f"{base}/model-channels/{channel}"
+    upstream = httpx.Client
+
+    def models(request):
+        assert request.method == "GET" and request.url.path == "/v1/models"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "MiniMax-M3"},
+                    {"id": "MiniMax-H3"},
+                    {"id": "MiniMax-H3-Image"},
+                    {"id": "custom-id"},
+                    {"id": "with-metadata", "architecture": {"output_modalities": ["video"]}},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        channels.httpx, "Client", lambda **kw: upstream(transport=httpx.MockTransport(models), **kw)
+    )
+    assert client.post(path + "/discover?purpose=video").json()["models"] == [
+        "MiniMax-H3",
+        "with-metadata",
+    ]
+    assert client.post(path + "/discover?purpose=text").json()["models"] == ["MiniMax-M3"]
+    assert client.post(path + "/discover?purpose=image").json()["models"] == ["MiniMax-H3-Image"]
+    body = {"name": "测试", "model": "MiniMax-M3", "modality": "video", "protocol": "minimax_video"}
+    assert client.post(path + "/models", json=body).status_code == 422
+    assert client.post(path + "/models", json={**body, "model": "custom-id"}).status_code == 200
+    assert (
+        client.post(
+            path + "/models", json={**body, "modality": "text", "protocol": "cloud_llm"}
+        ).status_code
+        == 200
+    )
+
+
+def test_existing_duplicates_keep_their_ids_and_can_be_edited(studio):
+    client, sessions, ids = studio
+    base, cid = setup(client, ids["project"])
+    first = add(client, base, cid, model="same")
+    second = add(client, base, cid, model="other")
+    with sessions() as db:
+        row = db.get(ProviderConfig, uuid.UUID(second["id"]))
+        row.config = {**row.config, "model": "same"}
+        db.commit()
+    path = f"{base}/model-channels/{cid}/models"
+    body = {"name": "旧路由", "model": "same", "modality": "image", "protocol": "gpt_image"}
+    assert (
+        client.put(
+            f"{path}/{second['id']}", json={**body, "enabled": False, "revision": 1}
+        ).status_code
+        == 200
+    )
+    assert client.post(path, json=body).status_code == 409
+    models = client.get(base + "/model-channels").json()["channels"][0]["models"]
+    assert {m["id"] for m in models} == {first["id"], second["id"]}
 
 
 def test_directory_edit_permissions_conflicts_and_hide(studio):
