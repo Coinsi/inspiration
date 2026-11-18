@@ -24,7 +24,13 @@ await new Promise(done => server.listen(0, '127.0.0.1', done));
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const requests = [], mutations = [], errors = [];
 let isAdmin = true;
-const models = ['text', 'image', 'video'].map((modality, i) => ({ id: `model-${i}`, name: ['创作助手', '画面创作', '视频创作'][i], modality, enabled: true, is_default: false, available_routes: 1, routes: [{ channel_name: '平台模型服务', profile_id: `profile-${i}`, available: true }] }));
+const models = ['text', 'image', 'video'].map((modality, i) => ({
+  id: `model-${i}`, name: ['创作助手', '画面创作', '视频创作'][i], modality,
+  description: '', enabled: true, is_default: false, revision: 1,
+  available_routes: 1, route_count: 1, price_policy: 'inherit',
+  price: { mode: 'unconfigured', amount: '0' },
+  routes: [{ channel_name: '平台模型服务', profile_id: `profile-${i}`, enabled: true, available: true, priority: 0, weight: 1 }],
+}));
 const channel = { id: 'channel', name: '平台模型服务', endpoint: 'https://fixture.example/v1', enabled: true, has_token: true, revision: 1, models: [] };
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -40,6 +46,11 @@ try {
     if (path === '/admin/models/creative-models') return ok(models);
     if (path === '/admin/models/model-channels/check') return ok({message: '地址与鉴权通过，模型目录可读取；尚未验证实际生成能力', model_count: 2});
     if (path === '/admin/models/model-channels/channel/discover') return ok({models: ['gpt-text-test', 'seedream-test'], truncated: false});
+    if (path === '/admin/models/model-channels/channel' && method === 'PUT') {
+      channel.name = mutations.at(-1).data.name;
+      channel.revision++;
+      return ok({id: channel.id});
+    }
     if (path === '/admin/models/model-channels/channel/models/batch') { channel.models = mutations.at(-1).data.models.map((m,i) => ({...m, id: `profile-${i}`, enabled: true, revision: 1})); return ok(channel.models); }
     if (path.startsWith('/admin/models/model-channels/channel/models/') && method === 'PUT') return ok({});
     if (path === '/admin/models/model-channels' && method === 'POST') return ok({id: channel.id});
@@ -56,14 +67,13 @@ try {
   await page.screenshot({ path: resolve(out, 'defaults-light.png'), fullPage: true });
   await page.evaluate(() => document.documentElement.className = 'dark');
   await page.screenshot({ path: resolve(out, 'defaults-dark.png'), fullPage: true });
-  await page.getByRole('button', { name: '全局模型服务', exact: true }).click();
-  await page.getByText('平台模型服务', { exact: true }).waitFor();
+  // The batch importer is part of advanced connection management.
+  await page.getByRole('button', { name: '高级路由', exact: true }).click();
+  await page.getByText('高级连接管理与旧配置导入', {exact: true}).click();
+  await page.locator('.service-list').getByText('平台模型服务', { exact: true }).waitFor();
   await page.getByRole('button', { name: '编辑连接', exact: true }).click();
   await page.getByRole('dialog').waitFor();
   await page.screenshot({ path: resolve(out, 'edit-service.png'), fullPage: true });
-  await page.getByRole('button', { name: '关闭编辑', exact: true }).click();
-  await page.getByRole('button', { name: '添加服务', exact: true }).click();
-  await page.getByRole('dialog', { name: '添加模型服务' }).waitFor();
   await page.getByLabel('服务名称', {exact: true}).fill('网关测试');
   await page.getByLabel('服务地址').fill('https://fixture.example/v1');
   await page.getByLabel('API Key', {exact: true}).fill('test-only');
