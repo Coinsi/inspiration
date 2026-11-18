@@ -63,6 +63,8 @@ def failed_job(studio, mode="routed", phase="generated"):
                 name="Personal fixture",
                 preset_id="custom-fixture",
                 endpoint="https://fixture.invalid",
+                # The pre-existing project import that created the original upstream receipt.
+                imported_endpoint="https://fixture.invalid",
                 credentials_encrypted=encrypt("fixture-key"),
                 models={"fixture": config},
                 revision=1,

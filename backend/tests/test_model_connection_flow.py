@@ -38,12 +38,13 @@ def test_unsaved_check_and_saved_scope_without_generation(studio, monkeypatch):
     with sessions() as db:
         assert db.scalar(select(func.count()).select_from(ModelChannel)) == 0
     _, cid = setup(client, ids["project"])
-    assert (
-        client.post(
-            root + f"/model-channels/check?channel_id={cid}", json={**body, "token": None}
-        ).status_code
-        == 200
-    )
+    path = root + f"/model-channels/check?channel_id={cid}"
+    saved = {**body, "token": None}
+    # An unsaved address change cannot forward a previously stored key to another host.
+    assert client.post(path, json=saved).status_code == 422
+    assert len(seen) == 1
+    checked = client.post(path, json={**saved, "endpoint": "https://models.example/v1"})
+    assert checked.status_code == 200, checked.text
     assert seen[-1].headers["Authorization"] == "Bearer test-secret"
     admin(sessions, ids)
     assert (

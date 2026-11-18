@@ -96,7 +96,7 @@ def create(db, ctx, data):
     if data.model_provider:
         from app.modules.generation.channels import selected_llm
 
-        selected_llm(db, ctx.project.id, data.model_provider, user_id=ctx.user.id)
+        selected_llm(db, ctx.project.id, data.model_provider, user_id=ctx.user.id, for_request=False)
     for target in data.scope:
         adapter = get_adapter(target.target_type)
         adapter.read(db, ctx.project.id, target.target_id)

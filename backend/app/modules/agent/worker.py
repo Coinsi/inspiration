@@ -200,7 +200,7 @@ def advance(run_id):
             input_contract = InputCapabilities().model_dump()
             if r.engine != "mock":
                 if current:
-                    resolved = resolve_cloud_input(db, ctx, r.model_provider)
+                    resolved = resolve_cloud_input(db, ctx, r.model_provider, for_request=True)
                     config.update(resolved["config"])
                     input_contract = resolved["input_contract"]
                 else:

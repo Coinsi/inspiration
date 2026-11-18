@@ -1,10 +1,14 @@
 """Exercise the personal provider workspace through its real API and job entry points."""
 
 # ruff: noqa: F811
+import socket
 import uuid
+
+import pytest
 
 from app.adapters.contracts import GenerationResult, JobHandle, Output
 from app.adapters.generation.gpt_image import GptImageProvider
+from app.core.errors import ProviderError
 from app.core.security import create_access_token
 from app.models.identity import User
 from app.modules.generation import channels
@@ -14,6 +18,35 @@ from tests.test_model_channels import add, setup
 from tests.test_personal_models import connect
 
 ROOT = "/api/v1/me/model-channels"
+
+
+def test_inspecting_private_text_model_does_not_require_a_live_host(studio, monkeypatch):
+    client, sessions, ids = studio
+    connection = client.post(
+        ROOT,
+        json={"name": "My gateway", "endpoint": "https://gateway.invalid/v1", "token": "fixture"},
+    )
+    profile = client.post(
+        f"{ROOT}/{connection.json()['id']}/models",
+        json={"name": "Chat", "model": "chat", "modality": "text", "protocol": "cloud_llm"},
+    ).json()
+    attempts = []
+    original = socket.getaddrinfo
+
+    def offline_gateway(host, *args, **kwargs):
+        if host == "gateway.invalid":
+            attempts.append(host)
+            raise socket.gaierror("fixture offline")
+        return original(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", offline_gateway)
+    with sessions() as db:
+        args = (db, uuid.UUID(ids["project"]), profile["provider_name"], ids["user"])
+        assert channels.selected_llm(*args, for_request=False).config["model"] == "chat"
+        assert attempts == []
+        with pytest.raises(ProviderError, match="无法解析"):
+            channels.selected_llm(*args, for_request=True)
+        assert attempts == ["gateway.invalid"]
 
 
 def create_connection(client):

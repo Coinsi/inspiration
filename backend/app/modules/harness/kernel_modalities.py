@@ -57,7 +57,9 @@ def input_contract(engine: str, model_config: dict | None = None) -> dict:
         raise CapabilityUnsupported("模型输入能力声明无效，请在模型服务中重新配置") from None
 
 
-def resolve_cloud_input(db, ctx, provider=None, *, preferred_profile=None) -> dict:
+def resolve_cloud_input(
+    db, ctx, provider=None, *, preferred_profile=None, for_request=False
+) -> dict:
     """Resolve once and retain concrete route identity; returned config is private.
 
     Persist only ``profile`` and a digest of config+input_contract. Never return
@@ -92,7 +94,9 @@ def resolve_cloud_input(db, ctx, provider=None, *, preferred_profile=None) -> di
                 raise Conflict("原文字模型线路已停用或移除，请暂停后确认切换")
         try:
             pc = (
-                channels.selected_llm(db, live.project.id, name, user_id=live.user.id)
+                channels.selected_llm(
+                    db, live.project.id, name, user_id=live.user.id, for_request=for_request
+                )
                 if name
                 else channels.llm_config(db, live.project.id)
             )

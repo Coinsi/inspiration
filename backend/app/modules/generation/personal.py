@@ -329,14 +329,15 @@ def providers(db, user_id):
     return result
 
 
-def text_config(db, name, user_id):
+def text_config(db, name, user_id, *, for_request):
     from types import SimpleNamespace
 
     row, key = resolve(db, name, user_id)
     spec = row.models[key]
     if spec["modality"] != "text":
         raise CapabilityUnsupported("请选择文字模型")
-    validate_endpoint(db, row.endpoint, row, resolve=True)
+    if for_request:
+        validate_endpoint(db, row.endpoint, row, resolve=True)
     return SimpleNamespace(
         endpoint=row.endpoint,
         credentials_encrypted=row.credentials_encrypted,

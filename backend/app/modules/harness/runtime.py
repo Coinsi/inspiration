@@ -230,7 +230,9 @@ def prepare(db, ticket):
     )
     if run.engine == "cloud_llm" and (task.kind == "agent" or compile_generation):
         resolved = resolve_cloud_input(
-            db, ctx, run.model_provider, preferred_profile=run.context.get("kernel_profile")
+            db, ctx, run.model_provider,
+            preferred_profile=run.context.get("kernel_profile"),
+            for_request=True,
         )
         config, modalities = resolved["config"], resolved["input_contract"]
         binding = hashlib.sha256(

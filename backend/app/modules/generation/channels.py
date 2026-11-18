@@ -537,12 +537,12 @@ def provider_view(db, row):
     return result
 
 
-def selected_llm(db, project_id, name, user_id=None):
+def selected_llm(db, project_id, name, user_id=None, *, for_request=True):
+    """Resolve a text model without contacting its host when inspecting the catalog."""
     if name.startswith("personal_"):
         from app.modules.generation.personal import text_config
 
-        return text_config(db, name, user_id)
-    """Resolve an explicit, project-owned text model. Never silently use another default."""
+        return text_config(db, name, user_id, for_request=for_request)
     from app.modules.generation import model_catalog as catalog
 
     if name.startswith(catalog.PREFIX):
