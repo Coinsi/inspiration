@@ -6,6 +6,7 @@
 
 ## 开始使用
 
+- 第一次剪片可以从[四步样片教程](../README.md#第一次剪一段样片)开始。要让所有成员共用文字、图片或视频模型，请看[全局模型配置](PLATFORM_MODELS.md)。
 - [平台管理后台](ADMIN_CONSOLE.md)：独立后台、多管理员、用户与任务、全局模型、官网、额度和运行状态。
 - [安装与本地体验](GETTING_STARTED.md)：Windows、Docker、开发环境、演示账号和常见问题。
 - [运行与部署](59-运行可靠性与部署修复.md)：健康检查、任务执行、认证、存储和备份。
@@ -22,12 +23,12 @@
 | 素材库与片段引用 | [多媒体处理与检索](70-素材检索与处理集成计划.md) · [跨项目复用](31-跨项目素材复用与保留验收.md) · [可选人脸与物体检索边界](71-可选人脸与物体检索验收边界.md) |
 | 自由画布 | [媒体创作画布](35-媒体创作画布重做验收.md) · [拖线新增节点](37-画布拖线新增节点验收.md) · [绘图、引用与导出](38-画布创作工具补齐验收.md) |
 | 导演台与剪辑 | [导演台](41-导演台工作区打磨验收.md) · [运镜关键帧](43-导演台多关键帧运镜验收.md) · [多画面轨](44-剪辑多画面轨验收.md) · [拖拽与预览](49-剪辑拖拽与实时预览验收.md) |
-| AI、技能与模型 | [Agent 审阅](22-在线Agent工具循环与审阅验收.md) · [技能安装](54-技能安装流程验收.md) · [渠道与模型](46-渠道与模型接入改造验收.md) |
+| 创作助理、技能与模型 | [对话与制作任务](architecture/agent-harness/CURRENT_STATUS.md) · [附件与媒体工具](HARNESS_MEDIA_TOOLS.md) · [技能安装](54-技能安装流程验收.md) · [模型配置](PLATFORM_MODELS.md) |
 | 官网与博客 | [官网内容管理](61-产品官网与内容管理.md) · [博客与创作手记](62-博客与创作手记.md) |
 
 ## 开发与扩展
 
-- [可编辑作品工程设计](architecture/editable-project/README.md)：设计草案，包含工程结构、修改契约、48 个场景覆盖和可运行的设计探针；不是已上线功能清单。
+- 作品工程的版本、依赖、候选审阅与归档能力见[当前实现与验证](architecture/editable-project/CURRENT_STATUS.md)。需要扩展工程格式或执行器时，可再查阅[工程设计](architecture/editable-project/README.md)。
 - [后端开发](../backend/README.md) · [前端开发](../frontend/README.md)
 - [技术架构](architecture/README.md) · [术语](00-术语表.md) · [数据模型](03-详细设计-数据模型.md) · [接口设计](04-详细设计-接口契约.md)
 - [视频索引服务](../services/media-indexer/README.md) · [转写服务](../services/transcriber/README.md) · [MCP 网关](../services/mcp-gateway/README.md)
