@@ -30,7 +30,7 @@ export function NarrativeCover({ projectId, kind, title, hash }: CoverProps) {
     <div className={`narrative-cover-art ${kind}`}>
       {hash && !failed ? (
         <img
-          src={blobUrl(projectId, hash)}
+          src={blobUrl(projectId, hash, "thumbnail")}
           alt={`${title} · 封面`}
           loading="lazy"
           onError={() => setFailed(true)}

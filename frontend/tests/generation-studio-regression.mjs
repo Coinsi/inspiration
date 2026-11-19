@@ -87,6 +87,8 @@ const url = base + "/tests/fixtures/generation-panel.html";
 try {
   await page.goto(url);
   const prompt = page.getByLabel("本次生成指令", { exact: true });
+  const cover = page.locator('[data-generation-id="g2"] img').first();
+  assert.equal(new URL(await cover.getAttribute("src"), base).searchParams.get("view"), "thumbnail");
   await prompt.fill("镜头A的未提交草稿");
   await page.reload();
   assert.equal(await prompt.inputValue(), "镜头A的未提交草稿");
@@ -129,6 +131,8 @@ try {
     await page.locator(".generation-reference-preview img").getAttribute("alt"),
     "重绘参考",
   );
+  const referenceSrc = await page.locator(".generation-reference-preview img").getAttribute("src");
+  assert.equal(new URL(referenceSrc, base).searchParams.get("view"), "thumbnail");
   await page
     .getByRole("group", { name: "筛选生成结果" })
     .getByRole("button", { name: "收藏", exact: true })
@@ -174,7 +178,7 @@ try {
   broken = true;
   await page.reload();
   await page
-    .getByText("作品暂时无法加载，已有版本不会丢失。", { exact: true })
+    .getByRole("alert").filter({ hasText: "已有版本不会丢失" })
     .waitFor();
   assert.equal(
     await page.getByText("暂无生成结果", { exact: true }).count(),

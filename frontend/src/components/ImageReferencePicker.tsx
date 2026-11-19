@@ -196,7 +196,7 @@ export function ImageReferencePicker({
               >
                 <div className="relative aspect-video">
                   <MediaImage
-                    src={blobUrl(projectId, r.blob_hash)}
+                    src={blobUrl(projectId, r.blob_hash, "thumbnail")}
                     alt={r.title}
                     className="[&_img]:object-contain"
                   />

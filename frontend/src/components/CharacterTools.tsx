@@ -84,7 +84,7 @@ export function CharacterTools({
       <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <div className="min-w-0 space-y-3">
           <img
-            src={blobUrl(projectId, generation.output_blob_hash!)}
+            src={blobUrl(projectId, generation.output_blob_hash!, "display")}
             alt={zh ? "角色参考图" : "Character reference"}
             onError={() => setImageError(true)}
             className="max-h-96 w-full rounded-lg bg-elevated object-contain"

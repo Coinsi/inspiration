@@ -564,7 +564,7 @@ function Workspace({ projectId }: { projectId: string }) {
                   >
                     {c.thumbnail_hash && (
                       <MediaImage
-                        src={blobUrl(projectId, c.thumbnail_hash)}
+                        src={blobUrl(projectId, c.thumbnail_hash, "thumbnail")}
                         alt={c.name}
                         className="aspect-video w-full object-cover"
                       />
@@ -860,7 +860,7 @@ function Workspace({ projectId }: { projectId: string }) {
                     >
                       {e.poster_hash && (
                         <MediaImage
-                          src={blobUrl(projectId, e.poster_hash)}
+                          src={blobUrl(projectId, e.poster_hash, "thumbnail")}
                           alt={e.name}
                           className="h-20 w-28 shrink-0 rounded-lg object-cover"
                         />

@@ -280,7 +280,8 @@ function ProjectWorkbench({ projectId }: { projectId: string }) {
               {cover ? (
                 <>
                   <MediaImage
-                    src={blobUrl(projectId, cover.representative_blob_hash!)}
+                    src={blobUrl(projectId, cover.representative_blob_hash!, "display")}
+                    priority
                     alt={cover.name}
                   />
                   <div className="absolute bottom-4 right-4 rounded-lg bg-black/70 px-3 py-1.5 text-xs text-white">

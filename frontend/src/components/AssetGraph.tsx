@@ -51,7 +51,9 @@ export default function AssetGraph({
         >
           {a.representative_blob_hash && (
             <img
-              src={blobUrl(projectId, a.representative_blob_hash)}
+              src={blobUrl(projectId, a.representative_blob_hash, "thumbnail")}
+              loading="lazy"
+              decoding="async"
               alt={a.name}
               className="absolute inset-0 h-full w-full object-cover"
             />

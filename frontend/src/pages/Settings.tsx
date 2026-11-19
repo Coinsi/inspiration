@@ -218,7 +218,7 @@ function ProjectPane({
             <div className="settings-project-cover">
               {project.data.cover_blob_hash ? (
                 <img
-                  src={blobUrl(projectId, project.data.cover_blob_hash)}
+                  src={blobUrl(projectId, project.data.cover_blob_hash, "thumbnail")}
                   alt="项目封面"
                 />
               ) : (

@@ -763,6 +763,7 @@ function TimelineDraft({
                       <ZoomableImage
                         filename={`frame-${g.id.slice(0, 8)}`}
                         src={blobUrl(projectId, g.output_blob_hash!)}
+                        previewSrc={blobUrl(projectId, g.output_blob_hash!, "thumbnail")}
                         className="aspect-video w-full object-contain"
                       />
                     )}
@@ -1293,7 +1294,8 @@ function TimelineDraft({
               />
             ) : result ? (
               <MediaVideo
-                src={blobUrl(projectId, result.output_blob_hash!)}
+                src={blobUrl(projectId, result.output_blob_hash!, "playback")}
+                poster={blobUrl(projectId, result.output_blob_hash!, "thumbnail")}
                 label={zh ? "成片预览" : "Film preview"}
               />
             ) : (
@@ -1617,7 +1619,7 @@ function ClipThumbnail({
       <div className="flex h-20 items-center justify-center bg-elevated">
         {media?.output_type === "image" && media.output_blob_hash ? (
           <img
-            src={blobUrl(projectId, media.output_blob_hash)}
+            src={blobUrl(projectId, media.output_blob_hash, "thumbnail")}
             loading="lazy"
             alt=""
             className="h-full w-full object-cover"

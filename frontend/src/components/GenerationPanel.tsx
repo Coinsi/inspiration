@@ -701,7 +701,7 @@ function GenerationPanelContent({
                     <div className="generation-reference-preview">
                       <div className="h-16 w-24 shrink-0 overflow-hidden rounded-lg">
                         <MediaImage
-                          src={blobUrl(projectId, reference.output_blob_hash)}
+                          src={blobUrl(projectId, reference.output_blob_hash, "thumbnail")}
                           alt={zh ? "重绘参考" : "Edit reference"}
                         />
                       </div>
@@ -1078,6 +1078,7 @@ function GenerationPanelContent({
                         >
                           <ZoomableImage
                             src={blobUrl(projectId, g.output_blob_hash!)}
+                            previewSrc={blobUrl(projectId, g.output_blob_hash!, "display")}
                             filename={`compare-${g.id}`}
                             className="aspect-square w-full bg-elevated object-contain"
                           />
@@ -1132,7 +1133,8 @@ function GenerationPanelContent({
                       (g.output_type === "video" ? (
                         <div className="aspect-video">
                           <MediaVideo
-                            src={blobUrl(projectId, g.output_blob_hash)}
+                            src={blobUrl(projectId, g.output_blob_hash, "playback")}
+                            poster={blobUrl(projectId, g.output_blob_hash, "thumbnail")}
                             label={`${tr("gen.video")} ${g.id.slice(0, 8)}`}
                           />
                         </div>
@@ -1143,6 +1145,7 @@ function GenerationPanelContent({
                       ) : (
                         <ZoomableImage
                           src={blobUrl(projectId, g.output_blob_hash)}
+                          previewSrc={blobUrl(projectId, g.output_blob_hash, "thumbnail")}
                           filename={`${targetType}-${g.id.slice(0, 8)}`}
                           className="aspect-video w-full bg-elevated object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                         />

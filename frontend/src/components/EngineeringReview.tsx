@@ -373,7 +373,8 @@ export function EngineeringReview({
                   <div className="flex min-h-52 items-center justify-center overflow-hidden rounded-xl bg-black/90 text-white/70">
                     {preview?.blob_hash ? (
                       <MediaVideo
-                        src={blobUrl(projectId, preview.blob_hash)}
+                        src={blobUrl(projectId, preview.blob_hash, "playback")}
+                        poster={blobUrl(projectId, preview.blob_hash, "thumbnail")}
                         label="候选预览"
                       />
                     ) : (

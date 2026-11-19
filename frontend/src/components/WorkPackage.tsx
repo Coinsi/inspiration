@@ -809,7 +809,7 @@ export function DocumentChangeReview({
           selectedPreview.output_type === "image" ? (
             <img
               className="max-h-96 max-w-full rounded-xl border object-contain"
-              src={blobUrl(projectId, selectedPreview.blob_hash)}
+              src={blobUrl(projectId, selectedPreview.blob_hash, "display")}
               alt="固定工程修订的图像预览"
             />
           ) : selectedPreview.status === "succeeded" &&
@@ -823,7 +823,8 @@ export function DocumentChangeReview({
             selectedPreview.blob_hash &&
             selectedPreview.output_type === "video" ? (
             <MediaVideo
-              src={blobUrl(projectId, selectedPreview.blob_hash)}
+              src={blobUrl(projectId, selectedPreview.blob_hash, "playback")}
+              poster={blobUrl(projectId, selectedPreview.blob_hash, "thumbnail")}
               label="固定工程修订的合成预览"
             />
           ) : (

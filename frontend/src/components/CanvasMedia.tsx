@@ -24,6 +24,7 @@ import {
 import {
   api,
   blobUrl,
+  type MediaView,
   type Generation,
   type Asset,
   type Shot,
@@ -93,17 +94,25 @@ export function useCanvasVersions(
   });
 }
 export function CanvasMedia({
-  src,
+  projectId,
+  hash,
+  fallbackSrc = "",
   kind,
   label,
 }: {
-  src: string;
+  projectId: string;
+  hash?: string | null;
+  fallbackSrc?: string;
   kind: string;
   label: string;
 }) {
-  if (kind === "video") return <MediaVideo src={src} label={label} />;
-  if (kind === "audio") return <MediaAudio key={src} src={src} />;
-  return <MediaImage src={src} alt={label} />;
+  if (!hash && !fallbackSrc) return null;
+  const url = (view?: MediaView) => hash ? blobUrl(projectId, hash, view) : fallbackSrc;
+  if (kind === "video") {
+    return <MediaVideo src={url("playback")} poster={hash ? url("thumbnail") : undefined} label={label} />;
+  }
+  if (kind === "audio") return <MediaAudio src={url()} key={url()} />;
+  return <MediaImage src={url("thumbnail")} alt={label} />;
 }
 export function CanvasCard({ id, data, selected }: NodeProps<CanvasNode>) {
   const actions = useContext(CanvasActions),
@@ -134,6 +143,13 @@ export function CanvasCard({ id, data, selected }: NodeProps<CanvasNode>) {
   const kind =
     version?.output_type ||
     (data.kind === "generate" ? data.generate.request_type : "image");
+  const cardMedia = {
+    projectId: actions.projectId,
+    hash: version?.output_blob_hash,
+    fallbackSrc: !versionId ? data.preview : undefined,
+    kind,
+    label: data.label,
+  };
   const references = actions.references(id);
   const capabilities = useQuery({
     queryKey: ["capabilities", actions.projectId, data.generate.provider],
@@ -269,10 +285,10 @@ export function CanvasCard({ id, data, selected }: NodeProps<CanvasNode>) {
                 aria-label={`放大 ${data.label}`}
                 onClick={() => setLarge(true)}
               >
-                <CanvasMedia src={src} kind={kind} label={data.label} />
+                <CanvasMedia {...cardMedia} />
               </button>
             ) : (
-              <CanvasMedia src={src} kind={kind} label={data.label} />
+              <CanvasMedia {...cardMedia} />
             )}
           </div>
         ) : data.kind === "text" ? (
@@ -478,6 +494,9 @@ export function CanvasCard({ id, data, selected }: NodeProps<CanvasNode>) {
       {large && src && (
         <Lightbox
           src={src}
+          previewSrc={version?.output_blob_hash
+            ? blobUrl(actions.projectId, version.output_blob_hash, "thumbnail")
+            : undefined}
           alt={data.label}
           filename={data.label}
           onClose={() => setLarge(false)}
@@ -643,7 +662,8 @@ export function CanvasMaterialPicker({
                   <article key={g.id} data-generation-id={g.id}>
                     <div className="canvas-picker-preview">
                       <CanvasMedia
-                        src={blobUrl(projectId, g.output_blob_hash!)}
+                        projectId={projectId}
+                        hash={g.output_blob_hash}
                         kind={g.output_type}
                         label={current?.label || "作品"}
                       />
@@ -750,7 +770,8 @@ export function CanvasVersionDialog({
                   <article key={g.id} data-generation-id={g.id}>
                     <div className="canvas-picker-preview">
                       <CanvasMedia
-                        src={blobUrl(projectId, g.output_blob_hash!)}
+                        projectId={projectId}
+                        hash={g.output_blob_hash}
                         kind={g.output_type}
                         label={node.data.label}
                       />
@@ -825,7 +846,8 @@ export function CanvasRunMedia({
     );
   return (
     <CanvasMedia
-      src={blobUrl(projectId, hash)}
+      projectId={projectId}
+      hash={hash}
       kind={g?.output_type || "image"}
       label={node?.data.label || "画布生成结果"}
     />
