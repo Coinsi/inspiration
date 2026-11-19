@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pause, Play, RotateCcw, Maximize, Minimize } from "lucide-react";
+import { Pause, Play, RotateCcw, Maximize, Minimize, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, blobUrl, type Generation, type Shot } from "@/lib/api";
 import { timelineDuration, type TimelineContent } from "@/lib/timeline-edit";
-import { audioEnvelope, transitionAt } from "@/lib/timeline-interaction";
+import { audioEnvelope, frameMs, timecode, transitionAt } from "@/lib/timeline-interaction";
 
 type MediaProps = {
   projectId: string;
@@ -33,6 +33,7 @@ function PlaybackMedia({
     sourceElement = useRef<HTMLMediaElement | null>(null),
     sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const latest = useRef({ time, playing, gain });
+  const [originalImage, setOriginalImage] = useState("");
   latest.current = { time, playing, gain };
   const q = useQuery({
     queryKey: ["generation", projectId, generationId],
@@ -106,7 +107,10 @@ function PlaybackMedia({
 
   if (!q.data?.output_blob_hash)
     return <span className="timeline-composition-missing">正在读取素材…</span>;
-  const src = blobUrl(projectId, q.data.output_blob_hash),
+  const hash = q.data.output_blob_hash;
+  const rendition = q.data.output_type === "video" ? "playback" :
+    q.data.output_type === "image" && originalImage !== hash ? "display" : undefined;
+  const src = blobUrl(projectId, hash, rendition),
     failed = () =>
       status(mediaKey, false, "素材无法解码，请检查来源后重新打开预览");
   if (q.data.output_type === "image")
@@ -117,7 +121,7 @@ function PlaybackMedia({
         alt=""
         style={{ width: "100%", height: "100%", objectFit: fit }}
         onLoad={() => status(mediaKey, true)}
-        onError={failed}
+        onError={() => rendition === "display" ? setOriginalImage(hash) : failed()}
       />
     );
   const props = {
@@ -152,18 +156,12 @@ function PlaybackMedia({
     />
   );
 }
-export function TimelinePlayback({
-  projectId,
-  shots,
-  content,
-  aspect,
-  time,
-  onTime,
-  selected,
-  mute = false,
-  subtitleMode = "burn",
-  disabled = false,
-}: {
+export interface PlaybackControls {
+  toggle(): void;
+  audition(at: number): void;
+  seek(at: number): void;
+}
+type PlaybackProps = {
   projectId: string;
   shots: Shot[];
   content: TimelineContent;
@@ -174,7 +172,19 @@ export function TimelinePlayback({
   mute?: boolean;
   subtitleMode?: string;
   disabled?: boolean;
-}) {
+};
+export const TimelinePlayback = forwardRef<PlaybackControls, PlaybackProps>(function TimelinePlayback({
+  projectId,
+  shots,
+  content,
+  aspect,
+  time,
+  onTime,
+  selected,
+  mute = false,
+  subtitleMode = "burn",
+  disabled = false,
+}, ref) {
   const qc = useQueryClient();
   const shell = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -185,10 +195,7 @@ export function TimelinePlayback({
     document.addEventListener("fullscreenchange", changed);
     return () => document.removeEventListener("fullscreenchange", changed);
   }, []);
-  const stamp = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  };
+  const audition = useRef<{ center: number; end: number } | null>(null);
   const root = useRef<HTMLDivElement>(null),
     [size, setSize] = useState({ width: 640, height: 360 }),
     [playing, setPlaying] = useState(false),
@@ -241,7 +248,7 @@ export function TimelinePlayback({
   }, []);
   useEffect(() => {
     setPlaying(false);
-  }, [content, aspect, mute, subtitleMode, disabled]);
+  }, [aspect, mute, subtitleMode, disabled]);
   useEffect(() => {
     const hide = () => {
       if (document.hidden) setPlaying(false);
@@ -264,10 +271,13 @@ export function TimelinePlayback({
       if (state.keys.every((k) => ready.current[k])) {
         acc += delta;
         if (acc >= 1000 / 24) {
-          const next = Math.min(state.total - 1, state.time + acc);
+          const until = Math.min(state.total - 1, audition.current?.end ?? state.total);
+          const next = Math.min(until, state.time + acc);
           acc = 0;
           state.onTime(next);
-          if (next >= state.total - 1) {
+          if (next >= until) {
+            if (audition.current) state.onTime(audition.current.center);
+            audition.current = null;
             setPlaying(false);
             return;
           }
@@ -278,8 +288,9 @@ export function TimelinePlayback({
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing]);
-  async function toggle() {
-    if (playing) {
+  async function play(force = false) {
+    if (!force) audition.current = null;
+    if (playing && !force) {
       setPlaying(false);
       return;
     }
@@ -290,13 +301,14 @@ export function TimelinePlayback({
         setContext(contextRef.current);
       }
       await contextRef.current.resume();
-      if (now >= total - 1) onTime(0);
+      if (!force && now >= total - 1) onTime(0);
       setPlaying(true);
     } catch {
       setError("声音输出不可用，请检查浏览器播放权限");
     }
   }
   const seek = (value: number) => {
+      audition.current = null;
       const target = Math.max(0, Math.min(value, Math.max(0, total - 1)));
       // Seeking changes position, not the user's playback intent.
       // Update the clock immediately so the next animation frame cannot restore the old position.
@@ -304,6 +316,16 @@ export function TimelinePlayback({
       onTime(target);
     },
     width = Math.min(size.width, Math.max(1, size.height) * ratio);
+  useImperativeHandle(ref, () => ({
+    toggle: () => { void play(); },
+    seek,
+    audition: (at) => {
+      if (!total || disabled || error) return;
+      seek(Math.max(0, at - 1500));
+      audition.current = { center: at, end: Math.min(total - 1, at + 1500) };
+      void play(true);
+    },
+  }));
   return (
     <div ref={shell} className="timeline-composition">
       <div ref={root} className="timeline-composition-stage">
@@ -411,23 +433,25 @@ export function TimelinePlayback({
         ))}
       <div
         className="timeline-live-controls"
-        style={{ width: Math.max(280, width), maxWidth: "100%" }}
+
       >
         <button
           aria-label={playing ? "暂停时间线" : "播放时间线"}
           disabled={!total || !!error || disabled}
-          onClick={() => void toggle()}
+          onClick={() => void play()}
         >
           {playing ? <Pause size={16} /> : <Play size={16} />}
         </button>
         <button aria-label="回到开头" onClick={() => seek(0)}>
           <RotateCcw size={14} />
         </button>
+        <button aria-label="上一帧" onClick={() => seek(Math.round(now - frameMs))}><ChevronLeft size={15}/></button>
+        <button aria-label="下一帧" onClick={() => seek(Math.round(now + frameMs))}><ChevronRight size={15}/></button>
         <label className="timeline-composition-scrub">
-          <span>{stamp(now)}</span>
+          <span>{timecode(now)}</span>
           <input
             aria-label="合成预览位置"
-            aria-valuetext={`${stamp(now)} / ${stamp(total)}`}
+            aria-valuetext={`${timecode(now)} / ${timecode(total)}`}
             type="range"
             min={0}
             max={Math.max(0, total - 1)}
@@ -435,7 +459,7 @@ export function TimelinePlayback({
             value={now}
             onChange={(e) => seek(Number(e.target.value))}
           />
-          <span>{stamp(total)}</span>
+          <span>{timecode(total)}</span>
         </label>
         <button
           aria-label={fullscreen ? "退出全屏预览" : "全屏预览"}
@@ -477,4 +501,4 @@ export function TimelinePlayback({
       )}
     </div>
   );
-}
+});

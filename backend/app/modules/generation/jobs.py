@@ -261,6 +261,8 @@ def document_render_snapshot(db, ctx, timeline_id, data):
                 "output_type": g.output_type,
                 "in_point_ms": item.in_point_ms,
                 "duration_ms": duration,
+                "gap_before_ms": item.gap_before_ms,
+                "gap_after_ms": item.gap_after_ms,
                 "transition": item.transition,
             }
         )

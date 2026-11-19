@@ -89,6 +89,7 @@ import "./conversation-layout.css";
 const TaskInspector = lazy(() =>
   import("@/pages/Agent").then((m) => ({ default: m.AgentWorkspace })),
 );
+type CutSelection = { timelineId: string; revision: number; clipId?: string; track?: "audio" | "visuals" | "subtitles"; name: string; start: number; end: number; projectId: string; workId: string };
 type Target = { target_type: string; target_id: string };
 type Message = {
   id: string;
@@ -101,6 +102,7 @@ type Message = {
   execution_kind?: string;
   created_at: string;
   context: {
+    cut_selection?: { timeline: string; revision: number; start_ms: number; end_ms: number };
     media_progress?: MediaProgress | null;
     generation_brief?: { prompt: string; summary: string; references: { kind: string; id: string }[] } | null;
     ui_blocks?: UIBlock[];
@@ -171,6 +173,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   const [hasOlder, setHasOlder] = useState(false);
   const scopeKey = `conversation.${me?.user.id}.${projectId}.${selected || "new"}`;
   const [draft, setDraft] = usePersistentState(`${scopeKey}.draft`, "");
+  const [cutSelection, setCutSelection] = usePersistentState<CutSelection | null>(`${scopeKey}.cut`, null);
   const [mode, setMode] = usePersistentState<CreationMode>(
     `${scopeKey}.mode`,
     params.get("view") === "generate" ? "image" : "text",
@@ -485,6 +488,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         model_provider: selectedProvider || null,
         mode: "standard",
         scope: mode === "text" ? targets : [],
+        cut_selection: mode === "text" && cutSelection ? {
+          timeline_id: cutSelection.timelineId, revision: cutSelection.revision, clip_id: cutSelection.clipId ?? null,
+          start_ms: cutSelection.start, end_ms: cutSelection.end, track: cutSelection.track,
+        } : null,
         skills,
         attachments: attachments.references.map(item => ({ ...item, role: mode !== "video" ? "reference" : item.role })),
         references: mode === "text" ? media.refs.map(item => referenceInput(item, "reference")) : [],
@@ -534,11 +541,13 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       }
       // Persist before changing the URL: the new scope can render in the same batch.
       try {
+        localStorage.removeItem(`${scopeKey}.cut`);
         localStorage.setItem(`${scopeKey}.draft`, JSON.stringify(""));
         localStorage.setItem(`${scopeKey}.pending`, "null");
       } catch {
         /* local draft persistence is best effort */
       }
+      setCutSelection(null);
       setDraft("");
       setMode("text");
       setComposerUndo(null);
@@ -666,6 +675,15 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     setWorkOpen(false);
   }, [selected]);
   useEffect(() => {
+    const cut = location.state?.cutSelection;
+    if (cut && cut.projectId === projectId && typeof cut.timelineId === "string") {
+      setCutSelection(cut);
+      if (!selected) setDraftWork(cut.workId || "");
+      setMode("text");
+      navigate(location.pathname + location.search, { replace: true, state: null });
+      input.current?.focus();
+      return;
+    }
     const incoming = location.state?.creativeGoal;
     if (typeof incoming !== "string" || !incoming.trim()) return;
     setDraft(incoming.slice(0, 8000));
@@ -1065,7 +1083,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 {m.context.mode === "test" && <span>离线机制测试</span>}
               </div>
               {m.role === "user" ? (
-                <><MessageAttachments projectId={projectId} attachments={m.context.attachments} references={m.context.references} onReuse={busy || !!detail.data?.archived ? undefined : reuseAttachment} /><ConversationText content={m.content} user /></>
+                <><MessageAttachments projectId={projectId} attachments={m.context.attachments} references={m.context.references} onReuse={busy || !!detail.data?.archived ? undefined : reuseAttachment} />{m.context.cut_selection && <small>{m.context.cut_selection.timeline} · {(m.context.cut_selection.start_ms / 1000).toFixed(2)}–{(m.context.cut_selection.end_ms / 1000).toFixed(2)} 秒 · v{m.context.cut_selection.revision}</small>}<ConversationText content={m.content} user /></>
               ) : (
                 <ConversationAnswer
                   content={m.execution_kind === "generation" && m.context.outputs?.length &&
@@ -1274,6 +1292,9 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ))}
             </div>
           )}
+          {cutSelection && mode === "text" && <span className="conversation-attachment">
+            <Paperclip size={13}/><span>{cutSelection.name} · {(cutSelection.start / 1000).toFixed(2)}–{(cutSelection.end / 1000).toFixed(2)} 秒 · v{cutSelection.revision}</span>
+            <button aria-label="移除剪辑选区" disabled={busy} onClick={() => setCutSelection(null)}><X size={12}/></button></span>}
           {composerNotice && <div className="conversation-composer-notice" role="status"><span>{composerNotice}</span>{composerUndo && <button type="button" onClick={undoComposer}><Undo2 size={13} />撤销</button>}<button type="button" aria-label="关闭提示" onClick={() => { setComposerNotice(""); setComposerUndo(null); }}><X size={13} /></button></div>}
           <ComposerPrimitive.Input
             ref={input}

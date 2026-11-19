@@ -211,20 +211,23 @@ def run_once(canceled=lambda: False, *, playback=False):
 
 
 def start():
+    from app.modules.media import timeline_preview
+
     stop = threading.Event()
 
-    def loop(playback):
+    def loop(process):
         while not stop.is_set():
             try:
-                if run_once(stop.is_set, playback=playback):
+                if process(stop.is_set):
                     continue
             except Exception:
                 log.exception("Could not pick up media preview work")
             stop.wait(1.5)
 
     threads = [
-        threading.Thread(target=loop, args=(False,), name="media-covers", daemon=True),
-        threading.Thread(target=loop, args=(True,), name="media-playback", daemon=True),
+        threading.Thread(target=loop, args=(run_once,), name="media-covers", daemon=True),
+        threading.Thread(target=loop, args=(lambda cancel: run_once(cancel, playback=True),), name="media-playback", daemon=True),
+        threading.Thread(target=loop, args=(timeline_preview.run_once,), name="timeline-previews", daemon=True),
     ]
     for thread in threads:
         thread.start()

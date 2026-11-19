@@ -15,6 +15,23 @@ EDIT = require_action("timeline.edit")
 LOCK = require_action("lock.baseline")
 
 
+@router.get("/generations/{generation_id}/timeline-preview")
+def get_timeline_preview(
+    generation_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.core.config import settings
+    from app.models.storage import Blob
+    from app.modules.generation import jobs
+    from app.modules.media.timeline_preview import lookup
+
+    generation = jobs.source(db, ctx.project.id, generation_id)
+    blob = db.get(Blob, generation.output_blob_hash)
+    if not blob or generation.output_type not in ("video", "audio"):
+        return {"status": "unavailable"}
+    return lookup(db, blob, worker_enabled=settings.library_worker_enabled)
+
+
 @router.post("/timelines", response_model=schemas.TimelineOut)
 def create_timeline(
     data: schemas.TimelineIn,

@@ -45,6 +45,131 @@ def track(hash="tone", **overrides):
     }
 
 
+def test_picture_gaps_survive_an_actual_video_export(tmp_path):
+    source = tmp_path / "source.mp4"
+    media_engine.run(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "color=red:s=160x90:r=24:d=3",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=3",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            str(source),
+        ]
+    )
+    clips = [
+        {
+            "output_type": "video",
+            "blob_hash": "video",
+            "in_point_ms": 250,
+            "duration_ms": 1000,
+            "gap_before_ms": 500,
+            "gap_after_ms": 500,
+        }
+    ]
+    with media_engine.render_file(clips, lambda _: source, {"height": 180}) as movie:
+        for ms, is_black in ((250, True), (1000, False), (1750, True)):
+            frame = tmp_path / f"{ms}.png"
+            media_engine.run(
+                ["-ss", str(ms / 1000), "-i", str(movie), "-frames:v", "1", str(frame)]
+            )
+            with Image.open(frame) as image:
+                red = image.getpixel((80, 45))[0]
+                assert red < 10 if is_black else red > 200
+        wav = tmp_path / "with-gaps.wav"
+        media_engine.run(["-i", str(movie), "-vn", "-ac", "1", "-c:a", "pcm_s16le", str(wav)])
+        with wave.open(str(wav), "rb") as sound:
+            for second, audible in ((0.2, False), (0.9, True), (1.7, False)):
+                sound.setpos(round(second * sound.getframerate()))
+                samples = struct.iter_unpack("<h", sound.readframes(sound.getframerate() // 10))
+                peak = max(abs(value) for (value,) in samples)
+                assert peak > 100 if audible else peak < 10
+
+
+def test_older_clients_preserve_gaps_and_older_revisions_restore_them(studio):
+    from app.models.timeline import TimelineRevision
+
+    client, sessions, ids = studio
+    base = f"/api/v1/projects/{ids['project']}/timelines"
+    timeline = post_ok(client, base, {"name": "Picture gaps"})
+    path = f"{base}/{timeline['id']}"
+    old = {"shot_id": ids["shot"], "duration_ms": 1000}
+    first = client.put(path + "/items", json={"items": [old]})
+    assert first.status_code == 200
+    doc = client.get(path + "/document").json()
+    # Match the stored format used by projects created before this migration.
+    with sessions.begin() as db:
+        row = db.scalar(
+            select(TimelineRevision).where(
+                TimelineRevision.timeline_id == uuid.UUID(timeline["id"]),
+                TimelineRevision.revision == doc["revision"],
+            )
+        )
+        row.snapshot = {
+            **row.snapshot,
+            "items": [
+                {k: v for k, v in item.items() if not k.startswith("gap_")}
+                for item in row.snapshot["items"]
+            ],
+        }
+    doc["items"][0].update(gap_before_ms=200, gap_after_ms=400)
+    assert client.put(path + "/document", json=doc).status_code == 200
+    assert client.put(path + "/items", json={"items": [old]}).status_code == 200
+    kept = client.get(path + "/document").json()
+    assert (kept["items"][0]["gap_before_ms"], kept["items"][0]["gap_after_ms"]) == (200, 400)
+    old_doc = post_ok(
+        client, path + f"/history/{doc['revision']}/restore", {"revision": kept["revision"]}
+    )
+    assert (old_doc["items"][0]["gap_before_ms"], old_doc["items"][0]["gap_after_ms"]) == (0, 0)
+
+
+def test_chat_quotes_the_selected_subtitle_and_picture_from_the_saved_revision(studio):
+    client, _, ids = studio
+    base = f"/api/v1/projects/{ids['project']}"
+    timeline = post_ok(client, base + "/timelines", {"name": "Quoted edit"})
+    path = f"{base}/timelines/{timeline['id']}/document"
+    cue = {"id": str(uuid.uuid4()), "text": "原来的字幕", "start_ms": 750, "end_ms": 1250}
+    clip = {"shot_id": ids["shot"], "duration_ms": 2000, "in_point_ms": 100, "gap_before_ms": 250}
+    saved = client.put(path, json={"revision": 0, "items": [clip], "audio": [], "subtitles": [cue]})
+    assert saved.is_success, saved.text
+    changed = saved.json()
+    changed["subtitles"][0]["text"] = "新字幕"
+    assert client.put(path, json=changed).is_success
+    selection = {
+        "timeline_id": timeline["id"],
+        "revision": saved.json()["revision"],
+        "track": "subtitles",
+        "clip_id": cue["id"],
+        "start_ms": 800,
+        "end_ms": 1200,
+    }
+    chat = post_ok(client, base + "/conversations", {})
+    messages = f"{base}/conversations/{chat['id']}/messages"
+    payload = {
+        "request_key": str(uuid.uuid4()),
+        "content": "调整这句字幕",
+        "mode": "test",
+        "cut_selection": selection,
+    }
+    response = post_ok(client, messages, payload)
+    quote = next(m for m in response["messages"] if m["role"] == "user")["context"]["cut_selection"]
+    assert quote["focus"]["text"] == "原来的字幕"
+    assert (quote["clips"][0]["source_start_ms"], quote["clips"][0]["source_end_ms"]) == (650, 1050)
+    invalid = {
+        **payload,
+        "request_key": str(uuid.uuid4()),
+        "cut_selection": {**selection, "clip_id": str(uuid.uuid4())},
+    }
+    assert client.post(messages, json=invalid).status_code == 422
+
+
 @pytest.mark.parametrize("kind", ["dissolve", "fadeblack", "wipeleft"])
 def test_real_transition_duration_and_picture_blend(tmp_path, kind):
     from app.modules.media.timing import duration

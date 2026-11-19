@@ -95,6 +95,8 @@ def _replace_items(db: Session, ctx: ProjectContext, timeline_id: uuid.UUID, ite
             in_point_ms=it.in_point_ms,
             out_point_ms=it.out_point_ms,
             duration_ms=it.duration_ms,
+            gap_before_ms=it.gap_before_ms,
+            gap_after_ms=it.gap_after_ms,
             transition=it.transition,
             note=it.note,
         )
@@ -206,6 +208,8 @@ def finalize_cut(db: Session, ctx: ProjectContext, cut_id: uuid.UUID) -> Baselin
             "in_point_ms": it.in_point_ms,
             "out_point_ms": it.out_point_ms,
             "duration_ms": it.duration_ms,
+            "gap_before_ms": it.gap_before_ms,
+            "gap_after_ms": it.gap_after_ms,
             "timeline_items": [
                 {
                     "ordinal": clip.ordinal,
@@ -215,6 +219,8 @@ def finalize_cut(db: Session, ctx: ProjectContext, cut_id: uuid.UUID) -> Baselin
                     "in_point_ms": clip.in_point_ms,
                     "out_point_ms": clip.out_point_ms,
                     "duration_ms": clip.duration_ms,
+                    "gap_before_ms": clip.gap_before_ms,
+                    "gap_after_ms": clip.gap_after_ms,
                     "transition": clip.transition,
                 }
                 for clip in items

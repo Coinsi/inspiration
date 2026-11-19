@@ -33,6 +33,7 @@ export function LibraryUpload({
   mediaType,
   onClose,
   onChange,
+  onImported,
 }: {
   projectId: string;
   mediaId?: string;
@@ -41,6 +42,7 @@ export function LibraryUpload({
   mediaType?: MediaType;
   onClose: () => void;
   onChange: () => void;
+  onImported?: (version: MediaVersion) => void;
 }) {
   const zh = useI18n().lang === "zh",
     base = `/projects/${projectId}/library`;
@@ -486,7 +488,10 @@ export function LibraryUpload({
           </span>
           <div>
             {ended ? (
-              <Button onClick={onClose}>{zh ? "完成" : "Done"}</Button>
+              <Button onClick={() => {
+                if (onImported && version && finished) onImported(version);
+                else onClose();
+              }}>{zh ? "完成" : "Done"}</Button>
             ) : busy ? (
               <Button
                 variant="outline"

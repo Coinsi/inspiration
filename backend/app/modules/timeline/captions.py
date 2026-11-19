@@ -24,6 +24,7 @@ def preview(db, ctx, timeline_id, items):
     offset, matched = 0, 0
     cues, cache, skipped = [], {}, []
     for index, item in enumerate(items):
+        offset += item.gap_before_ms
         shot = jobs.validate_target(db, ctx.project.id, "shot", item.shot_id)
         gen_id = item.generation_id or shot.selected_generation_id
         span = item.out_point_ms - item.in_point_ms if item.out_point_ms else item.duration_ms
@@ -82,7 +83,7 @@ def preview(db, ctx, timeline_id, items):
             matched += 1
         else:
             skipped.append(index + 1)
-        offset += span - int((item.transition or {}).get("duration_ms", 0))
+        offset += span + item.gap_after_ms - int((item.transition or {}).get("duration_ms", 0))
     if len(cues) > 10000 or sum(len(cue["text"]) for cue in cues) > 1_000_000:
         raise CapabilityUnsupported("映射后的字幕过多，请拆分剪辑")
     return {

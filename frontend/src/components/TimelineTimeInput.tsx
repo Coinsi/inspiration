@@ -8,7 +8,7 @@ export function TimelineTimeInput({
   ...props
 }: {
   value: number;
-  onChange: (ms: number) => void;
+  onChange: (ms: number) => number | void;
   min?: number;
   max?: number;
   disabled?: boolean;
@@ -27,8 +27,8 @@ export function TimelineTimeInput({
       min,
       Math.min(Math.max(min, max), Math.round(n * 1000)),
     );
-    setDraft(String(ms / 1000));
-    if (ms !== value) onChange(ms);
+    const accepted = ms === value ? value : onChange(ms);
+    setDraft(String((accepted ?? ms) / 1000));
   };
   return (
     <input

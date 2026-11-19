@@ -192,18 +192,48 @@ def render_file(clips: list[dict], read_blob, options: dict, canceled=lambda: Fa
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,"
                 f"tpad=stop_mode=clone:stop_duration={seconds}"
             )
+            before = clip.get("gap_before_ms", 0)
+            after = clip.get("gap_after_ms", 0)
+            part_seconds = seconds + (before + after) / 1000
+            audio_stream = "0:a:0" if has_audio else "1:a:0"
+            if before or after:
+                # Encode actual black frames and silent samples. Time offsets alone can
+                # leave a hole that different players fill with different pictures.
+                filters = [
+                    f"[0:v:0]{vf},trim=duration={seconds},setpts=PTS-STARTPTS[picture]",
+                    f"[{audio_stream}]aresample=48000,aformat=channel_layouts=stereo,"
+                    f"apad,atrim=duration={seconds},asetpts=N/SR/TB[sound]",
+                ]
+                segments = []
+                for label, gap_ms in (("before", before), ("picture", 0), ("after", after)):
+                    if label == "picture":
+                        segments.append("[picture][sound]")
+                    if gap_ms:
+                        filters.extend(
+                            [
+                                f"color=c=black:s={width}x{height}:r=24:d={gap_ms / 1000}[{label}v]",
+                                f"anullsrc=r=48000:cl=stereo:d={gap_ms / 1000}[{label}a]",
+                            ]
+                        )
+                        segments.append(f"[{label}v][{label}a]")
+                filters.append(
+                    "".join(segments) + f"concat=n={len(segments)}:v=1:a=1[video][audio]"
+                )
+                args += ["-filter_complex", ";".join(filters)]
+            else:
+                args += ["-vf", vf, "-af", "aresample=48000,apad"]
             dest = root / f"clip{i}.mp4"
             args += [
                 "-map",
-                "0:v:0",
+                "[video]" if before or after else "0:v:0",
                 "-map",
-                "0:a:0" if has_audio else "1:a:0",
+                "[audio]" if before or after else audio_stream,
                 "-t",
-                str(seconds),
-                "-vf",
-                vf,
-                "-af",
-                "aresample=48000,apad",
+                str(part_seconds),
+                "-r",
+                "24",
+                "-video_track_timescale",
+                "24000",
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -222,7 +252,7 @@ def render_file(clips: list[dict], read_blob, options: dict, canceled=lambda: Fa
                 "2",
                 str(dest),
             ]
-            run(args, canceled, timeout=max(180, seconds * 10))
+            run(args, canceled, timeout=max(180, part_seconds * 10))
             paths.append(dest)
         output = root / "film.mp4"
         if any(c.get("transition") for c in clips):
@@ -271,7 +301,13 @@ def join_transitions(paths, clips, output, duration_ms, canceled):
             f"[{i}:v:0]setpts=PTS-STARTPTS,fps=24,settb=AVTB[v{i}]",
             f"[{i}:a:0]asetpts=PTS-STARTPTS[a{i}]",
         ]
-    video, audio, elapsed = "v0", "a0", clips[0]["duration_ms"] / 1000
+
+    def segment_seconds(clip):
+        return (
+            clip["duration_ms"] + clip.get("gap_before_ms", 0) + clip.get("gap_after_ms", 0)
+        ) / 1000
+
+    video, audio, elapsed = "v0", "a0", segment_seconds(clips[0])
     for i in range(1, len(paths)):
         transition = clips[i - 1].get("transition")
         if transition:
@@ -287,7 +323,7 @@ def join_transitions(paths, clips, output, duration_ms, canceled):
         if not transition:
             filters.append(f"[cv{i}]fps=24,settb=AVTB[mv{i}]")
         video, audio = f"mv{i}", f"ma{i}"
-        elapsed += clips[i]["duration_ms"] / 1000
+        elapsed += segment_seconds(clips[i])
     args += [
         "-filter_complex_threads",
         "1",

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.base import Base, TimestampMixin, uuid_pk
 
@@ -31,6 +32,16 @@ class BlobDeletion(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(16), default="marked", index=True)
     not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(100))
+
+
+class TimelineMediaPreview(Base):
+    __tablename__ = "timeline_media_preview"
+
+    source_hash: Mapped[str] = mapped_column(ForeignKey("blob.hash", ondelete="CASCADE"), primary_key=True)
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (Index("ix_timeline_preview_due", "due_at", postgresql_where=text("due_at IS NOT NULL")),)
 
 
 class MediaRendition(Base):

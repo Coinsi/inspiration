@@ -498,8 +498,10 @@ export interface GenJob {
   } | null;
 }
 export interface Generation {
+  thumbnail_hash?: string | null;
   input_refs?: {
     engineering_change_id?: string;
+    options?: { timeline_revision?: number; height?: number; aspect_ratio?: string; mute?: boolean; subtitle_mode?: string };
     engineering_work_id?: string;
     original_prompt?: string;
     skills?: { id: string; name: string; revision: number }[];

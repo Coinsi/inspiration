@@ -5,6 +5,8 @@ export interface Clip {
   in_point_ms: number;
   out_point_ms: number;
   duration_ms: number;
+  gap_before_ms?: number;
+  gap_after_ms?: number;
   transition?: Record<string, unknown> | null;
   note?: string | null;
 }
@@ -130,7 +132,7 @@ export function editableContent(doc: TimelineContent): TimelineContent {
 export function timelineDuration(clips: Clip[]): number {
   return clips.reduce(
     (total, c) =>
-      total + c.duration_ms - Number(c.transition?.duration_ms || 0),
+      total + (c.gap_before_ms || 0) + c.duration_ms + (c.gap_after_ms || 0) - Number(c.transition?.duration_ms || 0),
     0,
   );
 }
@@ -178,10 +180,11 @@ export function splitClip(
   }
   return [
     ...clips.slice(0, index),
-    { ...c, duration_ms: offset, out_point_ms: 0, transition: null },
+    { ...c, duration_ms: offset, out_point_ms: 0, gap_after_ms: 0, transition: null },
     {
       ...c,
       id: crypto.randomUUID(),
+      gap_before_ms: 0,
       in_point_ms: c.in_point_ms + offset,
       duration_ms: c.duration_ms - offset,
       out_point_ms: 0,
@@ -194,7 +197,7 @@ export function duplicateClip(clips: Clip[], index: number): Clip[] {
   if (!clips[index] || clips.length >= 100) return clips;
   return [
     ...clips.slice(0, index + 1),
-    { ...clips[index], id: crypto.randomUUID(), transition: null },
+    { ...clips[index], id: crypto.randomUUID(), gap_before_ms: 0, gap_after_ms: 0, transition: null },
     ...clips.slice(index + 1),
   ];
 }

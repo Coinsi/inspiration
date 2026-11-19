@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {dragTimeline,transitionAt,audioEnvelope} from '../src/lib/timeline-interaction.ts';
+import {audioEnvelope, canClosePictureGap, clipSpans, closePictureGap, cutAt, dragTimeline, removePicture, snapEdit, transitionAt} from '../src/lib/timeline-interaction.ts';
 import {edit,undo} from '../src/lib/timeline-edit.ts';
 const clip=(id,duration=4000)=>({shot_id:id,generation_id:id,in_point_ms:1000,out_point_ms:0,duration_ms:duration,transition:null});
 const initial={items:[clip('a'),clip('b'),clip('c')],audio:[],subtitles:[],visuals:[]};
@@ -38,3 +38,27 @@ const tailMove = dragTimeline(transition,'items',0,'move',99999);
 assert.equal(tailMove.error, '');
 assert.equal(tailMove.content.items.at(-1).transition, null);
 assert.deepEqual(undo(edit({past:[],present:transition,future:[]},tailMove.content)).present, transition);
+
+const anchored = {
+  ...initial,
+  items: [clip('a', 5000), clip('b', 4000), clip('c', 3000)],
+  subtitles: [{ start_ms: 10000, end_ms: 12000, text: '片尾' }],
+};
+const resizeMiddle = (document, delta, mode) =>
+  dragTimeline(document, 'items', 1, 'end', delta, undefined, { image: true }, mode).content;
+const fixed = resizeMiddle(anchored, -500, 'lift');
+assert.equal(clipSpans(fixed)[2].start, 9000);
+assert.equal(fixed.items[1].gap_after_ms, 500);
+assert.equal(cutAt(fixed, 8750, 0), undefined);
+assert.equal(cutAt(fixed, 6300, 0).index, 1);
+assert.deepEqual(fixed.subtitles, anchored.subtitles);
+assert.equal(resizeMiddle(fixed, 750, 'lift').items[1].duration_ms, 4000);
+const ripple = resizeMiddle(anchored, -500, 'ripple');
+assert.equal(clipSpans(ripple)[2].start, 8500);
+assert.equal(ripple.items[2].gap_after_ms, 500);
+assert.equal(canClosePictureGap(ripple, 11750), false);
+assert.equal(clipSpans(closePictureGap(fixed, 8750))[2].start, 8500);
+assert.deepEqual(snapEdit(anchored, 'subtitles', 0, 'start', -982, 6300, 30), { delta: -1000, guide: 9000 });
+assert.deepEqual(clipSpans(removePicture(anchored, 1, 'lift').content).map(s => s.start), [0, 9000]);
+assert.deepEqual(clipSpans(removePicture(anchored, 1, 'ripple').content).map(s => s.start), [0, 5000]);
+assert.match(removePicture({...anchored, items: [clip('a')]}, 0, 'lift').error, /替代画面/);

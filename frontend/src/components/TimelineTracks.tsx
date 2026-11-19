@@ -88,6 +88,8 @@ export function TimelineTracks({
   disabled,
   onChange,
   activeTab,
+  selectedId = "",
+  onDeselect,
   onTabChange,
   onBusy,
   onAddLibraryAudio,
@@ -99,6 +101,8 @@ export function TimelineTracks({
   disabled: boolean;
   onChange: (next: TimelineContent) => void;
   activeTab?: "audio" | "subtitles";
+  selectedId?: string;
+  onDeselect?: () => void;
   onTabChange?: (tab: "audio" | "subtitles") => void;
   onBusy?: (busy: boolean) => void;
   onAddLibraryAudio: () => void;
@@ -240,6 +244,8 @@ export function TimelineTracks({
     cuePage,
     Math.max(0, Math.ceil(content.subtitles.length / 50) - 1),
   );
+  const focusIndex = content[tab].findIndex(item => item.id === selectedId);
+  const focused = focusIndex >= 0;
   return (
     <section
       className="overflow-hidden rounded-xl border bg-panel"
@@ -282,7 +288,9 @@ export function TimelineTracks({
           00:00 — {(durationMs / 1000).toFixed(1)} s
         </span>
       </div>
-      <div className="space-y-4 p-4" role="tabpanel">
+      <div className={`space-y-4 p-4 ${focused ? "cut-focused-properties" : ""}`} role="tabpanel">
+        {focused && <div className="cut-property-context"><strong>{tab === "audio" ? content.audio[focusIndex].name : `字幕 ${focusIndex + 1}`}</strong>
+          <button onClick={onDeselect}>{tab === "audio" ? "全部音轨" : "全部字幕"}</button></div>}
         {tab === "audio" ? (
           <>
             <p className="text-xs leading-5 text-muted-foreground">
@@ -395,9 +403,9 @@ export function TimelineTracks({
                   : "Choose or upload audio to add sound to your film."}
               </div>
             )}
-            {content.audio.map((a, i) => (
+            {content.audio.map((a, i) => (!focused || focusIndex === i) && (
               <article
-                key={i}
+                key={a.id ?? i}
                 className="space-y-3 rounded-lg border p-3"
                 aria-label={`${zh ? "音轨" : "Audio clip"} ${i + 1}`}
               >
@@ -695,9 +703,9 @@ export function TimelineTracks({
               </div>
             )}
             {content.subtitles
-              .slice(page * 50, page * 50 + 50)
+              .slice(focused ? focusIndex : page * 50, focused ? focusIndex + 1 : page * 50 + 50)
               .map((c, offset) => {
-                const i = page * 50 + offset;
+                const i = focused ? focusIndex : page * 50 + offset;
                 return (
                   <article
                     key={i}

@@ -12,7 +12,7 @@ def duration(items):
     ]
     if any(n < 0 for n in spans):
         raise ValueError("画面时长不能为负数")
-    total = sum(spans)
+    total = sum(spans) + sum(i.get("gap_before_ms", 0) + i.get("gap_after_ms", 0) for i in items)
     for n, item in enumerate(items):
         transition = item.get("transition")
         if not transition:
@@ -24,6 +24,8 @@ def duration(items):
             raise ValueError("转场时长须在0.1–2秒之间")
         if n == len(items) - 1:
             raise ValueError("最后一个画面没有后续转场")
+        if item.get("gap_after_ms") or items[n + 1].get("gap_before_ms"):
+            raise ValueError("请先合拢两个画面之间的空隙，再添加转场")
         if ms * 2 > min(spans[n], spans[n + 1]):
             raise ValueError("转场不能超过相邻较短画面的一半时长")
         total -= ms

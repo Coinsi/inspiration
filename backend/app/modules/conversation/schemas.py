@@ -58,6 +58,17 @@ class ProductionControl(BaseModel):
     guidance_id: uuid.UUID | None = None
 
 
+class CutSelection(BaseModel):
+    timeline_id: uuid.UUID
+    revision: int = Field(ge=0)
+    clip_id: uuid.UUID | None = None
+    track: Literal["audio", "visuals", "subtitles"] | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    start_ms: int = Field(ge=0, le=1_800_000)
+    end_ms: int = Field(gt=0, le=1_800_000)
+
+
 class Send(BaseModel):
     content: str = Field(default="", max_length=8000)
     request_key: uuid.UUID
@@ -69,6 +80,7 @@ class Send(BaseModel):
     production: ProductionControl | None = None
     attachments: list[AttachmentInput] = Field(default_factory=list, max_length=8)
     references: list[Reference] = Field(default_factory=list, max_length=8)
+    cut_selection: CutSelection | None = None
 
     @model_validator(mode="after")
     def media_controls(self):

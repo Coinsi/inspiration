@@ -105,10 +105,15 @@ def prepare_document(db, ctx, timeline_id, data):
             raise CapabilityUnsupported("同一轨道中的使用标识不能重复")
         model = {"items": TimelineItem, "audio": AudioTrack}.get(field)
         if model:
-            for item_id in ids:
-                existing = db.get(model, item_id)
+            for item in getattr(data, field):
+                existing = db.get(model, item.id)
                 if existing and existing.timeline_id != timeline_id:
                     raise Conflict("片段或音轨不属于该时间线")
+                if field == "items" and existing:
+                    # Clients predating picture gaps can still edit the other tracks.
+                    for gap in ("gap_before_ms", "gap_after_ms"):
+                        if gap not in item.model_fields_set:
+                            setattr(item, gap, getattr(existing, gap))
     from app.modules.media.timing import duration
 
     try:
@@ -232,8 +237,15 @@ def restore(db, ctx, timeline_id, target_revision, current_revision):
     )
     if not row:
         raise NotFound("历史版本不存在")
+    # Snapshots created before picture gaps always represented contiguous clips.
+    items = [{"gap_before_ms": 0, "gap_after_ms": 0, **clip} for clip in row.snapshot["items"]]
     data = schemas.TimelineDocumentIn.model_validate(
-        {**row.snapshot, "visuals": row.snapshot.get("visuals", []), "revision": current_revision}
+        {
+            **row.snapshot,
+            "items": items,
+            "visuals": row.snapshot.get("visuals", []),
+            "revision": current_revision,
+        }
     )
     return save_document(db, ctx, timeline_id, data, label=f"恢复到版本 {target_revision}")
 

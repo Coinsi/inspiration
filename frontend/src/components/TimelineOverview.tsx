@@ -4,10 +4,11 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Film, Music2, Captions, Minus, Plus } from "lucide-react";
+import { Film, Music2, Captions, Minus, Plus, Magnet, Layers, ScanLine } from "lucide-react";
+import { TimelineMediaStrip } from "./TimelineMediaStrip";
 import { timelineDuration, type TimelineContent } from "@/lib/timeline-edit";
 import {
-  clipSpans,
+  clipSpans, frameMs, snapEdit, timecode, type TrimMode,
   dragTimeline,
   type TrackKind,
   type DragMode,
@@ -15,6 +16,8 @@ import {
 } from "@/lib/timeline-interaction";
 import type { Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+
+const trackNames: Record<TrackKind, string> = { items: "画面", audio: "声音", visuals: "叠加画面", subtitles: "字幕" };
 
 type Gesture = {
   kind: TrackKind;
@@ -30,6 +33,7 @@ type Gesture = {
 };
 export function TimelineOverview({
   content,
+  projectId, trimMode, focusKind, focusId, range, onRange, onTrimPreview,
   bounds,
   shots,
   selected,
@@ -41,12 +45,19 @@ export function TimelineOverview({
   time,
   onTime,
 }: {
+  projectId: string;
+  trimMode: TrimMode;
+  focusKind: TrackKind;
+  focusId: string;
+  range: [number, number] | null;
+  onRange: (range: [number, number] | null) => void;
+  onTrimPreview: (content: TimelineContent | null) => void;
   bounds: Record<string, SourceBounds | undefined>;
   content: TimelineContent;
   shots: Shot[];
   selected: number;
   onSelect: (index: number) => void;
-  onTracks: (tab: "audio" | "subtitles") => void;
+  onTracks: (tab: "audio" | "subtitles", id?: string) => void;
   onVisualSelect: (id: string) => void;
   onChange: (c: TimelineContent) => void;
   disabled: boolean;
@@ -58,15 +69,49 @@ export function TimelineOverview({
     [draft, setDraft] = useState<TimelineContent | null>(null),
     [error, setError] = useState("");
   const [showEmptyLayers, setShowEmptyLayers] = useState(false);
+  const [magnet, setMagnet] = useState(true);
+  const [rangeTool, setRangeTool] = useState(false);
+  const [guide, setGuide] = useState<number | null>(null);
+  const ruler = useRef<HTMLDivElement>(null);
+  const [rulerWidth, setRulerWidth] = useState(800);
+  const scrub = useRef<{ pointer: number; anchor: number | null } | null>(null);
+  const beforeDrag = useRef(0);
   const gesture = useRef<Gesture | null>(null),
-    latest = useRef({ content, disabled, onChange, onSelect }),
+    latest = useRef({ content, disabled, onChange, onSelect, onTrimPreview, onTime }),
     suppress = useRef(false);
-  latest.current = { content, disabled, onChange, onSelect };
+  latest.current = { content, disabled, onChange, onSelect, onTrimPreview, onTime };
   const displayed = draft ?? content,
     clips = clipSpans(displayed),
     span = Math.max(1000, timelineDuration(content.items) * 1.2);
+  const fullLength = timelineDuration(content.items);
+  const pixelsPerLabel = Math.max(1, rulerWidth / 76);
+  const targetStep = span / pixelsPerLabel;
+  const magnitude = 10 ** Math.floor(Math.log10(targetStep));
+  const tick = ([1, 2, 5, 10].find(step => step * magnitude >= targetStep) || 10) * magnitude;
+  useEffect(() => {
+    if (!ruler.current) return;
+    const observer = new ResizeObserver(([entry]) => setRulerWidth(Math.max(1,entry.contentRect.width)));
+    observer.observe(ruler.current);
+    return () => observer.disconnect();
+  }, []);
+  function rulerTime(e: ReactPointerEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return Math.max(0, Math.min(fullLength, Math.round((e.clientX - rect.left) / Math.max(1, rect.width) * span)));
+  }
+  function scrubTo(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = scrub.current;
+    if (!drag || drag.pointer !== e.pointerId) return;
+    const at = rulerTime(e);
+    onTime(Math.min(at, Math.max(0, fullLength - 1)));
+    if (drag.anchor !== null && Math.abs(at - drag.anchor) >= 1)
+      onRange([Math.min(at, drag.anchor), Math.max(at, drag.anchor)]);
+  }
   useEffect(() => {
     const cancel = () => {
+      if (gesture.current?.moved) latest.current.onTime(beforeDrag.current);
+      latest.current.onTrimPreview(null);
+      scrub.current = null;
+      setGuide(null);
       gesture.current = null;
       setDraft(null);
     };
@@ -86,7 +131,9 @@ export function TimelineOverview({
   useEffect(() => {
     if (disabled || (gesture.current && gesture.current.original !== content)) {
       gesture.current = null;
+      latest.current.onTrimPreview(null);
       setDraft(null);
+      setGuide(null);
     }
   }, [disabled, content]);
   const sourceFor = (kind: TrackKind, index: number) => {
@@ -114,6 +161,7 @@ export function TimelineOverview({
     );
     if (!target) return;
     const lane = e.currentTarget.parentElement!;
+    beforeDrag.current = time;
     suppress.current = false;
     setError("");
     gesture.current = {
@@ -136,8 +184,11 @@ export function TimelineOverview({
     if (Math.hypot(e.clientX - g.x, e.clientY - g.y) < 4 && !g.moved) return;
     g.moved = true;
     suppress.current = true;
-    const raw = ((e.clientX - g.x) / g.width) * g.span,
-      delta = e.shiftKey ? Math.round(raw) : Math.round(raw / 100) * 100;
+    const raw = ((e.clientX - g.x) / g.width) * g.span;
+    const snapping = magnet && !e.shiftKey && !(g.kind === "items" && g.mode === "move");
+    const snap = snapping ? snapEdit(g.original, g.kind, g.index, g.mode, raw, beforeDrag.current, g.span / g.width * 7)
+      : {delta: Math.round(raw), guide: null};
+    setGuide(snap.guide);
     const lane = document
       .elementFromPoint(e.clientX, e.clientY)
       ?.closest<HTMLElement>("[data-visual-track]");
@@ -146,10 +197,15 @@ export function TimelineOverview({
       g.kind,
       g.index,
       g.mode,
-      delta,
+      snap.delta,
       lane ? Number(lane.dataset.visualTrack) : undefined,
-      sourceFor(g.kind, g.index),
+      sourceFor(g.kind, g.index), trimMode,
     );
+    if (g.kind === "items" && g.mode !== "move" && !g.result.error) {
+      const edge = clipSpans(g.result.content)[g.index];
+      onTrimPreview(g.result.content);
+      onTime(g.mode === "start" ? edge.start : Math.max(edge.start, edge.end - 1));
+    }
     setDraft(g.result.content);
     setError(g.result.error);
   };
@@ -157,6 +213,9 @@ export function TimelineOverview({
     const g = gesture.current;
     gesture.current = null;
     setDraft(null);
+    setGuide(null);
+    onTrimPreview(null);
+    if (g?.moved && (cancel || g.result.error)) onTime(beforeDrag.current);
     if (
       !g?.moved ||
       cancel ||
@@ -183,7 +242,7 @@ export function TimelineOverview({
     top?: number,
   ) => (
     <div
-      key={`${kind}-${index}`}
+      key={content[kind][index]?.id || `${kind}-${index}`}
       className="timeline-drag-shell"
       style={{ ...position(start, length), top }}
       onPointerDown={(e) => begin(e, kind, index)}
@@ -205,7 +264,7 @@ export function TimelineOverview({
         }
         data-drag-mode="move"
         aria-label={label}
-        aria-pressed={kind === "items" ? selected === index : undefined}
+        aria-pressed={focusKind === kind && (kind === "items" ? selected === index : displayed[kind][index].id === focusId)}
         onClick={() => {
           if (suppress.current) {
             suppress.current = false;
@@ -222,24 +281,32 @@ export function TimelineOverview({
           className={`timeline-trim-handle is-${mode}`}
           disabled={disabled}
           data-drag-mode={mode}
-          aria-label={`${mode === "start" ? "裁切起点" : "裁切终点"} ${kind} ${index + 1}`}
-          title="向内缩短，向外延长；方向键每次调整 0.1 秒"
+          aria-label={`${trackNames[kind]} ${index + 1} · ${mode === "start" ? "裁切起点" : "裁切终点"}`}
+          title="拖动修剪，方向键逐帧调整"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (!["ArrowLeft", "ArrowRight"].includes(e.key) || disabled)
               return;
             e.preventDefault();
+            e.stopPropagation();
             const result = dragTimeline(
               content,
               kind,
               index,
               mode,
-              e.key === "ArrowRight" ? 100 : -100,
+              e.key === "ArrowRight" ? Math.round(frameMs) : -Math.round(frameMs),
               undefined,
-              sourceFor(kind, index),
+              sourceFor(kind, index), trimMode,
             );
             setError(result.error);
-            if (!result.error) onChange(result.content);
+            if (!result.error) {
+              onChange(result.content);
+              onClick();
+              if (kind === "items") {
+                const edge = clipSpans(result.content)[index];
+                onTime(mode === "start" ? edge.start : Math.max(edge.start, edge.end - 1));
+              }
+            }
           }}
         />
       ))}
@@ -260,12 +327,9 @@ export function TimelineOverview({
           </span>
         </div>
         <div>
-          <button
-            aria-expanded={showEmptyLayers}
-            onClick={() => setShowEmptyLayers(!showEmptyLayers)}
-          >
-            {showEmptyLayers ? "收起空叠加轨" : "显示叠加轨"}
-          </button>
+          <button aria-label="吸附剪点" title="吸附剪点和声音边缘（按住 Shift 临时关闭）" aria-pressed={magnet} onClick={() => setMagnet(!magnet)}><Magnet/></button>
+          <button aria-label="选取时间范围" title="拖动时间尺选区，也可以按住 Shift 拖动" aria-pressed={rangeTool} onClick={() => setRangeTool(!rangeTool)}><ScanLine/></button>
+          <button aria-label="显示叠加轨" title="显示空叠加轨" aria-expanded={showEmptyLayers} onClick={() => setShowEmptyLayers(!showEmptyLayers)}><Layers/></button>
           <button
             aria-label="缩小时间线"
             disabled={zoom === 1}
@@ -286,39 +350,39 @@ export function TimelineOverview({
       <div className="timeline-overview-scroll">
         <div
           className="timeline-overview-content"
-          style={{ width: `${zoom * 100}%` }}
+          style={{ width: `${zoom * 100}%`, "--tick-width": `${tick / span * 100}%` } as React.CSSProperties}
         >
           <div className="timeline-ruler">
             <span className="timeline-track-label">秒</span>
-            <div
-              className="timeline-seek-ruler"
-              onPointerDown={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                onTime(
-                  Math.min(
-                    Math.max(0, timelineDuration(content.items) - 1),
-                    Math.round(
-                      Math.max(
-                        0,
-                        Math.min(1, (e.clientX - rect.left) / rect.width),
-                      ) * span,
-                    ),
-                  ),
-                );
+            <div className="timeline-seek-ruler" ref={ruler} role="slider" tabIndex={0}
+              aria-label="时间尺" aria-valuemin={0} aria-valuemax={fullLength} aria-valuenow={Math.round(time)} aria-valuetext={timecode(time)}
+              onPointerDown={e => {
+                if (e.button !== 0 || scrub.current) return;
+                e.preventDefault(); e.currentTarget.focus(); e.currentTarget.setPointerCapture(e.pointerId);
+                const at = rulerTime(e);
+                scrub.current = { pointer: e.pointerId, anchor: rangeTool || e.shiftKey ? at : null };
+                onRange(null);
+                scrubTo(e);
               }}
-            >
-              {Array.from({ length: 11 }, (_, i) => (
-                <span key={i} style={{ left: `${i * 10}%` }}>
-                  {((span * i) / 10000).toFixed(1)}
-                </span>
+              onPointerMove={scrubTo}
+              onPointerUp={e => { scrubTo(e); scrub.current = null; }}
+              onLostPointerCapture={() => { scrub.current = null; }}
+              onKeyDown={e => {
+                if (!["ArrowLeft","ArrowRight","Home","End"].includes(e.key)) return;
+                e.preventDefault(); e.stopPropagation();
+                const at = e.key === "Home" ? 0 : e.key === "End" ? fullLength - 1 :
+                  time + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : frameMs);
+                onTime(Math.max(0, Math.min(fullLength - 1, Math.round(at))));
+              }}>
+              {Array.from({length: Math.ceil(span / tick)}, (_, i) => (
+                <span key={i} style={{left: `${i * tick / span * 100}%`}}>{Number((i * tick / 1000).toFixed(2))}s</span>
               ))}
-              <i
-                className="timeline-playhead"
-                style={{
-                  left: `${Math.max(0, Math.min(100, (time / span) * 100))}%`,
-                }}
-              />
             </div>
+          </div>
+          <div className="cut-cursor-layer" aria-hidden="true">
+            {range && <i className="cut-range-wash" style={position(range[0], range[1] - range[0])}/>}
+            {guide !== null && <i className="cut-snap-guide" style={{left: `${guide / span * 100}%`}}/>}
+            <i className="cut-playhead" style={{left: `${time / span * 100}%`}}/>
           </div>
           <div className="timeline-overview-row">
             <span className="timeline-track-label">
@@ -336,7 +400,8 @@ export function TimelineOverview({
                   "timeline-picture-block",
                   () => onSelect(index),
                   <>
-                    <span>
+                    <TimelineMediaStrip project={projectId} id={clip.generation_id || shots.find(s => s.id === clip.shot_id)?.selected_generation_id || ""} from={clip.in_point_ms} length={clip.duration_ms}/>
+                    <span className="cut-clip-label">
                       {index + 1} ·{" "}
                       {shots.find((s) => s.id === clip.shot_id)?.title ||
                         clip.note ||
@@ -422,8 +487,8 @@ export function TimelineOverview({
                   a.start_ms,
                   a.duration_ms,
                   `timeline-audio-block ${a.muted ? "is-muted" : ""}`,
-                  () => onTracks("audio"),
-                  a.name,
+                  () => onTracks("audio", a.id),
+                  <><TimelineMediaStrip project={projectId} id={a.generation_id} from={a.in_point_ms} length={a.duration_ms} audio/><span>{a.name}</span></>,
                   4 + i * 30,
                 ),
               )}
@@ -456,7 +521,7 @@ export function TimelineOverview({
                     c.start_ms,
                     c.end_ms - c.start_ms,
                     "timeline-caption-block",
-                    () => onTracks("subtitles"),
+                    () => onTracks("subtitles", c.id),
                     c.text,
                   ),
                 )}
@@ -472,11 +537,8 @@ export function TimelineOverview({
           </div>
         </div>
       </div>
-      <p>
-        拖动画面调整顺序，拖动叠加、声音或字幕调整时间；两侧拖柄向内裁切。默认按
-        0.1 秒对齐，按住 Shift 精细移动，Esc 取消。点击刻度预览。
-        {content.subtitles.length > 500 ? " 概览显示前 500 条字幕。" : ""}
-      </p>
+      {range && <div className="cut-range-info">选区 {timecode(range[0])} – {timecode(range[1])}<button onClick={() => onRange(null)}>清除选区</button></div>}
+      {content.subtitles.length > 500 && <p>显示前 500 条字幕，其余可在字幕属性中查看。</p>}
       {error && (
         <p role="alert" className="text-danger">
           {error}，本次拖动未保存。

@@ -44,6 +44,8 @@ class TimelineItem(Base, TimestampMixin):
     in_point_ms: Mapped[int] = mapped_column(Integer, default=0)
     out_point_ms: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    gap_before_ms: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    gap_after_ms: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     transition: Mapped[dict | None] = mapped_column(JSONB)
     note: Mapped[str | None] = mapped_column(String(255))
 

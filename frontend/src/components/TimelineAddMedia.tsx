@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LibraryUpload } from "./LibraryUpload";
 import {
@@ -9,6 +9,8 @@ import { Modal } from "./ui/modal";
 import { Button } from "./ui/button";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { mediaTypeName, type MediaType } from "@/lib/library";
+import { Upload } from "lucide-react";
 
 export type EditingSource = {
   id: string;
@@ -38,8 +40,15 @@ export function TimelineAddMedia({
   const zh = useI18n().lang === "zh";
   const qc = useQueryClient();
   const [version, setVersion] = useState("");
+  const [filter, setFilter] = useState<MediaType | "all">(mediaType);
   const [uploading, setUploading] = useState(false);
-  const selected = useLibraryVersion(projectId, version);
+  const [justUploaded, setJustUploaded] = useState("");
+  const selected = useLibraryVersion(projectId, version, true);
+  useEffect(() => {
+    if (justUploaded !== version || !version || selected.data?.status !== "ready") return;
+    setJustUploaded("");
+    void qc.invalidateQueries({ queryKey: ["library-version-catalog", projectId] });
+  }, [justUploaded, version, selected.data?.status, qc, projectId]);
   const isAudio = selected.data?.media_type === "audio";
   const add = useMutation({
     mutationFn: () =>
@@ -56,6 +65,14 @@ export function TimelineAddMedia({
     return (
       <LibraryUpload
         projectId={projectId}
+        mediaType={filter === "all" ? undefined : filter}
+        onImported={file => {
+          setFilter(mediaType === "audio" ? "audio" : file.media_type);
+          setVersion(file.id);
+          setJustUploaded(file.id);
+          setUploading(false);
+          void qc.invalidateQueries({ queryKey: ["library-version-catalog", projectId] });
+        }}
         onChange={() => {
           void qc.invalidateQueries({
             queryKey: ["library-version-catalog", projectId],
@@ -73,23 +90,48 @@ export function TimelineAddMedia({
     <Modal
       open
       title={zh ? "添加素材" : "Add media"}
-      width={680}
+      width={720}
       onClose={() => {
         if (!add.isPending) onClose();
       }}
     >
-      <div className="space-y-5">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            {zh
-              ? "图片、视频加入画面，音频加入声音轨。"
-              : "Images and videos become clips; audio goes on the sound track."}
-          </p>
+      <div className="space-y-4">
+        <div className="cut-library-header">
+          {mediaType === "all" ? (
+            <div
+              className="cut-library-types"
+              role="group"
+              aria-label={zh ? "素材类型" : "Media type"}
+            >
+              {(["all", "video", "image", "audio"] as const).map((type) => (
+                <button
+                  type="button"
+                  key={type}
+                  aria-pressed={filter === type}
+                  disabled={add.isPending}
+                  onClick={() => {
+                    setFilter(type);
+                    setVersion("");
+                    add.reset();
+                  }}
+                >
+                  {type === "all"
+                    ? zh
+                      ? "全部"
+                      : "All"
+                    : mediaTypeName(type, zh)}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <strong>{zh ? "声音素材" : "Audio"}</strong>
+          )}
           <Button
             variant="outline"
             disabled={add.isPending}
             onClick={() => setUploading(true)}
           >
+            <Upload size={15} />
             {zh ? "本地上传" : "Upload file"}
           </Button>
         </div>
@@ -101,14 +143,26 @@ export function TimelineAddMedia({
             add.reset();
           }}
           label={zh ? "素材库" : "Media library"}
-          mediaType={mediaType}
+          mediaType={filter}
+          gallery
           disabled={add.isPending}
         />
-        <p className="text-xs text-muted-foreground">
-          {zh
-            ? "上传完成后，等待素材处理完成再选择。添加后可继续裁剪，原文件不会改变。"
-            : "Wait for uploaded media to finish processing, then select it. Editing keeps the original intact."}
-        </p>
+        {selected.data &&
+          ["queued", "processing"].includes(selected.data.status) && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {zh
+                ? "正在处理刚上传的素材，就绪后可直接加入剪辑。"
+                : "Preparing your upload. Add it as soon as it is ready."}
+            </p>
+          )}
+        {selected.data?.status === "failed" && (
+          <p role="alert" className="text-sm text-danger">
+            {selected.data.error ||
+              (zh
+                ? "素材处理失败，请检查文件后重新上传。"
+                : "Media processing failed. Check the file and try again.")}
+          </p>
+        )}
         {isAudio && remainingMs <= 0 && (
           <p role="status">
             {zh

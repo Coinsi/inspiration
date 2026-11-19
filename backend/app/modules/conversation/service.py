@@ -135,6 +135,9 @@ def history_snapshot(messages):
     history, budget = [], 24000
     for m in reversed(messages):
         content = m.content or m.error or ""
+        selection = (m.context or {}).get("cut_selection")
+        if selection and m.role == "user":
+            content += "\n剪辑选区：" + json.dumps(selection, ensure_ascii=False)
         ui = (m.context or {}).get("ui_blocks", [])
         if (
             not content
@@ -200,6 +203,7 @@ def send(db, ctx, conversation_id, data, *, retry_job_id=None):
             "scope": [item.model_dump(mode="json") for item in data.scope],
             "skills": [item.model_dump(mode="json") for item in data.skills],
             "media": data.media.model_dump(mode="json") if data.media else None,
+            "cut_selection_request": data.cut_selection.model_dump(mode="json") if data.cut_selection else None,
             "production_request": data.production.model_dump(mode="json")
             if data.production
             else None,
@@ -248,6 +252,23 @@ def send(db, ctx, conversation_id, data, *, retry_job_id=None):
     db.add_all([user, reply])
     db.flush()
     execution_data, current_inputs, input_context = inputs.bind_inputs(db, ctx, c, user, data)
+    if data.cut_selection:
+        from app.modules.conversation.cut_selection import resolve
+
+        selection = resolve(db, ctx, c.work_id, data.cut_selection)
+        input_context.update(
+            cut_selection=selection,
+            cut_selection_request=data.cut_selection.model_dump(mode="json"),
+        )
+        history["messages"].append(
+            {
+                "id": str(user.id),
+                "role": "user",
+                "ordinal": user.ordinal,
+                "status": "completed",
+                "content": "本次引用的剪辑选区：" + json.dumps(selection, ensure_ascii=False),
+            }
+        )
     history["current_attachments"] = current_inputs
     job = None
     if retry_job_id:
@@ -342,6 +363,7 @@ def retry_input(db, ctx, conversation_id, message_id, *, allow_resume=False, all
         "media": context.get("media"),
         "attachments": context.get("attachment_requests", []),
         "references": context.get("reference_requests", []),
+        "cut_selection": context.get("cut_selection_request"),
     }
 
 

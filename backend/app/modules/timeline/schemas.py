@@ -29,6 +29,8 @@ class TimelineItemIn(BaseModel):
     in_point_ms: int = Field(0, ge=0, le=1_800_000)
     out_point_ms: int = Field(0, ge=0, le=1_800_000)
     duration_ms: int = Field(0, ge=0, le=1_800_000)
+    gap_before_ms: int = Field(0, ge=0, le=1_800_000)
+    gap_after_ms: int = Field(0, ge=0, le=1_800_000)
     transition: dict | None = None
     note: str | None = None
 
@@ -123,6 +125,8 @@ class TimelineItemOut(BaseModel):
     in_point_ms: int
     out_point_ms: int
     duration_ms: int
+    gap_before_ms: int = 0
+    gap_after_ms: int = 0
     transition: dict | None
     note: str | None
 

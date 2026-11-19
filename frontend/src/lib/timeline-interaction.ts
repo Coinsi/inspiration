@@ -6,13 +6,164 @@ import {
 export type TrackKind = "items" | "visuals" | "audio" | "subtitles";
 export type SourceBounds = { image: boolean; duration_ms?: number };
 export type DragMode = "move" | "start" | "end";
+export type TrimMode = "ripple" | "lift";
+export const frameMs = 1000 / 24;
+export function timecode(ms: number) {
+  const frames = Math.max(0, Math.floor((ms + 0.5) / frameMs));
+  return [Math.floor(frames / 1440), Math.floor(frames / 24) % 60, frames % 24]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
+}
 export function clipSpans(content: TimelineContent) {
   let start = 0;
   return content.items.map((clip, index) => {
-    const at = start;
-    start += clip.duration_ms - Number(clip.transition?.duration_ms || 0);
+    const at = start + (clip.gap_before_ms || 0);
+    start =
+      at +
+      clip.duration_ms +
+      (clip.gap_after_ms || 0) -
+      Number(clip.transition?.duration_ms || 0);
     return { index, start: at, end: at + clip.duration_ms, clip };
   });
+}
+export function cutAt(
+  content: TimelineContent,
+  time: number,
+  preferred: number,
+) {
+  const spans = clipSpans(content);
+  const candidates = spans.filter(({ index, start, end, clip }) => {
+    const left = Number(content.items[index - 1]?.transition?.duration_ms || 0);
+    const right = Number(clip.transition?.duration_ms || 0);
+    return (
+      time - start >= Math.max(100, left * 2) &&
+      end - time >= Math.max(100, right * 2)
+    );
+  });
+  return (
+    candidates.find((s) => s.index === preferred) ??
+    candidates[candidates.length - 1]
+  );
+}
+
+function edges(content: TimelineContent, kind: TrackKind, index: number) {
+  if (kind === "items") {
+    const { start, end } = clipSpans(content)[index];
+    return [start, end];
+  }
+  const item = content[kind][index];
+  return [
+    item.start_ms,
+    "end_ms" in item ? item.end_ms : item.start_ms + item.duration_ms,
+  ];
+}
+
+export function snapEdit(
+  content: TimelineContent,
+  kind: TrackKind,
+  index: number,
+  mode: DragMode,
+  delta: number,
+  playhead: number,
+  tolerance: number,
+) {
+  const [start, end] = edges(content, kind, index);
+  const moving =
+    mode === "start" ? [start] : mode === "end" ? [end] : [start, end];
+  const anchors = new Set([0, Math.round(playhead)]);
+  for (const track of ["items", "audio", "subtitles", "visuals"] as const) {
+    const spans = track === "items" ? clipSpans(content) : null;
+    content[track].forEach((_, i) => {
+      if (track === kind && i === index) return;
+      const pair = spans
+        ? [spans[i].start, spans[i].end]
+        : edges(content, track, i);
+      pair.forEach((n) => anchors.add(n));
+    });
+  }
+  let distance = tolerance,
+    guide: number | null = null,
+    adjusted = Math.round(delta / frameMs) * frameMs;
+  for (const edge of moving)
+    for (const anchor of anchors) {
+      const diff = anchor - edge - delta;
+      if (Math.abs(diff) < distance) {
+        distance = Math.abs(diff);
+        guide = anchor;
+        adjusted = anchor - edge;
+      }
+    }
+  return { delta: Math.round(adjusted), guide };
+}
+
+function lastTrackEnd(content: TimelineContent) {
+  return Math.max(
+    0,
+    ...content.subtitles.map((c) => c.end_ms),
+    ...content.audio.map((a) => a.start_ms + a.duration_ms),
+    ...content.visuals.map((v) => v.start_ms + v.duration_ms),
+  );
+}
+
+function preserveTrackEnds(content: TimelineContent) {
+  const tail = content.items[content.items.length - 1];
+  const shortage = lastTrackEnd(content) - timelineDuration(content.items);
+  if (tail && shortage > 0)
+    tail.gap_after_ms = (tail.gap_after_ms || 0) + shortage;
+}
+
+export function removePicture(
+  content: TimelineContent,
+  index: number,
+  mode: TrimMode,
+) {
+  const next = structuredClone(content);
+  const [removed] = next.items.splice(index, 1);
+  if (!removed) return { content, error: "" };
+  if (!next.items.length && lastTrackEnd(content) > 0)
+    return {
+      content,
+      error:
+        "时间线上还有声音、字幕或叠加画面。请先添加替代画面，或移除这些轨道内容。",
+    };
+  const previous = next.items[index - 1];
+  if (previous) previous.transition = null;
+  if (mode === "lift" && next.items.length) {
+    const removedTime =
+      timelineDuration(content.items) - timelineDuration(next.items);
+    const following = next.items[index];
+    if (following)
+      following.gap_before_ms = (following.gap_before_ms || 0) + removedTime;
+    else previous.gap_after_ms = (previous.gap_after_ms || 0) + removedTime;
+  }
+  preserveTrackEnds(next);
+  return { content: next, error: "" };
+}
+
+export function canClosePictureGap(content: TimelineContent, time: number) {
+  const spans = clipSpans(content);
+  if (!spans.length || spans.some((s) => time >= s.start && time < s.end))
+    return false;
+  const tailEnd = Math.max(spans[spans.length - 1].end, lastTrackEnd(content));
+  return (
+    spans.some((s) => s.start > time) ||
+    timelineDuration(content.items) > tailEnd
+  );
+}
+
+export function closePictureGap(
+  content: TimelineContent,
+  time: number,
+): TimelineContent {
+  const next = structuredClone(content);
+  const spans = clipSpans(content);
+  const following = spans.find((s) => s.start > time);
+  const previous = [...spans].reverse().find((s) => s.end <= time);
+  if (!canClosePictureGap(content, time)) return content;
+  if (previous) next.items[previous.index].gap_after_ms = 0;
+  if (following) next.items[following.index].gap_before_ms = 0;
+  preserveTrackEnds(next);
+  return next;
 }
 export function timelineEditIssue(c: TimelineContent): string {
   const total = timelineDuration(c.items);
@@ -32,6 +183,8 @@ export function timelineEditIssue(c: TimelineContent): string {
           Math.min(v.duration_ms, c.items[i + 1].duration_ms))
     )
       return `第 ${i + 1} 个画面的转场过长或已位于末尾，请缩短或移除转场`;
+    if (v.transition && (v.gap_after_ms || c.items[i + 1]?.gap_before_ms))
+      return "请先合拢两个画面之间的空隙，再添加转场";
   }
   if (visualIssue(c.visuals, total))
     return "叠加画面不能越界或在同一轨道重叠，请在叠加画面面板调整";
@@ -81,6 +234,7 @@ export function dragTimeline(
   delta: number,
   track?: number,
   source?: SourceBounds,
+  trimMode: TrimMode = "ripple",
 ): { content: TimelineContent; selected: number; error: string } {
   const content = structuredClone(original),
     total = timelineDuration(original.items);
@@ -151,7 +305,40 @@ export function dragTimeline(
         Math.min(maximum, clip.duration_ms + delta),
       );
     }
-    if (kind === "items") content.items[index].out_point_ms = 0;
+    if (kind === "items") {
+      const item = content.items[index];
+      item.out_point_ms = 0;
+      const shrink = original.items[index].duration_ms - item.duration_ms;
+      if (trimMode === "lift" && mode !== "move") {
+        const before = mode === "start";
+        const key = before ? "gap_before_ms" : "gap_after_ms";
+        const neighbor = content.items[index + (before ? -1 : 1)];
+        const otherKey = before ? "gap_after_ms" : "gap_before_ms";
+        if (shrink !== 0 && (before ? neighbor?.transition : item.transition))
+          return {
+            content: original,
+            selected,
+            error: "这个剪点有转场，请切换到联动修剪或移除转场",
+          };
+        const room = (item[key] || 0) + (neighbor?.[otherKey] || 0);
+        if (shrink < -room && (before || neighbor)) {
+          const excess = -shrink - room;
+          item.duration_ms -= excess;
+          if (before && !source?.image) item.in_point_ms += excess;
+        }
+        const remaining =
+          (item[key] || 0) +
+          original.items[index].duration_ms -
+          item.duration_ms;
+        item[key] = Math.max(0, remaining);
+        if (remaining < 0 && neighbor)
+          neighbor[otherKey] = Math.max(
+            0,
+            (neighbor[otherKey] || 0) + remaining,
+          );
+      }
+      preserveTrackEnds(content);
+    }
     if (
       kind === "visuals" &&
       mode === "move" &&
