@@ -31,6 +31,7 @@ export function AssetPreview({
           {asset.representative_blob_hash ? (
             <MediaPreview
               src={blobUrl(projectId, asset.representative_blob_hash)}
+              displaySrc={blobUrl(projectId, asset.representative_blob_hash, "display")}
               label={asset.name}
               filename={asset.name}
             />
@@ -116,7 +117,7 @@ export function AssetPreview({
               <div key={r.id}>
                 <div className="relative aspect-video overflow-hidden rounded-md border">
                   <MediaImage
-                    src={blobUrl(projectId, r.blob_hash)}
+                    src={blobUrl(projectId, r.blob_hash, "thumbnail")}
                     className="[&_img]:object-contain"
                     alt={r.note || `${t("detail.ref")} ${i + 1}`}
                   />

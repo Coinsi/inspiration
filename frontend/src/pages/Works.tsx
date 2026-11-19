@@ -436,7 +436,8 @@ function WorkDetail({
               <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-2xl bg-black/90 text-white/70">
                 {detail.data?.preview?.blob_hash ? (
                   <MediaVideo
-                    src={blobUrl(projectId, detail.data.preview.blob_hash)}
+                    src={blobUrl(projectId, detail.data.preview.blob_hash, "playback")}
+                    poster={blobUrl(projectId, detail.data.preview.blob_hash, "thumbnail")}
                     label="作品候选预览"
                   />
                 ) : (

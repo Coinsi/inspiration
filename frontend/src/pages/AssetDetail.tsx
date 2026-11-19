@@ -111,7 +111,7 @@ export default function AssetDetail() {
 
   if (!asset) return <p className="p-6 text-muted-foreground">{tr("common.loading")}</p>;
   const locked = asset.status === "locked";
-  const cover = asset.representative_blob_hash ? blobUrl(projectId!, asset.representative_blob_hash) : null;
+  const cover = asset.representative_blob_hash ? blobUrl(projectId!, asset.representative_blob_hash, "thumbnail") : null;
 
   return (
     <div>
@@ -231,6 +231,7 @@ export default function AssetDetail() {
                     <ZoomableImage
                       key={r.id}
                       src={blobUrl(projectId!, r.blob_hash)}
+                      previewSrc={blobUrl(projectId!, r.blob_hash, "thumbnail")}
                       alt={r.role}
                       filename={`${asset.name}-ref-${i + 1}`}
                       className="aspect-square w-full object-cover rounded-lg border border-border transition hover:border-primary/60"

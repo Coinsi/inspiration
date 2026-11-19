@@ -36,7 +36,11 @@ def store(db, data):
     if data is None:
         return None
     raw, mime, width, height = data
-    return cas.put_bytes(db, raw, mime, width=width, height=height).hash
+    from app.modules.media.renditions import enqueue
+
+    blob = cas.put_bytes(db, raw, mime, width=width, height=height)
+    enqueue(db, blob)
+    return blob.hash
 
 
 def create(db, user, name, description, request_key, file):

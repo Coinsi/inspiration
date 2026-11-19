@@ -187,7 +187,11 @@ test('unknown capabilities disable new picks while errors offer a retry', async 
 test('historical attachment previews and reuse preserve attachment and reference identities', async () => {
   const reused = [], attachment = saved(audio);
   let tree;
-  await act(async () => { tree = create(React.createElement(MessageAttachments, { projectId: 'p', attachments: [attachment], references: [image], onReuse: item => reused.push(item) })); });
+  await act(async () => {
+    tree = create(React.createElement(I18nProvider, null, React.createElement(MessageAttachments, {
+      projectId: 'p', attachments: [attachment], references: [image], onReuse: item => reused.push(item),
+    })));
+  });
   try {
     await act(async () => tree.root.findByProps({ 'aria-label': '预览 对白音频' }).props.onClick());
     assert.equal(tree.root.findByType('audio').props.controls, true);

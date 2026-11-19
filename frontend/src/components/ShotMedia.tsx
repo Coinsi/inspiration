@@ -26,10 +26,10 @@ export function ShotMedia({
   });
   const result = data?.find((g) => g.id === shot.selected_generation_id);
   const hash = result?.output_blob_hash;
-  if (hash && result?.output_type === "image") {
+  if (hash && (result?.output_type === "image" || thumbnail)) {
     return (
       <MediaImage
-        src={blobUrl(projectId, hash)}
+        src={blobUrl(projectId, hash, thumbnail ? "thumbnail" : "display")}
         alt={shot.title ?? shot.code}
         className={
           thumbnail ? "[&_span]:sr-only [&_svg]:h-4 [&_svg]:w-4" : undefined
@@ -38,20 +38,10 @@ export function ShotMedia({
     );
   }
   if (hash && result?.output_type === "video") {
-    if (thumbnail)
-      return (
-        <video
-          src={blobUrl(projectId, hash)}
-          preload="metadata"
-          muted
-          playsInline
-          aria-label={shot.title ?? shot.code}
-          className="h-full w-full object-cover pointer-events-none"
-        />
-      );
     return (
       <MediaVideo
-        src={blobUrl(projectId, hash)}
+        src={blobUrl(projectId, hash, "playback")}
+        poster={blobUrl(projectId, hash, "thumbnail")}
         label={shot.title ?? shot.code}
       />
     );

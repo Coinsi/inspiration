@@ -8,10 +8,12 @@ import "./media-preview.css";
 /** Complete image on a quiet preview stage; the original opens in a lightbox. */
 export function MediaPreview({
   src,
+  displaySrc,
   label,
   filename,
 }: {
   src: string;
+  displaySrc?: string;
   label: string;
   filename: string;
 }) {
@@ -25,7 +27,7 @@ export function MediaPreview({
         aria-label={label}
         onClick={() => setOpen(true)}
       >
-        <MediaImage src={src} alt={label} className="media-image-canvas" />
+        <MediaImage src={displaySrc || src} alt={label} className="media-image-canvas" />
         <span className="media-expand">
           <Maximize2 size={14} />
           {zh ? "查看原图" : "View image"}
@@ -34,6 +36,7 @@ export function MediaPreview({
       {open && (
         <Lightbox
           src={src}
+          previewSrc={displaySrc}
           alt={label}
           filename={filename}
           onClose={() => setOpen(false)}

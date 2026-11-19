@@ -23,24 +23,37 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const image=await readFile(resolve('public/images/studio-scenes.webp'));
 const browser=await chromium.launch({headless:true,channel:'chrome'});
 const asset={id:'attachment-a',title:'镜头风格参考',filename:'original-scene.webp',kind:'image',status:'ready',blob_hash:'image',thumbnail_hash:null,description:'在对话中上传的构图参考',tags:['构图'],metadata_revision:1,conversation_id:'origin-conversation',message_id:'origin-message',message_ordinal:5,saved_at:new Date().toISOString(),size_bytes:image.length};
-let patch=null;const errors=[];
+let patch=null;const errors=[];const requestedViews=new Set();
 try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>localStorage.setItem('inspiration_token','fixture-token'));
  await page.route('**/api/v1/**',async route=>{const u=new URL(route.request().url()),p=u.pathname,method=route.request().method();const ok=json=>route.fulfill({json});
   if(p==='/api/v1/me')return ok({user:{id:'u',username:'fixture'},memberships:[{project_id:'fixture',role:'artist'}]});
+  if(p.endsWith('/library/uploads'))return ok([]);
   if(p.endsWith('/library/materials'))return ok({total:1,items:[{id:asset.id,source:'attachment',name:asset.title,description:asset.description,tags:asset.tags,metadata_revision:asset.metadata_revision,kind:'image',created_at:asset.saved_at,deleted_at:null,status:'ready',poster_hash:null,blob_hash:asset.blob_hash,preview_hash:null,size_bytes:asset.size_bytes,duration_ms:null,version_id:null,is_test:false,adopted:false}]});
   if(p.endsWith('/attachments/attachment-a')){if(method==='PATCH'){patch=route.request().postDataJSON();assert.equal(patch.expected_revision,asset.metadata_revision);Object.assign(asset,{title:patch.title,description:patch.description,tags:patch.tags,metadata_revision:asset.metadata_revision+1});}return ok(asset);}
-  if(p.includes('/blobs/'))return route.fulfill({body:image,contentType:'image/webp'});
+  if(p.includes('/blobs/')){
+    requestedViews.add(u.searchParams.get('view') || 'original');
+    return route.fulfill({body:image,contentType:'image/webp'});
+  }
   throw new Error(`Unexpected ${method} ${p}`);
  });
  const returnTo='/projects/fixture/workbench?view=chat&conversation=return-conversation&message=old&ordinal=99&attachment=stale';
  const home=`http://127.0.0.1:${server.address().port}/projects/fixture/materials?source=attachment&return=${encodeURIComponent(returnTo)}`;
  await page.goto(home);await page.getByRole('button',{name:'预览 镜头风格参考',exact:true}).waitFor();
  await page.screenshot({path:resolve(out,'catalog-light.png'),fullPage:true});
+ assert.deepEqual([...requestedViews],['thumbnail']);
  await page.getByRole('button',{name:'预览 镜头风格参考',exact:true}).click();
  const detail=page.getByRole('dialog',{name:'对话附件',exact:true});await detail.waitFor();
  await page.screenshot({path:resolve(out,'detail-light.png'),fullPage:true});
+ assert.deepEqual([...requestedViews],['thumbnail','display']);
+ const downloadUrl=new URL(await detail.getByRole('link',{name:'下载原文件'}).getAttribute('href'),home);
+ assert.equal(downloadUrl.searchParams.get('view'),null);
+ const original=page.waitForResponse(response=>response.url().includes('/blobs/')&&!new URL(response.url()).searchParams.has('view'));
+ await detail.getByRole('button',{name:asset.title,exact:true}).click();
+ assert.ok((await original).ok());
+ const lightbox=page.getByRole('dialog',{name:asset.title,exact:true});
+ await lightbox.getByRole('button',{name:'取消'}).click();
  await detail.getByRole('button',{name:'编辑素材资料：镜头风格参考',exact:true}).click();
  const editor=page.getByRole('dialog',{name:'编辑素材资料',exact:true});
  assert.equal(await editor.getByLabel(/素材名称/).inputValue(),'镜头风格参考');

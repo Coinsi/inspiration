@@ -596,20 +596,6 @@
   outline: 2px solid hsl(var(--primary));
   outline-offset: 4px;
 }
-.composer-result-cover .material-video-cover {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-}
-.composer-result-cover video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.composer-result-cover video:not(.is-ready) {
-  display: none;
-}
 .composer-test-cover {
   display: grid;
   height: 100%;

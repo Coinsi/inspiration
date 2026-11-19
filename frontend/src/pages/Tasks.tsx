@@ -591,7 +591,8 @@ function TaskDetail({
             ) : result.output_type === "video" ? (
               <MediaVideo
                 presentation="studio"
-                src={blobUrl(projectId, result.output_blob_hash!)}
+                src={blobUrl(projectId, result.output_blob_hash!, "playback")}
+                poster={blobUrl(projectId, result.output_blob_hash!, "thumbnail")}
                 label={zh ? "任务视频结果" : "Task video result"}
               />
             ) : result.output_type === "audio" ? (
@@ -605,6 +606,7 @@ function TaskDetail({
                 filename={`result-${result.id.slice(0, 8)}`}
                 label={zh ? "任务图片结果" : "Task image result"}
                 src={blobUrl(projectId, result.output_blob_hash!)}
+                displaySrc={blobUrl(projectId, result.output_blob_hash!, "display")}
               />
             )}
           </div>

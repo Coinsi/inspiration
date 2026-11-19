@@ -403,7 +403,7 @@ function Collection({ projectId }: { projectId: string }) {
             </div>
           ) : (
             <div className="materials-grid">
-              {list.data.items.map((item) => {
+              {list.data.items.map((item, index) => {
                 const previewKey = `${item.source}:${item.id}`;
                 const videoSrc =
                   item.kind === "video" &&
@@ -416,14 +416,11 @@ function Collection({ projectId }: { projectId: string }) {
                     <div className="material-thumb">
                       {videoSrc ? (
                         <MaterialVideoPreview
-                          src={blobUrl(projectId, videoSrc)}
-                          poster={
-                            item.poster_hash
-                              ? blobUrl(projectId, item.poster_hash)
-                              : undefined
-                          }
+                          src={blobUrl(projectId, videoSrc, item.source === "upload" && item.preview_hash ? undefined : "playback")}
+                          poster={blobUrl(projectId, item.poster_hash || item.blob_hash || videoSrc, "thumbnail")}
                           label={item.name}
                           active={previewId === previewKey}
+                          priority={index === 0}
                           onActiveChange={(active) =>
                             setPreviewId((current) =>
                               active
@@ -450,8 +447,10 @@ function Collection({ projectId }: { projectId: string }) {
                               src={blobUrl(
                                 projectId,
                                 item.poster_hash || item.blob_hash!,
+                                "thumbnail",
                               )}
                               alt={item.name}
+                              priority={index === 0}
                             />
                           ) : item.kind === "video" ? (
                             <Film size={34} />
@@ -655,19 +654,16 @@ function Collection({ projectId }: { projectId: string }) {
               ) : generated.data.output_type === "image" ? (
                 <MediaPreview
                   src={blobUrl(projectId, generated.data.blob_hash)}
+                  displaySrc={blobUrl(projectId, generated.data.blob_hash, "display")}
                   label={generated.data.title}
                   filename={`inspiration-${generation}`}
                 />
               ) : (
                 <MediaVideo
-                  src={blobUrl(projectId, generated.data.blob_hash)}
+                  src={blobUrl(projectId, generated.data.blob_hash, "playback")}
                   label={generated.data.title}
                   presentation="studio"
-                  poster={
-                    generated.data.poster_hash
-                      ? blobUrl(projectId, generated.data.poster_hash)
-                      : undefined
-                  }
+                  poster={blobUrl(projectId, generated.data.poster_hash || generated.data.blob_hash, "thumbnail")}
                 />
               )}
             </div>
@@ -813,9 +809,11 @@ function Collection({ projectId }: { projectId: string }) {
           <div className="material-result-preview">
             {attached.data.kind === "image" ? <MediaPreview
               src={blobUrl(projectId, attached.data.blob_hash)} label={attached.data.title}
+              displaySrc={blobUrl(projectId, attached.data.blob_hash, "display")}
               filename={attached.data.filename} />
               : attached.data.kind === "video" ? <MediaVideo
-                src={blobUrl(projectId, attached.data.blob_hash)} label={attached.data.title} />
+                src={blobUrl(projectId, attached.data.blob_hash, "playback")} label={attached.data.title}
+                poster={blobUrl(projectId, attached.data.blob_hash, "thumbnail")} />
               : <audio className="w-full" controls preload="metadata"
                 src={blobUrl(projectId, attached.data.blob_hash)} aria-label={attached.data.title} />}
           </div>

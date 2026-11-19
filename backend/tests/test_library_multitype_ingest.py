@@ -96,7 +96,8 @@ def test_worker_imports_each_type_with_safe_preview_and_immutable_original(inges
             actual = media_ingest.probe_media(preview, kind)
         if kind == "image":
             assert version.duration_ms is None and (version.width, version.height) == (80, 48)
-            assert version.proxy_hash == version.poster_hash
+            assert version.proxy_hash != version.poster_hash
+            assert db.get(Blob, version.poster_hash).mime == "image/webp"
             assert proxy.mime == "image/jpeg" and actual["duration_ms"] is None
         elif kind == "audio":
             assert version.width is None and version.height is None and version.poster_hash is None

@@ -1,45 +1,42 @@
 import { ImageOff } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-/** Keep slow or missing media explicit without blocking the surrounding content. */
-export function MediaImage({
-  src,
-  alt,
-  className,
-  onDimensions,
-}: {
+type MediaImageProps = {
   src?: string | null;
   alt: string;
   className?: string;
+  priority?: boolean;
   onDimensions?: (width: number, height: number) => void;
-}) {
-  return (
-    <MediaImageContent
-      key={src ?? "empty"}
-      src={src}
-      alt={alt}
-      className={className}
-      onDimensions={onDimensions}
-    />
-  );
+};
+
+export function MediaImage(props: MediaImageProps) {
+  return <MediaImageContent key={props.src ?? "empty"} {...props} />;
 }
 function MediaImageContent({
   src,
   alt,
   className,
+  priority,
   onDimensions,
-}: {
-  src?: string | null;
-  alt: string;
-  className?: string;
-  onDimensions?: (width: number, height: number) => void;
-}) {
+}: MediaImageProps) {
   const { lang } = useI18n();
   const [state, setState] = useState<"loading" | "loaded" | "error">(
     src ? "loading" : "error",
   );
+  const [attempt, setAttempt] = useState(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(retryTimer.current), []);
+  function onError() {
+    // A freshly published file can appear before its browsing copy is ready.
+    if (src?.includes("&view=") && attempt < 6) {
+      clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(() => setAttempt(value => value + 1), Math.min(1000 * 2 ** attempt, 12000));
+      return;
+    }
+    setState("error");
+  }
   return (
     <div
       className={cn(
@@ -49,18 +46,21 @@ function MediaImageContent({
     >
       {src && (
         <img
+          key={attempt}
           src={src}
           alt={alt}
-          loading="lazy"
+          loading={priority ? "eager" : "lazy"}
+          {...(priority && { fetchpriority: "high" })}
           decoding="async"
           onLoad={(e) => {
+            clearTimeout(retryTimer.current);
             setState("loaded");
             onDimensions?.(
               e.currentTarget.naturalWidth,
               e.currentTarget.naturalHeight,
             );
           }}
-          onError={() => setState("error")}
+          onError={onError}
           className={cn(
             "h-full w-full object-cover",
             state !== "loaded" && "opacity-0",

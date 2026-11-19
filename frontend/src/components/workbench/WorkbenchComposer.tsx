@@ -33,7 +33,6 @@ import { useAuth } from "@/lib/auth";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { MediaImage } from "@/components/MediaImage";
-import { MaterialVideoCover } from "@/components/MaterialVideoCover";
 
 import { JobStatus, ACTIVE_JOBS, JOB_LABEL } from "@/components/JobStatus";
 import { ComposerModelPicker } from "./ComposerModelPicker";
@@ -780,13 +779,9 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
                           <span className="composer-test-cover">
                             离线测试占位
                           </span>
-                        ) : g.output_type === "video" ? (
-                          <MaterialVideoCover
-                            src={blobUrl(projectId, g.output_blob_hash!)}
-                          />
                         ) : (
                           <MediaImage
-                            src={blobUrl(projectId, g.output_blob_hash!)}
+                            src={blobUrl(projectId, g.output_blob_hash!, "thumbnail")}
                             alt={c.title}
                           />
                         )}

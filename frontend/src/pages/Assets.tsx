@@ -598,7 +598,7 @@ function AssetsContent() {
                     <MediaImage
                       src={
                         a.representative_blob_hash
-                          ? blobUrl(projectId!, a.representative_blob_hash)
+                          ? blobUrl(projectId!, a.representative_blob_hash, "thumbnail")
                           : null
                       }
                       alt={a.name}
@@ -850,7 +850,8 @@ function ListView({
                     <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-lg">
                       {a.representative_blob_hash ? (
                         <img
-                          src={blobUrl(projectId, a.representative_blob_hash)}
+                          src={blobUrl(projectId, a.representative_blob_hash, "thumbnail")}
+                          loading="lazy"
                           alt=""
                           className="h-full w-full object-cover"
                         />

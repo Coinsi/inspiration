@@ -442,7 +442,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                   const kind = (ready || v)?.media_type || "video";
                   const cover =
                     ready?.poster_hash ||
-                    (kind === "image" ? ready?.proxy_hash : null);
+                    (kind !== "audio" ? ready?.original_hash : null);
                   const KindIcon =
                     kind === "audio"
                       ? AudioLines
@@ -479,7 +479,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                         )}
                         {!deleted && cover ? (
                           <MediaImage
-                            src={blobUrl(projectId, cover)}
+                            src={blobUrl(projectId, cover, "thumbnail")}
                             alt={item.name}
                             className={
                               kind === "image"

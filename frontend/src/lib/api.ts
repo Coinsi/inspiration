@@ -557,8 +557,11 @@ export interface ProviderConfig {
   capabilities: Record<string, unknown>;
 }
 
-export function blobUrl(projectId: string, hash: string): string {
-  return `/api/v1/projects/${projectId}/blobs/${hash}?token=${getToken() ?? ""}`;
+export type MediaView = "thumbnail" | "display" | "playback";
+
+export function blobUrl(projectId: string, hash: string, view?: MediaView): string {
+  const url = `/api/v1/projects/${projectId}/blobs/${hash}?token=${getToken() ?? ""}`;
+  return view ? `${url}&view=${view}` : url;
 }
 
 export interface Review {

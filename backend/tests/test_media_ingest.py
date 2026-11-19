@@ -23,7 +23,8 @@ def test_static_image_preview_is_decoded_and_source_preserved(tmp_path, suffix, 
     output = media_ingest.build_preview(source, tmp_path, info)
     assert info["duration_ms"] is None and (info["width"], info["height"]) == (96, 64)
     assert not info["has_video"] and not info["has_audio"]
-    assert output["proxy"] == output["poster"]
+    with Image.open(output["poster"][0]) as poster:
+        assert poster.size == (96, 64) and poster.format == "WEBP"
     with Image.open(output["proxy"][0]) as preview:
         preview.load()
         assert preview.size == (96, 64) and preview.format == "JPEG"
@@ -184,4 +185,4 @@ def test_existing_video_containers_remain_supported(tmp_path, suffix, mime):
     assert info["mime"] == mime and info["has_video"]
     assert (info["width"], info["height"]) == (80, 48)
     result = media_ingest.build_preview(source, tmp_path, info)
-    assert result["proxy"][1] == "video/mp4" and result["poster"][1] == "image/jpeg"
+    assert result["proxy"][1] == "video/mp4" and result["poster"][1] == "image/webp"

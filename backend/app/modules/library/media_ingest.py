@@ -151,7 +151,10 @@ def probe_media(path, media_type, canceled=lambda: False, *, max_duration_ms=MAX
         for line in log.splitlines()
         if "Stream #" in line and "Video:" in line and "attached pic" not in line.lower()
     ]
-    has_audio = any("Stream #" in line and "Audio:" in line for line in log.splitlines())
+    audio_line = next(
+        (line for line in log.splitlines() if "Stream #" in line and "Audio:" in line), ""
+    )
+    has_audio = bool(audio_line)
     if media_type == "audio" and (not has_audio or videos):
         raise ValueError("请选择只有音轨的音频文件，请重新上传")
     if media_type == "video" and not videos:
@@ -177,7 +180,49 @@ def probe_media(path, media_type, canceled=lambda: False, *, max_duration_ms=MAX
         "height": height,
         "has_video": bool(videos),
         "has_audio": has_audio,
+        "browser_mp4": bool(
+            videos
+            and input_format == "mov"
+            and "Video: h264 " in videos[0]
+            and re.search(r"\byuvj?420p\b", videos[0])
+            and (not has_audio or "Audio: aac " in audio_line)
+        ),
     }
+
+
+def web_image(image, path, edge, quality):
+    """A metadata-free, aspect-correct browsing copy. Downsample before encoding."""
+    image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+    image.info.clear()
+    image.save(path, "WEBP", quality=quality, method=4)
+    return path, "image/webp", {"width": image.width, "height": image.height}
+
+
+def video_poster(source, folder, info, canceled):
+    # Extract a bounded frame directly. The playback transcode may take much longer.
+    frame = folder / "frame.png"
+    media_engine.run(
+        [
+            *input_options(info),
+            "-i",
+            str(source),
+            "-map",
+            "0:V:0",
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=w='min(480,iw)':h='min(480,ih)':force_original_aspect_ratio=decrease",
+            "-threads",
+            "1",
+            "-update",
+            "1",
+            str(frame),
+        ],
+        canceled=canceled,
+        timeout=45,
+    )
+    with Image.open(frame) as image:
+        return web_image(image, folder / "poster.webp", 480, 78)
 
 
 def build_preview(source, folder, info, canceled=lambda: False):
@@ -197,9 +242,17 @@ def build_preview(source, folder, info, canceled=lambda: False):
                 "image/png" if alpha else "image/jpeg",
                 {"width": image.width, "height": image.height},
             )
-            return {"proxy": item, "poster": item}
+            poster = web_image(image, folder / "poster.webp", 480, 78)
+            return {"proxy": item, "poster": poster}
         finally:
             image.close()
+    proxy = build_playback(source, folder, info, canceled)
+    poster = video_poster(source, folder, info, canceled) if kind == "video" else None
+    return {"proxy": proxy, "poster": poster}
+
+
+def build_playback(source, folder, info, canceled):
+    kind = info["media_type"]
     audio = kind == "audio"
     proxy = folder / ("proxy.m4a" if audio else "proxy.mp4")
     args = ["-xerror", "-err_detect", "explode", *input_options(info), "-i", str(source)]
@@ -219,6 +272,10 @@ def build_preview(source, folder, info, canceled=lambda: False):
             "veryfast",
             "-crf",
             "28",
+            "-maxrate",
+            "2400k",
+            "-bufsize",
+            "4800k",
             "-pix_fmt",
             "yuv420p",
             "-c:a",
@@ -246,28 +303,5 @@ def build_preview(source, folder, info, canceled=lambda: False):
     if abs(actual["duration_ms"] - info["duration_ms"]) > 1500:
         raise ValueError("预览时长与原片不一致，请重新上传完整素材")
     metadata = {key: actual[key] for key in ("duration_ms", "width", "height")}
-    result = {"proxy": (proxy, "audio/mp4" if audio else "video/mp4", metadata), "poster": None}
-    if not audio:
-        poster = folder / "poster.jpg"
-        media_engine.run(
-            [
-                "-protocol_whitelist",
-                "file,pipe",
-                "-i",
-                str(proxy),
-                "-map",
-                "0:V:0",
-                "-frames:v",
-                "1",
-                "-update",
-                "1",
-                str(poster),
-            ],
-            canceled=canceled,
-            timeout=30,
-        )
-        image, _ = read_image(poster, canceled)
-        result["poster"] = (poster, "image/jpeg", {"width": image.width, "height": image.height})
-        image.close()
     check_canceled(canceled)
-    return result
+    return proxy, "audio/mp4" if audio else "video/mp4", metadata

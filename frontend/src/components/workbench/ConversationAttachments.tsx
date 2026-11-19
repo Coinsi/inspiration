@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, FileAudio, Film, FolderOpen, ImagePlus, Loader2, Paperclip, RotateCcw, Upload, X } from "lucide-react";
 import { api, blobUrl } from "@/lib/api";
 import { mediaSize } from "@/lib/library";
+import { MediaImage } from "@/components/MediaImage";
+import { MediaVideo } from "@/components/MediaVideo";
 import { Modal } from "@/components/ui/modal";
 import { SearchField } from "@/components/ui/search-field";
 import { SelectField } from "@/components/ui/select-field";
@@ -15,15 +17,16 @@ import "./conversation-attachments.css";
 
 type PreviewItem = { title: string; kind?: string; blob_hash?: string | null; thumbnail_hash?: string | null; preview_url?: string };
 export function AttachmentPreview({ projectId, item }: { projectId: string; item: PreviewItem }) {
-  const url = item.preview_url || (item.blob_hash ? blobUrl(projectId, item.blob_hash) : "");
-  return <div className="attachment-preview-stage">{item.kind === "audio" ? <><FileAudio size={54} /><audio src={url} controls /></> : item.kind === "video" ? <video src={url} controls playsInline /> : <img src={url} alt={item.title} />}</div>;
+  const url = item.preview_url || (item.blob_hash ? blobUrl(projectId, item.blob_hash, item.kind === "video" ? "playback" : undefined) : "");
+  const cover = item.thumbnail_hash || item.blob_hash;
+  return <div className="attachment-preview-stage">{item.kind === "audio" ? <><FileAudio size={54} /><audio src={url} controls /></> : item.kind === "video" ? <MediaVideo src={url} label={item.title} poster={cover ? blobUrl(projectId, cover, "thumbnail") : undefined} /> : <img src={url} alt={item.title} />}</div>;
 }
 function Thumbnail({ projectId, item }: { projectId: string; item: PreviewItem }) {
-  const image = item.thumbnail_hash || (item.kind !== "video" && item.kind !== "audio" ? item.blob_hash : "");
-  if (image) return <img src={blobUrl(projectId, image)} alt="" loading="lazy" />;
   if (item.kind === "audio") return <FileAudio size={28} />;
-  const source = item.preview_url || (item.blob_hash ? blobUrl(projectId, item.blob_hash) : "");
-  if (source) return item.kind === "video" ? <video src={source} muted preload="metadata" /> : <img src={source} alt="" />;
+  if (item.preview_url?.startsWith("blob:"))
+    return item.kind === "video" ? <video src={item.preview_url} muted playsInline preload="metadata" /> : <img src={item.preview_url} alt="" />;
+  const cover = item.thumbnail_hash || item.blob_hash;
+  if (cover) return <MediaImage src={blobUrl(projectId, cover, "thumbnail")} alt="" />;
   return item.kind === "video" ? <Film size={28} /> : <ImagePlus size={28} />;
 }
 const stateLabel = (item: AttachmentDraft) => item.state === "ready" ? mediaSize(item.size_bytes) : item.state === "paused" ? "重新选择原文件续传" : item.state === "failed" ? "上传失败，可重试" : item.state === "processing" ? "正在准备附件…" : item.state === "preparing" ? "准备上传…" : `上传中 ${Math.round((item.attachment?.uploaded_bytes || 0) / Math.max(1, item.size_bytes) * 100)}%`;

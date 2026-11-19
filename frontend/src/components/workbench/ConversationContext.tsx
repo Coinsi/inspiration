@@ -225,7 +225,7 @@ export function ConversationObjectDialog({
                     <ShotMedia projectId={projectId} shot={i.shot} thumbnail />
                   ) : i.image ? (
                     <img
-                      src={blobUrl(projectId, i.image)}
+                      src={blobUrl(projectId, i.image, "thumbnail")}
                       alt=""
                       loading="lazy"
                     />

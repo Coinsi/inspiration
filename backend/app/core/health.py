@@ -20,6 +20,7 @@ def background_status():
     for name, flag in (
         ("media_processing", "library_processing_enabled"),
         ("library", "library_worker_enabled"),
+        ("media_renditions", "library_worker_enabled"),
         ("transcription", "transcription_worker_enabled"),
         ("agent", "agent_worker_enabled"),
         ("production", "agent_worker_enabled"),

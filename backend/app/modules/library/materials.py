@@ -118,7 +118,7 @@ def catalog(
             Generation.created_at,
             GeneratedMaterialState.deleted_at,
             literal("ready"),
-            GeneratedMaterialState.poster_hash,
+            func.coalesce(GeneratedMaterialState.poster_hash, Generation.thumbnail_hash),
             Blob.hash,
             Blob.hash,
             Blob.size_bytes,

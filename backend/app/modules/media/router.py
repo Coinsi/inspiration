@@ -5,9 +5,10 @@
 """
 
 import uuid
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -42,6 +43,7 @@ def _media_user_id(token: str | None, authorization: str | None, db: Session) ->
     except Exception as exc:  # noqa: BLE001
         raise Unauthorized("令牌无效") from exc
     from app.core.auth_controls import is_revoked, validate_user_session
+
     if is_revoked(db, raw):
         raise Unauthorized("登录已退出，请重新登录")
     validate_user_session(db.get(User, user_id), payload)
@@ -50,13 +52,17 @@ def _media_user_id(token: str | None, authorization: str | None, db: Session) ->
 
 @router.get("/blobs/{blob_hash}")
 def get_blob(
+    request: Request,
     project_id: uuid.UUID,
     blob_hash: str,
+    db: Annotated[Session, Depends(get_db, scope="function")],
     token: str | None = Query(None),
     authorization: str | None = Header(None),
     range: str | None = Header(None),
     download: bool = Query(False),
-    db: Session = Depends(get_db, scope="function"),
+    view: Literal["thumbnail", "display", "playback"] | None = Query(None),
+    if_none_match: str | None = Header(None),
+    if_range: str | None = Header(None),
 ):
     user_id = _media_user_id(token, authorization, db)
     is_member = db.scalar(
@@ -87,10 +93,15 @@ def get_blob(
                 )
                 .exists(),
                 select(MediaSegment.id)
-                .join(MediaIndex).join(MediaVersion).join(LibraryMedia)
-                .where(LibraryMedia.project_id == project_id,
-                       LibraryMedia.deleted_at.is_(None),
-                       MediaSegment.frames.contains([{"hash": blob_hash}])).exists(),
+                .join(MediaIndex)
+                .join(MediaVersion)
+                .join(LibraryMedia)
+                .where(
+                    LibraryMedia.project_id == project_id,
+                    LibraryMedia.deleted_at.is_(None),
+                    MediaSegment.frames.contains([{"hash": blob_hash}]),
+                )
+                .exists(),
                 select(MediaVersion.id)
                 .join(LibraryMedia)
                 .where(
@@ -120,12 +131,17 @@ def get_blob(
                 .where(Asset.project_id == project_id, AssetReferenceImage.blob_hash == blob_hash)
                 .exists(),
                 select(Novel.id)
-                .where(Novel.project_id == project_id,
-                       or_(Novel.original_blob_hash == blob_hash, Novel.cover_blob_hash == blob_hash))
+                .where(
+                    Novel.project_id == project_id,
+                    or_(Novel.original_blob_hash == blob_hash, Novel.cover_blob_hash == blob_hash),
+                )
                 .exists(),
                 select(GeneratedMaterialState.generation_id)
                 .join(Generation, Generation.id == GeneratedMaterialState.generation_id)
-                .where(Generation.project_id == project_id, GeneratedMaterialState.poster_hash == blob_hash)
+                .where(
+                    Generation.project_id == project_id,
+                    GeneratedMaterialState.poster_hash == blob_hash,
+                )
                 .exists(),
                 select(Script.id)
                 .where(Script.project_id == project_id, Script.cover_blob_hash == blob_hash)
@@ -142,11 +158,68 @@ def get_blob(
     blob = db.get(Blob, blob_hash)
     if blob is None:
         raise NotFound("资源不存在")
+    if view and not download:
+        from app.core.config import settings
+        from app.models.storage import MediaRendition
+        from app.modules.media.renditions import lookup
+
+        supported = {
+            "thumbnail": ("image/", "video/"),
+            "display": ("image/",),
+            "playback": ("video/",),
+        }
+        if not blob.mime.startswith(supported[view]):
+            raise NotFound("该素材没有此类预览")
+        # Uploads already own a normalized playback file. Reuse it when a historical
+        # attachment or reference only knows the original hash.
+        upload_proxy = None
+        if view == "playback" and blob.mime.startswith("video/"):
+            upload_proxy = db.scalar(
+                select(MediaVersion.proxy_hash)
+                .join(LibraryMedia)
+                .where(
+                    LibraryMedia.project_id == project_id,
+                    LibraryMedia.deleted_at.is_(None),
+                    MediaVersion.original_hash == blob_hash,
+                    MediaVersion.proxy_hash.is_not(None),
+                    MediaVersion.status == "ready",
+                )
+                .order_by(MediaVersion.created_at.desc())
+                .limit(1)
+            )
+        rendition = db.get(Blob, upload_proxy) if upload_proxy else lookup(db, blob, view)
+        if rendition is None:
+            # Only explicit playback goes straight to the source during preparation.
+            # Redirect onto the stable original URL so a sequence of Range reads
+            # cannot mix bytes from before and after the playback copy was published.
+            pending = db.get(MediaRendition, blob.hash)
+            fallback_image = blob.mime.startswith("image/") and (
+                not settings.library_worker_enabled or (pending and pending.attempts)
+            )
+            if view == "playback" or fallback_image:
+                query = request.url.remove_query_params("view").query
+                location = request.url.path + (f"?{query}" if query else "")
+                return RedirectResponse(
+                    location, status_code=307, headers={"Cache-Control": "no-store"}
+                )
+            return Response(
+                status_code=503, headers={"Cache-Control": "no-store", "Retry-After": "2"}
+            )
+        blob = rendition
     # Streaming must not hold a DB pool connection for the duration of a long video.
     db.expunge(blob)
     db.commit()
     size = blob.size_bytes
-    headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=300"}
+    etag = f'"{blob.hash}"'
+    headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=300", "ETag": etag}
+    if if_none_match and any(
+        tag.strip().removeprefix("W/") in (etag, "*") for tag in if_none_match.split(",")
+    ):
+        return Response(status_code=304, headers=headers)
+    if if_range and if_range != etag:
+        range = None
+    if blob.mime.startswith("video/"):
+        headers["X-Accel-Buffering"] = "no"
     if download:
         ext = {
             "video/mp4": "mp4",
@@ -160,6 +233,7 @@ def get_blob(
             "audio/flac": "flac",
             "image/png": "png",
             "image/jpeg": "jpg",
+            "image/webp": "webp",
             "text/plain": "txt",
         }.get(blob.mime, "bin")
         headers["Content-Disposition"] = (
@@ -194,13 +268,15 @@ def get_blob(
 
     def chunks():
         remaining = length
+        chunk_size = 64 * 1024
         try:
             while remaining > 0:
-                chunk = stream.read(min(1024 * 1024, remaining))
+                chunk = stream.read(min(chunk_size, remaining))
                 if not chunk:
                     break
                 remaining -= len(chunk)
                 yield chunk
+                chunk_size = 256 * 1024
         finally:
             close()
 

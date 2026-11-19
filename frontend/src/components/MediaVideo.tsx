@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n";
+import { MediaImage } from "./MediaImage";
 import "./media-preview.css";
 
 const time = (value: number) => {
@@ -38,10 +39,10 @@ export function MediaVideo({
       onDimensions={onDimensions}
     />
   ) : (
-    <NativeVideo key={src} src={src} label={label} />
+    <NativeVideo key={src} src={src} label={label} poster={poster} />
   );
 }
-function NativeVideo({ src, label }: { src: string; label: string }) {
+function NativeVideo({ src, label, poster }: { src: string; label: string; poster?: string }) {
   const zh = useI18n().lang === "zh";
   const [failed, setFailed] = useState(false);
   if (failed)
@@ -56,8 +57,9 @@ function NativeVideo({ src, label }: { src: string; label: string }) {
       src={src}
       aria-label={label}
       controls
+      poster={poster}
       playsInline
-      preload="metadata"
+      preload={poster ? "none" : "metadata"}
       onError={() => setFailed(true)}
       className="h-full w-full bg-elevated object-contain"
     />
@@ -84,6 +86,7 @@ function VideoContent({
   const [muted, setMuted] = useState(false),
     [waiting, setWaiting] = useState(false);
   const [message, setMessage] = useState("");
+  const [hasFrame, setHasFrame] = useState(false);
   async function toggle() {
     const el = video.current;
     if (!el) return;
@@ -136,6 +139,7 @@ function VideoContent({
                 setWaiting(false);
                 setDuration(0);
                 setPosition(0);
+                setHasFrame(false);
               }}
             >
               <RotateCcw size={14} />
@@ -147,9 +151,8 @@ function VideoContent({
             <video
               ref={video}
               src={src}
-              poster={poster}
               aria-label={label}
-              preload="metadata"
+              preload={poster ? "none" : "metadata"}
               playsInline
               muted={muted}
               onLoadedMetadata={(e) => {
@@ -160,6 +163,7 @@ function VideoContent({
                 );
               }}
               onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
+              onLoadedData={() => setHasFrame(true)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
@@ -172,6 +176,7 @@ function VideoContent({
                 setWaiting(false);
               }}
             />
+            {poster && !hasFrame && <MediaImage src={poster} alt="" className="media-player-poster" onDimensions={onDimensions} />}
             <button
               type="button"
               className={`media-play-surface ${playing ? "is-playing" : ""}`}

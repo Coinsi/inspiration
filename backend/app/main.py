@@ -87,11 +87,15 @@ async def lifespan(app):
         processing_stop = start_processing()
         background_workers["media_processing"] = processing_stop.is_alive
     library_stop = None
+    rendition_stop = None
     if settings.library_worker_enabled:
         from app.modules.library.worker import start
+        from app.modules.media.renditions import start as start_renditions
 
         library_stop = start()
         background_workers["library"] = library_stop.is_alive
+        rendition_stop = start_renditions()
+        background_workers["media_renditions"] = rendition_stop.is_alive
     if settings.generation_executor == "local" and not settings.celery_eager:
         from app.modules.generation.jobs import recover_local
 
@@ -149,6 +153,8 @@ async def lifespan(app):
             await to_thread(canvas_stop)
         if library_stop:
             await to_thread(library_stop)
+        if rendition_stop:
+            await to_thread(rendition_stop)
         background_workers.clear()
 
 

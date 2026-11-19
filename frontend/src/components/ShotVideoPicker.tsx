@@ -135,7 +135,7 @@ export function ShotVideoPicker({
                         <MediaImage
                           src={
                             v.poster_hash
-                              ? blobUrl(projectId, v.poster_hash)
+                              ? blobUrl(projectId, v.poster_hash, "thumbnail")
                               : null
                           }
                           alt={v.name}

@@ -255,6 +255,7 @@ export function WorkbenchGallery({
                               ? blobUrl(
                                   projectId,
                                   asset.representative_blob_hash,
+                                  "thumbnail",
                                 )
                               : null
                           }

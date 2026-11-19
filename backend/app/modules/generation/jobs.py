@@ -773,7 +773,11 @@ def execute(db, job_id):
             if hasattr(provider, "actual_cost")
             else float(job.estimated_cost or 0)
         )
+        from app.modules.media import renditions
+
         for index, (blob, typ) in enumerate(blobs):
+            if provider_name != "mock":
+                renditions.enqueue(db, blob)
             db.add(
                 Generation(
                     project_id=job.project_id,

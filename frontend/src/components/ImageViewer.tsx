@@ -37,17 +37,22 @@ async function downloadImage(src: string, filename: string) {
 
 export function Lightbox({
   src,
+  previewSrc,
   alt,
   filename,
   onClose,
 }: {
   src: string;
+  previewSrc?: string;
   alt?: string;
   filename: string;
   onClose: () => void;
 }) {
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const [downloading, setDownloading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const dialogRef = useDialogFocus(true, onClose);
 
   const doDownload = async () => {
@@ -95,12 +100,29 @@ export function Lightbox({
           <X className="h-5 w-5" />
         </button>
       </div>
+      {previewSrc && previewSrc !== src && !loaded && (
+        <img src={previewSrc} alt="" aria-hidden="true" onClick={event => event.stopPropagation()}
+          className="absolute max-h-[calc(100%-4rem)] max-w-[calc(100%-4rem)] rounded-lg object-contain" />
+      )}
       <img
+        key={attempt}
         src={src}
         alt={alt}
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+        className={cn("relative max-h-full max-w-full rounded-lg object-contain shadow-2xl",
+          previewSrc && previewSrc !== src && !loaded && "opacity-0")}
       />
+      {failed && <button type="button"
+        className="absolute bottom-5 rounded-lg bg-black/70 px-4 py-2 text-sm text-white"
+        onClick={event => {
+          event.stopPropagation();
+          setFailed(false);
+          setAttempt(value => value + 1);
+        }}>
+        {lang === "zh" ? "原图加载失败，点击重试" : "Original unavailable. Retry"}
+      </button>}
     </div>,
     document.body,
   );
@@ -108,11 +130,13 @@ export function Lightbox({
 
 export function ZoomableImage({
   src,
+  previewSrc,
   alt,
   filename,
   className,
 }: {
   src: string;
+  previewSrc?: string;
   alt?: string;
   filename: string;
   className?: string;
@@ -143,7 +167,8 @@ export function ZoomableImage({
   return (
     <>
       <img
-        src={src}
+        src={previewSrc || src}
+        loading="lazy"
         alt={alt}
         role="button"
         onError={() => setFailed(src)}
@@ -165,6 +190,7 @@ export function ZoomableImage({
       {open && (
         <Lightbox
           src={src}
+          previewSrc={previewSrc}
           alt={alt}
           filename={filename}
           onClose={() => setOpen(false)}

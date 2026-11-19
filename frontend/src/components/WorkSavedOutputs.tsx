@@ -61,13 +61,15 @@ function FixedOutput({
         <div className="mb-3 overflow-hidden rounded-lg bg-black/10">
           {artifact.output_type === "image" ? (
             <img
-              src={blobUrl(projectId, artifact.blob_hash)}
+              src={blobUrl(projectId, artifact.blob_hash, "display")}
+              loading="lazy"
               alt={`${detail.data?.title} · 已采用修订预览`}
               className="max-h-64 w-full object-contain"
             />
           ) : artifact.output_type === "video" ? (
             <MediaVideo
-              src={blobUrl(projectId, artifact.blob_hash)}
+              src={blobUrl(projectId, artifact.blob_hash, "playback")}
+              poster={blobUrl(projectId, artifact.blob_hash, "thumbnail")}
               label={`${detail.data?.title} · 已采用修订预览`}
             />
           ) : (

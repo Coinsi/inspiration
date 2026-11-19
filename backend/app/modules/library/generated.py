@@ -49,7 +49,7 @@ def entry(db, g, job, blob):
         "description": metadata.description if metadata else "",
         "tags": metadata.tags if metadata else [],
         "metadata_revision": metadata.metadata_revision if metadata else 1,
-        "poster_hash": metadata.poster_hash if metadata else None,
+        "poster_hash": (metadata.poster_hash if metadata else None) or g.thumbnail_hash,
         "id": g.id,
         "work": {"id": work.id, "title": work.title, "script_id": work.script_id} if work else None,
         "job_id": job.id,

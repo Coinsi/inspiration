@@ -10,6 +10,8 @@ import {
   type GenJob,
   type Project,
 } from "@/lib/api";
+import { MediaVideo } from "@/components/MediaVideo";
+import { MediaImage } from "@/components/MediaImage";
 import { ACTIVE_JOBS, JOB_LABEL } from "@/lib/task-center";
 import { useAuth } from "@/lib/auth";
 import { Button } from "./ui/button";
@@ -326,14 +328,16 @@ function TestForm({
           return (
             <figure className="provider-result" key={g.id}>
               {g.output_type === "video" ? (
-                <video src={url} controls playsInline preload="metadata" />
+                <MediaVideo src={blobUrl(projectId, g.output_blob_hash!, "playback")}
+                  label="测试生成的视频" presentation="studio"
+                  poster={blobUrl(projectId, g.output_blob_hash!, "thumbnail")} />
               ) : (
                 <button
                   type="button"
                   aria-label="放大测试图片"
                   onClick={() => setExpanded(url)}
                 >
-                  <img src={url} alt="测试生成结果" />
+                  <MediaImage src={blobUrl(projectId, g.output_blob_hash!, "display")} alt="测试生成结果" />
                   <span>
                     <Expand size={16} />
                   </span>

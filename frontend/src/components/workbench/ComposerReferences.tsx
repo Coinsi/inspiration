@@ -18,11 +18,9 @@ export type ComposerReference = {
   thumbnail_hash?: string | null;
 };
 
-export function ReferencePreview({ projectId, item }: { projectId: string; item: ComposerReference }) {
+export function ReferencePreview({ projectId, item, priority }: { projectId: string; item: ComposerReference; priority?: boolean }) {
   if (item.kind === "audio") return <div className="composer-reference-video flex items-center justify-center"><FileAudio size={32} /></div>;
-  if (item.kind === "video" && !item.thumbnail_hash)
-    return <div className="composer-reference-video"><video src={blobUrl(projectId, item.blob_hash)} muted preload="metadata" aria-label={`参考视频 ${item.title}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>;
-  return <MediaImage src={blobUrl(projectId, item.thumbnail_hash || item.blob_hash)} alt={item.title} />;
+  return <MediaImage src={blobUrl(projectId, item.thumbnail_hash || item.blob_hash, "thumbnail")} alt={item.title} priority={priority} />;
 }
 export function ComposerReferences({
   projectId,
@@ -72,7 +70,7 @@ export function ComposerReferences({
         <p role="status">正在读取素材…</p>
       ) : (
         <div className="composer-reference-grid">
-          {images.data.items.map((item) => {
+          {images.data.items.map((item, index) => {
             const isSelected = selected.some(r => r.id === item.id && (r.source_type || "generation") === (item.source_type || "generation"));
             const candidate = { ...item, role: "reference" as const };
             const state = selection ? referencePickState(selection, candidate) : { role: candidate.role, problem: "" };
@@ -87,7 +85,7 @@ export function ComposerReferences({
               title={problem || (isSelected ? "已选择，点击移除" : undefined)}
               onClick={() => pick({ ...item, role: state.role })}
             >
-              <ReferencePreview projectId={projectId} item={candidate} />
+              <ReferencePreview projectId={projectId} item={candidate} priority={index === 0} />
               <span>{item.kind === "video" ? "视频 · " : item.kind === "audio" ? "音频 · " : "图片 · "}{item.title}</span>
               {problem && <small className="reference-selection-reason">{problem}</small>}
               {isSelected && <small className="reference-selection-status">已选择 · 点击移除</small>}

@@ -37,7 +37,9 @@ const film = await readFile(resolve('public/media/home-reference-updream.mp4'));
 const svg = index => `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="${index === '1' ? '#263640' : '#3e393b'}"/><path d="M140 450 L290 170 L510 170 L660 450" fill="#6f7f85"/><rect x="350" y="90" width="100" height="250" rx="50" fill="#202529"/></svg>`;
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://fixture.local');
-  if (url.pathname.includes('/blobs/image')) { res.setHeader('Content-Type', 'image/svg+xml'); res.end(svg(url.pathname.at(-1))); return; }
+  if (url.searchParams.get('view') === 'thumbnail' || url.pathname.includes('/blobs/image')) {
+    res.setHeader('Content-Type', 'image/svg+xml'); res.end(svg(url.pathname.at(-1))); return;
+  }
   if (url.pathname.includes('/blobs/video')) { res.setHeader('Content-Type', 'video/mp4'); res.end(film); return; }
   if (url.pathname.startsWith('/api/')) { res.statusCode = 500; res.end('Unexpected API request'); return; }
   const name = ({'/fixture.js':'fixture.js','/fixture.css':'fixture.css','/production.css':'production.css'})[url.pathname] || 'index.html';
@@ -48,7 +50,11 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  const errors = [], writes = [];
+  const errors = [], writes = [], videoRequests = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.includes('/blobs/video') && url.searchParams.get('view') !== 'thumbnail') videoRequests.push(url.pathname);
+  });
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()); });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -93,9 +99,13 @@ try {
   assert.equal(await page.getByRole('dialog').count(),0);
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'target-composer');
   await page.evaluate(() => window.changeKind('video'));
-  await page.waitForFunction(() => [...document.querySelectorAll('video')].length === 2 && [...document.querySelectorAll('video')].every(v=>v.readyState >= 1));
+  await page.waitForFunction(() => document.querySelectorAll('video').length === 2 &&
+    [...document.querySelectorAll('.media-player-poster img')].some(img => img.complete && img.naturalWidth));
+  assert.deepEqual(videoRequests, [], 'Opening the conversation should only fetch posters.');
   await page.locator('.conversation-result-more > summary').first().click();
   await page.getByRole('button',{name:'选择片段讨论',exact:true}).first().click();
+  await page.waitForFunction(() => document.querySelector('video').duration > 0);
+  assert.ok(videoRequests.length && videoRequests.every(path => path.endsWith('/video1')));
   await page.getByRole('spinbutton',{name:'视频 1 / 2讨论开始秒数',exact:true}).fill('0.1');
   await page.getByRole('spinbutton',{name:'视频 1 / 2讨论结束秒数',exact:true}).fill('0.5');
   await page.getByRole('button',{name:'带入对话',exact:true}).click();
@@ -105,6 +115,9 @@ try {
   await page.getByRole('spinbutton',{name:'视频 1 / 2讨论结束秒数',exact:true}).fill('1');
   assert.equal(await page.getByRole('button',{name:'带入对话',exact:true}).isDisabled(),true);
   await page.getByRole('button',{name:'取消',exact:true}).click();
+  await page.getByRole('button',{name:'播放视频',exact:true}).nth(1).click();
+  await page.waitForFunction(() => document.querySelectorAll('video')[1].currentTime > 0);
+  await page.getByRole('button',{name:'暂停视频',exact:true}).click();
   await page.getByRole('button',{name:'对比这两个结果',exact:true}).click();
   await page.getByRole('dialog').waitFor();
   assert.equal(await page.getByRole('dialog').locator('video').count(),2);

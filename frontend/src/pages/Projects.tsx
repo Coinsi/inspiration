@@ -295,7 +295,7 @@ export default function Projects() {
                         {p.cover_blob_hash ? (
                           <img
                             className="project-cover-image"
-                            src={blobUrl(p.id, p.cover_blob_hash)}
+                            src={blobUrl(p.id, p.cover_blob_hash, "thumbnail")}
                             alt={`${p.name} · ${zh ? "项目封面" : "Project cover"}`}
                             loading="lazy"
                           />

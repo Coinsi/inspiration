@@ -21,6 +21,8 @@ def sources():
         if table.name in {"blob", "blob_deletion"}:
             continue
         for column in table.columns:
+            if table.name == "media_rendition" and column.name == "source_hash":
+                continue  # A cache entry never keeps an unused original alive.
             if any(fk.target_fullname == "blob.hash" for fk in column.foreign_keys):
                 result.append((table, column, "foreign_key"))
             elif isinstance(column.type, JSON):
@@ -35,6 +37,8 @@ def inspect_blob(db, digest):
     reasons = []
     for table, column, kind in sources():
         predicate = column == digest
+        if table.name == "media_rendition":
+            predicate &= table.c.source_hash != digest
         if kind != "foreign_key":
             value = cast(column, JSONB)
             variables = cast({"digest": digest}, JSONB)

@@ -570,25 +570,6 @@
   }
 }
 
-.material-video-cover {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-}
-.material-video-cover video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0;
-  pointer-events: none;
-}
-.material-video-cover video.is-ready {
-  opacity: 1;
-}
 .unified-materials.studio-page {
   padding-top: 20px;
 }

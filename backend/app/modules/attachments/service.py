@@ -178,6 +178,9 @@ def complete(db, ctx, attachment_id):
         db, path, info["mime"], **{key: info[key] for key in ("width", "height", "duration_ms")}
     )
     item.blob_hash = blob.hash
+    from app.modules.media import renditions
+
+    renditions.enqueue(db, blob)
     # Original images are already validated. Thumbnail generation must not block use.
     item.thumbnail_hash = blob.hash if item.kind == "image" else None
     for key in ("width", "height", "duration_ms", "has_audio"):

@@ -73,6 +73,12 @@ def claim(db, operation_id):
     ):
         operation.status = "canceled"
         return operation
+    # CAS retains the blob row as a tombstone. Release presentation copies with their source.
+    from app.models.storage import MediaRendition
+
+    cached = db.get(MediaRendition, blob.hash)
+    if cached:
+        db.delete(cached)
     operation.status = "deleting"
     operation.last_error = None
     db.flush()

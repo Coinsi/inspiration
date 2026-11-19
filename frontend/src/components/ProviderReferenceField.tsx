@@ -41,7 +41,7 @@ export function ProviderReferenceField({
   const previewUrl =
     preview?.preview_url ||
     (projectId && preview?.attachment?.blob_hash
-      ? blobUrl(projectId, preview.attachment.blob_hash)
+      ? blobUrl(projectId, preview.attachment.blob_hash, preview.kind === "video" ? "playback" : undefined)
       : "");
   const label = videos ? "参考素材（可选）" : "参考图（可选）";
   const disabledInput = disabled || !files || !projectId;
@@ -116,10 +116,10 @@ export function ProviderReferenceField({
           {items.map((item, index) => {
             const hash =
               item.attachment?.thumbnail_hash ||
-              (item.kind === "image" && item.attachment?.blob_hash);
+              item.attachment?.blob_hash;
             const src =
               item.preview_url ||
-              (projectId && hash ? blobUrl(projectId, hash) : "");
+              (projectId && hash ? blobUrl(projectId, hash, "thumbnail") : "");
             const progress = Math.min(
               100,
               Math.round(

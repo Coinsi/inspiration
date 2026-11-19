@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { Link } from "react-router-dom";
 import {
@@ -294,8 +294,8 @@ export function ConversationMediaResults({
           simulated={simulated}
           onRecreate={onRecreate}
           onReference={onReference}
-          src={blobUrl(projectId, output.blob_hash)}
-          poster={output.thumbnail_hash ? blobUrl(projectId, output.thumbnail_hash) : undefined}
+          src={blobUrl(projectId, output.blob_hash, output.type === "video" ? "playback" : undefined)}
+          poster={output.type === "video" ? blobUrl(projectId, output.thumbnail_hash || output.blob_hash, "thumbnail") : undefined}
         />
       ))}
     </div>
@@ -307,8 +307,8 @@ export function ConversationMediaResults({
           taskHref={taskHref} returnTo={returnTo} simulated={simulated}
           onRecreate={onRecreate ? item => leaveComparison(() => onRecreate(item)) : undefined}
           onReference={onReference ? (item, selection) => leaveComparison(() => onReference(item, selection)) : undefined}
-          src={blobUrl(projectId, output.blob_hash)}
-          poster={output.thumbnail_hash ? blobUrl(projectId, output.thumbnail_hash) : undefined} />)}
+          src={blobUrl(projectId, output.blob_hash, output.type === "video" ? "playback" : undefined)}
+          poster={output.type === "video" ? blobUrl(projectId, output.thumbnail_hash || output.blob_hash, "thumbnail") : undefined} />)}
       </div>
     </Modal>}
     </>
@@ -346,6 +346,7 @@ export function ConversationMediaCard({
 } & ResultActions) {
   const [ratio, setRatio] = useState(16 / 9);
   const [preview, setPreview] = useState(false);
+  const figure = useRef<HTMLElement>(null);
   const [rangeOpen, setRangeOpen] = useState(false);
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
@@ -362,6 +363,7 @@ export function ConversationMediaCard({
   };
   return (
     <figure
+      ref={figure}
       className="conversation-media-result"
       onLoadedMetadataCapture={event => {
         const video = event.target;
@@ -387,7 +389,7 @@ export function ConversationMediaCard({
           aria-label="放大查看图片"
         >
           <MediaImage
-            src={src}
+            src={projectId ? blobUrl(projectId, output.blob_hash, "display") : src}
             alt={`本轮生成的${resultLabel}`}
             onDimensions={dimensions}
           />
@@ -424,9 +426,15 @@ export function ConversationMediaCard({
             <Film size={14} />{isImage ? "生成视频" : "用作视频参考"}
           </button>}
           {onRecreate && <button type="button" disabled={disabled} title="将原要求放回输入框，调整后再发送" onClick={() => onRecreate(output)}><RotateCcw size={14} />调整原要求</button>}
-          {!isImage && onReference && <button type="button" disabled={disabled || duration <= 0}
-            title={duration > 0 ? "选择时间范围，带回对话讨论" : "视频加载后可选择片段"}
-            onClick={() => { setRangeOpen(true); setRangeStart(String(Math.floor(position * 100) / 100)); }}>
+          {!isImage && onReference && <button type="button" disabled={disabled}
+            title="选择时间范围，带回对话讨论"
+            onClick={() => {
+              if (!duration) {
+                const player = figure.current?.querySelector("video");
+                if (player) { player.preload = "metadata"; player.load(); }
+              }
+              setRangeOpen(true); setRangeStart(String(Math.floor(position * 100) / 100));
+            }}>
             <Scissors size={14} />选择片段讨论
           </button>}
           {projectId && <Link
@@ -462,6 +470,7 @@ export function ConversationMediaCard({
       {preview && (
         <Lightbox
           src={src}
+          previewSrc={projectId ? blobUrl(projectId, output.blob_hash, "display") : undefined}
           alt="生成图片预览"
           filename="生成图片"
           onClose={() => setPreview(false)}

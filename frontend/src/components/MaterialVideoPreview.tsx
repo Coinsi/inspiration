@@ -8,6 +8,7 @@ export function MaterialVideoPreview({
   poster,
   label,
   active,
+  priority,
   onActiveChange,
   onOpen,
 }: {
@@ -15,6 +16,7 @@ export function MaterialVideoPreview({
   poster?: string;
   label: string;
   active: boolean;
+  priority?: boolean;
   onActiveChange: (active: boolean) => void;
   onOpen: () => void;
 }) {
@@ -101,7 +103,7 @@ export function MaterialVideoPreview({
         }}
       >
         {poster ? (
-          <MediaImage src={poster} alt={label} />
+          <MediaImage src={poster} alt={label} priority={priority} />
         ) : (
           <span className="material-video-placeholder">
             <Film size={32} />
@@ -111,7 +113,6 @@ export function MaterialVideoPreview({
         {active && (
           <video
             ref={video}
-            src={src}
             muted
             playsInline
             loop
