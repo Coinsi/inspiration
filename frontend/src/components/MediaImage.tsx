@@ -8,6 +8,7 @@ type MediaImageProps = {
   alt: string;
   className?: string;
   priority?: boolean;
+  deferUntilVisible?: boolean;
   onDimensions?: (width: number, height: number) => void;
 };
 
@@ -19,6 +20,7 @@ function MediaImageContent({
   alt,
   className,
   priority,
+  deferUntilVisible,
   onDimensions,
 }: MediaImageProps) {
   const { lang } = useI18n();
@@ -26,6 +28,21 @@ function MediaImageContent({
     src ? "loading" : "error",
   );
   const [attempt, setAttempt] = useState(0);
+  const container = useRef<HTMLDivElement>(null);
+  const [nearby, setNearby] = useState(false);
+  const deferred = deferUntilVisible && !priority && typeof IntersectionObserver !== "undefined";
+  useEffect(() => {
+    const node = container.current;
+    if (!deferred || !node || !src) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setNearby(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: "160px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [deferred, src]);
   const retryTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(retryTimer.current), []);
   function onError() {
@@ -39,12 +56,13 @@ function MediaImageContent({
   }
   return (
     <div
+      ref={container}
       className={cn(
         "relative h-full w-full overflow-hidden bg-elevated",
         className,
       )}
     >
-      {src && (
+      {src && (!deferred || nearby) && (
         <img
           key={attempt}
           src={src}

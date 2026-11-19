@@ -103,7 +103,7 @@ export function MaterialVideoPreview({
         }}
       >
         {poster ? (
-          <MediaImage src={poster} alt={label} priority={priority} />
+          <MediaImage src={poster} alt={label} priority={priority} deferUntilVisible />
         ) : (
           <span className="material-video-placeholder">
             <Film size={32} />

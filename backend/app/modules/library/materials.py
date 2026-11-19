@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import String, and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import String, and_, case, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import aliased
 
 from app.core import audit
@@ -29,42 +29,6 @@ def catalog(
     limit=24,
     user_id=None,
 ):
-    variant = aliased(Generation)
-    adopted = (
-        select(variant.id)
-        .where(
-            variant.project_id == project_id,
-            or_(
-                variant.id == Generation.id,
-                variant.input_refs["adoption_source_id"].astext == cast(Generation.id, String),
-            ),
-            or_(
-                and_(
-                    variant.target_type == "shot",
-                    select(Shot.id)
-                    .where(
-                        Shot.id == variant.target_id,
-                        Shot.deleted_at.is_(None),
-                        Shot.selected_generation_id == variant.id,
-                    )
-                    .exists(),
-                ),
-                and_(
-                    variant.target_type == "asset",
-                    variant.is_selected.is_(True),
-                    select(Asset.id)
-                    .where(
-                        Asset.id == variant.target_id,
-                        Asset.deleted_at.is_(None),
-                        Asset.representative_blob_hash == variant.output_blob_hash,
-                    )
-                    .exists(),
-                ),
-            ),
-        )
-        .correlate(Generation)
-        .exists()
-    )
     latest = (
         select(MediaVersion.id)
         .where(MediaVersion.media_id == LibraryMedia.id)
@@ -91,11 +55,14 @@ def catalog(
             MediaVersion.size_bytes.label("size_bytes"),
             MediaVersion.duration_ms.label("duration_ms"),
             cast(MediaVersion.id, String).label("version_id"),
-            (LibraryMedia.description + " " + cast(LibraryMedia.tags, String)).label(
-                "search_extra"
-            ),
+            (
+                func.coalesce(MediaVersion.filename, "")
+                + " "
+                + LibraryMedia.description
+                + " "
+                + cast(LibraryMedia.tags, String)
+            ).label("search_extra"),
             literal(False).label("is_test"),
-            literal(False).label("adopted"),
         )
         .select_from(LibraryMedia)
         .outerjoin(MediaVersion, MediaVersion.id == latest)
@@ -132,7 +99,6 @@ def catalog(
             + " "
             + func.coalesce(cast(GeneratedMaterialState.tags, String), ""),
             (Generation.provider == "mock"),
-            adopted,
         )
         .select_from(Generation)
         .join(GenerationJob, Generation.job_id == GenerationJob.id)
@@ -166,7 +132,6 @@ def catalog(
         literal(None, type_=String),
         Asset.code,
         literal(False),
-        literal(False),
     ).where(Asset.project_id == project_id, Asset.deleted_at.is_not(None))
     parts = [uploads, outputs] + ([entities] if deleted else [])
     if user_id:
@@ -194,7 +159,6 @@ def catalog(
                 + " "
                 + cast(Attachment.tags, String),
                 literal(False),
-                literal(False),
             ).where(
                 Attachment.project_id == project_id,
                 Attachment.created_by == user_id,
@@ -212,15 +176,59 @@ def catalog(
         conditions.append(rows.c.source == source)
     if kind:
         conditions.append(rows.c.kind == kind)
-    stmt = select(rows).where(*conditions)
-    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    result = db.execute(
-        stmt.order_by(rows.c.created_at.desc(), rows.c.source, rows.c.id)
+    total = db.scalar(select(func.count()).select_from(rows).where(*conditions))
+    page = (
+        select(*(column for column in rows.c if column.key != "search_extra"))
+        .where(*conditions)
+        .order_by(rows.c.created_at.desc(), rows.c.source, rows.c.id)
         .offset(offset)
         .limit(limit)
+        .subquery()
+    )
+    # Adoption is a property of a displayed result, never a catalog filter.
+    variant = aliased(Generation)
+    adopted = (
+        select(variant.id)
+        .where(
+            variant.project_id == project_id,
+            or_(
+                variant.id == page.c.id,
+                variant.input_refs["adoption_source_id"].astext == cast(page.c.id, String),
+            ),
+            or_(
+                and_(
+                    variant.target_type == "shot",
+                    select(Shot.id)
+                    .where(
+                        Shot.id == variant.target_id,
+                        Shot.deleted_at.is_(None),
+                        Shot.selected_generation_id == variant.id,
+                    )
+                    .exists(),
+                ),
+                and_(
+                    variant.target_type == "asset",
+                    variant.is_selected.is_(True),
+                    select(Asset.id)
+                    .where(
+                        Asset.id == variant.target_id,
+                        Asset.deleted_at.is_(None),
+                        Asset.representative_blob_hash == variant.output_blob_hash,
+                    )
+                    .exists(),
+                ),
+            ),
+        )
+        .correlate(page)
+        .exists()
+    )
+    result = db.execute(
+        select(
+            page, case((page.c.source == "generated", adopted), else_=False).label("adopted")
+        ).order_by(page.c.created_at.desc(), page.c.source, page.c.id)
     ).mappings()
     return {
-        "items": [{k: v for k, v in dict(r).items() if k != "search_extra"} for r in result],
+        "items": [dict(row) for row in result],
         "total": total,
         "offset": offset,
         "limit": limit,

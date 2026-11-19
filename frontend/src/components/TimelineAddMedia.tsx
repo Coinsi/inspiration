@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LibraryUpload } from "./LibraryUpload";
-import {
-  LibraryVersionPicker,
-  useLibraryVersion,
-} from "./LibraryVersionPicker";
+import { useLibraryVersion } from "./LibraryVersionPicker";
+import { TimelineSourcePicker } from "./TimelineSourcePicker";
+import { timelineSources, type TimelineSource } from "@/lib/timeline-sources";
 import { Modal } from "./ui/modal";
 import { Button } from "./ui/button";
 import { api } from "@/lib/api";
@@ -39,21 +38,43 @@ export function TimelineAddMedia({
 }) {
   const zh = useI18n().lang === "zh";
   const qc = useQueryClient();
-  const [version, setVersion] = useState("");
+  const [selected, setSelected] = useState<TimelineSource | null>(null);
   const [filter, setFilter] = useState<MediaType | "all">(mediaType);
   const [uploading, setUploading] = useState(false);
   const [justUploaded, setJustUploaded] = useState("");
-  const selected = useLibraryVersion(projectId, version, true);
+  const uploaded = useLibraryVersion(projectId, justUploaded, true);
   useEffect(() => {
-    if (justUploaded !== version || !version || selected.data?.status !== "ready") return;
+    const file = uploaded.data;
+    if (
+      !justUploaded ||
+      file?.id !== justUploaded ||
+      file.status !== "ready" ||
+      !file.original_hash
+    )
+      return;
+    setSelected({
+      id: file.id,
+      source_type: "media_version",
+      kind: file.media_type,
+      title: file.name,
+      blob_hash: file.original_hash,
+      thumbnail_hash: file.poster_hash,
+      duration_ms: file.duration_ms,
+      ordinal: file.ordinal,
+    });
     setJustUploaded("");
-    void qc.invalidateQueries({ queryKey: ["library-version-catalog", projectId] });
-  }, [justUploaded, version, selected.data?.status, qc, projectId]);
-  const isAudio = selected.data?.media_type === "audio";
+    void qc.invalidateQueries({ queryKey: ["materials", projectId] });
+  }, [justUploaded, uploaded.data, qc, projectId]);
+  const refreshUploads = () => {
+    for (const key of ["materials", "library-version-catalog"]) {
+      void qc.invalidateQueries({ queryKey: [key, projectId] });
+    }
+  };
+  const isAudio = selected?.kind === "audio";
   const add = useMutation({
-    mutationFn: () =>
+    mutationFn: (source: TimelineSource) =>
       api.post<EditingSource>(
-        `/projects/${projectId}/timelines/${timelineId}/library-sources/${version}`,
+        `/projects/${projectId}/timelines/${timelineId}/sources/${source.source_type}/${source.id}`,
         {},
       ),
     onSuccess: (source) => {
@@ -66,24 +87,15 @@ export function TimelineAddMedia({
       <LibraryUpload
         projectId={projectId}
         mediaType={filter === "all" ? undefined : filter}
-        onImported={file => {
+        onImported={(file) => {
           setFilter(mediaType === "audio" ? "audio" : file.media_type);
-          setVersion(file.id);
+          setSelected(null);
           setJustUploaded(file.id);
           setUploading(false);
-          void qc.invalidateQueries({ queryKey: ["library-version-catalog", projectId] });
+          refreshUploads();
         }}
-        onChange={() => {
-          void qc.invalidateQueries({
-            queryKey: ["library-version-catalog", projectId],
-          });
-        }}
-        onClose={() => {
-          setUploading(false);
-          void qc.invalidateQueries({
-            queryKey: ["library-version-catalog", projectId],
-          });
-        }}
+        onChange={refreshUploads}
+        onClose={() => setUploading(false)}
       />
     );
   return (
@@ -109,9 +121,20 @@ export function TimelineAddMedia({
                   key={type}
                   aria-pressed={filter === type}
                   disabled={add.isPending}
+                  onPointerEnter={() =>
+                    void qc.prefetchInfiniteQuery(
+                      timelineSources(projectId, type),
+                    )
+                  }
+                  onFocus={() =>
+                    void qc.prefetchInfiniteQuery(
+                      timelineSources(projectId, type),
+                    )
+                  }
                   onClick={() => {
                     setFilter(type);
-                    setVersion("");
+                    setSelected(null);
+                    setJustUploaded("");
                     add.reset();
                   }}
                 >
@@ -135,29 +158,41 @@ export function TimelineAddMedia({
             {zh ? "本地上传" : "Upload file"}
           </Button>
         </div>
-        <LibraryVersionPicker
-          projectId={projectId}
-          value={version}
-          onChange={(id) => {
-            setVersion(id);
+        <TimelineSourcePicker
+          project={projectId}
+          filter={filter}
+          selected={selected}
+          onSelect={(source) => {
+            setSelected(source);
+            setJustUploaded("");
             add.reset();
           }}
-          label={zh ? "素材库" : "Media library"}
-          mediaType={filter}
-          gallery
           disabled={add.isPending}
         />
-        {selected.data &&
-          ["queued", "processing"].includes(selected.data.status) && (
+        {justUploaded &&
+          !uploaded.isError &&
+          uploaded.data?.status !== "failed" && (
             <p role="status" className="text-sm text-muted-foreground">
               {zh
                 ? "正在处理刚上传的素材，就绪后可直接加入剪辑。"
                 : "Preparing your upload. Add it as soon as it is ready."}
             </p>
           )}
-        {selected.data?.status === "failed" && (
+        {justUploaded && uploaded.isError && (
+          <p role="alert">
+            {zh ? "未能读取上传状态。" : "Could not read upload status."}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void uploaded.refetch()}
+            >
+              {zh ? "重试" : "Retry"}
+            </Button>
+          </p>
+        )}
+        {uploaded.data?.status === "failed" && (
           <p role="alert" className="text-sm text-danger">
-            {selected.data.error ||
+            {uploaded.data.error ||
               (zh
                 ? "素材处理失败，请检查文件后重新上传。"
                 : "Media processing failed. Check the file and try again.")}
@@ -173,9 +208,6 @@ export function TimelineAddMedia({
         {isAudio && audioFull && (
           <p role="status">最多可添加 24 段声音，请先移除不需要的音轨。</p>
         )}
-        {isAudio && !selected.data?.duration_ms && (
-          <p role="status">音频缺少时长信息，请等待素材处理完成或重新上传。</p>
-        )}
         {!isAudio && pictureFull && (
           <p role="status">
             {zh
@@ -188,22 +220,27 @@ export function TimelineAddMedia({
             {add.error.message}
           </p>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2">
+          {selected && (
+            <span
+              className="mr-auto truncate text-sm text-muted-foreground"
+              title={selected.title}
+            >
+              {zh ? "已选 · " : "Selected · "}
+              {selected.title}
+            </span>
+          )}
           <Button variant="ghost" disabled={add.isPending} onClick={onClose}>
             {zh ? "取消" : "Cancel"}
           </Button>
           <Button
             disabled={
-              !selected.data ||
-              selected.data.status !== "ready" ||
+              !selected ||
               add.isPending ||
-              (isAudio &&
-                (remainingMs <= 0 ||
-                  audioFull ||
-                  !selected.data.duration_ms)) ||
+              (isAudio && (remainingMs <= 0 || audioFull)) ||
               (!isAudio && pictureFull)
             }
-            onClick={() => add.mutate()}
+            onClick={() => selected && add.mutate(selected)}
           >
             {add.isPending
               ? zh

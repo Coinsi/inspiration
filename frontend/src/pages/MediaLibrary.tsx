@@ -146,6 +146,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
       setPage(Math.max(0, Math.ceil(list.data.total / 24) - 1));
   }, [list.data, page]);
   const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["materials", projectId] });
     void qc.invalidateQueries({ queryKey: ["library-folders", projectId] });
     void qc.invalidateQueries({ queryKey: ["library", projectId] });
     void qc.invalidateQueries({ queryKey: ["library-item", projectId] });

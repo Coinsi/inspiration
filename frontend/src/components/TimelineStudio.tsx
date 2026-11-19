@@ -21,6 +21,7 @@ import {
   type TimelineContent,
   type TimelineDocument,
 } from "@/lib/timeline-edit";
+import { timelineSources } from "@/lib/timeline-sources";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -194,6 +195,9 @@ function TimelineDraft({
   const { lang } = useI18n();
   const zh = lang === "zh";
   const qc = useQueryClient();
+  useEffect(() => {
+    void qc.prefetchInfiniteQuery(timelineSources(projectId));
+  }, [qc, projectId]);
   const toast = useToast();
   const base = `/projects/${projectId}`;
   const navigate = useNavigate();

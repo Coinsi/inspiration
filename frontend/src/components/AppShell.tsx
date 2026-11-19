@@ -1,5 +1,6 @@
 import { StudioSelect } from "@/components/ui/studio-select";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { materialCatalog } from "@/lib/material-catalog";
 import {
   Clapperboard,
   Folder,
@@ -40,6 +41,10 @@ const COLLAPSE_KEY = "inspiration_sidebar_collapsed";
 
 export default function AppShell() {
   const { projectId } = useParams();
+  const queryClient = useQueryClient();
+  const warmMaterials = () => {
+    if (projectId) void queryClient.prefetchQuery(materialCatalog(projectId));
+  };
   const location = useLocation();
   const taskReturnParams = new URLSearchParams(location.search);
   taskReturnParams.delete("message");
@@ -268,6 +273,8 @@ export default function AppShell() {
               <div key={stage.id}>
                 <div className="flex items-center gap-1">
                   <NavLink
+                    onPointerEnter={stage.id === "media" ? warmMaterials : undefined}
+                    onFocus={stage.id === "media" ? warmMaterials : undefined}
                     to={
                       stage.id === "media"
                         ? `/projects/${projectId}/materials${activeStage?.id !== "media" ? `?return=${encodeURIComponent(location.pathname + location.search)}` : ""}`

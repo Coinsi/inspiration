@@ -4,10 +4,11 @@ import uuid
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_serializer, model_validator
-from sqlalchemy import String, and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import Integer, String, and_, cast, func, literal, or_, select, union_all
 
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.models.asset import Asset
+from app.models.attachment import Attachment
 from app.models.creation import Creation
 from app.models.generation import Generation
 from app.models.library import LibraryMedia, MediaVersion
@@ -62,8 +63,6 @@ class Reference(BaseModel):
 def resolve(db, project_id, reference, *, user_id=None, allow_audio=False):
     ref = reference if isinstance(reference, Reference) else Reference.model_validate(reference)
     if ref.attachment_id:
-        from app.models.attachment import Attachment
-
         row = (
             db.scalar(
                 select(Attachment).where(
@@ -94,7 +93,12 @@ def resolve(db, project_id, reference, *, user_id=None, allow_audio=False):
         if state and state.deleted_at:
             raise NotFound("素材已移入回收站")
         blob_hash, kind = item.output_blob_hash, item.output_type
-        title = (state.name if state else None) or item.prompt_snapshot or "项目素材"
+        title = (
+            (state.name if state else None)
+            or (item.input_refs or {}).get("filename")
+            or item.prompt_snapshot
+            or "项目素材"
+        )
         thumbnail = (state.poster_hash if state else None) or item.thumbnail_hash
     if kind not in (("image", "video", "audio") if allow_audio else ("image", "video")):
         raise CapabilityUnsupported("当前生成接口不支持音频参考，可在文字对话中添加音频讨论或处理")
@@ -113,22 +117,22 @@ def resolve(db, project_id, reference, *, user_id=None, allow_audio=False):
     }
 
 
-def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24):
+def _upload_rows(project_id, *, all_versions):
     # A pending new upload must not hide the preceding usable version. Selection
     # always stores its exact version ID; it never follows a mutable "latest" link.
-    latest_ready = (
-        select(MediaVersion.id)
-        .where(
-            MediaVersion.media_id == LibraryMedia.id,
-            MediaVersion.status == "ready",
-            MediaVersion.original_hash.is_not(None),
+    ready = (MediaVersion.status == "ready", MediaVersion.original_hash.is_not(None))
+    join_version = MediaVersion.media_id == LibraryMedia.id
+    if not all_versions:
+        latest_ready = (
+            select(MediaVersion.id)
+            .where(MediaVersion.media_id == LibraryMedia.id, *ready)
+            .order_by(MediaVersion.ordinal.desc())
+            .limit(1)
+            .correlate(LibraryMedia)
+            .scalar_subquery()
         )
-        .order_by(MediaVersion.ordinal.desc())
-        .limit(1)
-        .correlate(LibraryMedia)
-        .scalar_subquery()
-    )
-    uploads = (
+        join_version = MediaVersion.id == latest_ready
+    return (
         select(
             MediaVersion.id.label("id"),
             literal("media_version").label("source_type"),
@@ -137,8 +141,12 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
             MediaVersion.media_type.label("kind"),
             MediaVersion.poster_hash.label("thumbnail_hash"),
             MediaVersion.created_at.label("created_at"),
+            MediaVersion.ordinal.label("ordinal"),
+            MediaVersion.duration_ms.label("source_duration"),
             (
                 LibraryMedia.name
+                + " "
+                + MediaVersion.filename
                 + " "
                 + LibraryMedia.description
                 + " "
@@ -146,9 +154,12 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
             ).label("search_text"),
         )
         .select_from(LibraryMedia)
-        .join(MediaVersion, MediaVersion.id == latest_ready)
-        .where(LibraryMedia.project_id == project_id, LibraryMedia.deleted_at.is_(None))
+        .join(MediaVersion, join_version)
+        .where(LibraryMedia.project_id == project_id, LibraryMedia.deleted_at.is_(None), *ready)
     )
+
+
+def _generation_rows(project_id):
     targets = []
     for name, model in (
         ("asset", Asset),
@@ -167,9 +178,12 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
             )
         )
     title = func.coalesce(
-        GeneratedMaterialState.name, func.nullif(Generation.prompt_snapshot, ""), "项目素材"
+        GeneratedMaterialState.name,
+        Generation.input_refs["filename"].astext,
+        func.nullif(Generation.prompt_snapshot, ""),
+        "项目素材",
     )
-    generated = (
+    return (
         select(
             Generation.id,
             literal("generation"),
@@ -178,9 +192,15 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
             Generation.output_type,
             func.coalesce(GeneratedMaterialState.poster_hash, Generation.thumbnail_hash),
             Generation.created_at,
+            literal(None, type_=Integer),
+            literal(None, type_=Integer),
             title
             + " "
             + func.coalesce(Generation.prompt_snapshot, "")
+            + " "
+            + func.coalesce(Generation.input_refs["filename"].astext, "")
+            + " "
+            + func.coalesce(Generation.model, "")
             + " "
             + func.coalesce(GeneratedMaterialState.description, "")
             + " "
@@ -191,17 +211,51 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
             Generation.project_id == project_id,
             Generation.output_blob_hash.is_not(None),
             GeneratedMaterialState.deleted_at.is_(None),
+            Generation.input_refs["operation"].astext.is_distinct_from(
+                "timeline_attachment_source"
+            ),
             or_(*targets),
         )
     )
-    rows = union_all(uploads, generated).subquery()
-    kinds = (
-        ("image", "video", "audio")
-        if media_type == "any"
-        else (("image", "video") if media_type == "all" else (media_type,))
+
+
+def _saved_attachment_rows(project_id, user_id):
+    return select(
+        Attachment.id,
+        literal("attachment"),
+        Attachment.title,
+        Attachment.blob_hash,
+        Attachment.kind,
+        Attachment.thumbnail_hash,
+        Attachment.saved_at,
+        literal(None, type_=Integer),
+        Attachment.duration_ms,
+        Attachment.title
+        + " "
+        + Attachment.filename
+        + " "
+        + Attachment.description
+        + " "
+        + cast(Attachment.tags, String),
+    ).where(
+        Attachment.project_id == project_id,
+        Attachment.created_by == user_id,
+        Attachment.saved_at.is_not(None),
+        Attachment.hidden_at.is_(None),
+        Attachment.status == "ready",
     )
+
+
+def _page(db, sources, kinds, query, offset, limit, *, editing=False):
+    rows = union_all(*sources).subquery()
+    c = rows.c
+    columns = [c.id, c.source_type, c.title, c.kind, c.blob_hash, c.thumbnail_hash]
+    if editing:
+        columns.extend(
+            [c.ordinal, func.coalesce(c.source_duration, Blob.duration_ms).label("duration_ms")]
+        )
     stmt = (
-        select(rows)
+        select(*columns)
         .join(Blob, Blob.hash == rows.c.blob_hash)
         .where(
             rows.c.kind.in_(kinds),
@@ -219,12 +273,32 @@ def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24)
         ).mappings()
     )
     return {
-        "items": [
-            {k: v for k, v in row.items() if k not in ("search_text", "created_at")}
-            for row in page[:limit]
-        ],
+        "items": [dict(row) for row in page[:limit]],
         "has_more": len(page) > limit,
     }
+
+
+def catalog(db, project_id, *, query="", media_type="image", offset=0, limit=24):
+    kinds = {"any": ("image", "video", "audio"), "all": ("image", "video")}.get(
+        media_type, (media_type,)
+    )
+    sources = [_upload_rows(project_id, all_versions=False), _generation_rows(project_id)]
+    return _page(db, sources, kinds, query, offset, limit)
+
+
+def editing_catalog(db, ctx, *, query, media_type, offset, limit):
+    # A timeline pin wraps an existing source. Listing it again on each use
+    # would duplicate uploads and republish another editor's saved attachment.
+    outputs = _generation_rows(ctx.project.id).where(
+        Generation.input_refs["operation"].astext.is_distinct_from("timeline_library_source"),
+    )
+    sources = [
+        _upload_rows(ctx.project.id, all_versions=True),
+        outputs,
+        _saved_attachment_rows(ctx.project.id, ctx.user.id),
+    ]
+    kinds = ("image", "video", "audio") if media_type == "all" else (media_type,)
+    return _page(db, sources, kinds, query, offset, limit, editing=True)
 
 
 def validate_snapshot(db, project_id, snapshot, *, user_id=None):

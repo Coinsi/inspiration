@@ -1,6 +1,7 @@
 """timeline 路由(对照 04 §3.8 / §3.7 基线)。"""
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response
@@ -30,6 +31,33 @@ def get_timeline_preview(
     if not blob or generation.output_type not in ("video", "audio"):
         return {"status": "unavailable"}
     return lookup(db, blob, worker_enabled=settings.library_worker_enabled)
+
+
+@router.get("/timeline-sources")
+def list_editing_sources(
+    query: str = Query(default="", max_length=255),
+    media_type: Literal["all", "video", "image", "audio"] = "all",
+    offset: int = Query(0, ge=0, le=1_000_000),
+    limit: int = Query(24, ge=1, le=100),
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.generation.references import editing_catalog
+
+    return editing_catalog(db, ctx, query=query, media_type=media_type, offset=offset, limit=limit)
+
+
+@router.post("/timelines/{timeline_id}/sources/{source_type}/{source_id}")
+def attach_editing_source(
+    timeline_id: uuid.UUID,
+    source_type: Literal["media_version", "generation", "attachment"],
+    source_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.timeline.library_sources import attach_source
+
+    return attach_source(db, ctx, timeline_id, source_type, source_id)
 
 
 @router.post("/timelines", response_model=schemas.TimelineOut)

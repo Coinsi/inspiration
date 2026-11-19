@@ -1,3 +1,4 @@
+import { materialCatalog, type Material } from "@/lib/material-catalog";
 import {
   MaterialProfile,
   MaterialProfileEditor,
@@ -55,26 +56,6 @@ const Detail = lazy(() =>
 const Impact = lazy(() =>
   import("./MediaLibrary").then((m) => ({ default: m.ImpactDialog })),
 );
-type Material = {
-  adopted: boolean;
-  is_test: boolean;
-  id: string;
-  source: "upload" | "generated" | "asset" | "attachment";
-  name: string;
-  description?: string;
-  tags?: string[] | null;
-  metadata_revision?: number;
-  kind: "image" | "video" | "audio" | "entity";
-  created_at: string;
-  deleted_at: string | null;
-  status: string;
-  poster_hash: string | null;
-  blob_hash: string | null;
-  preview_hash: string | null;
-  size_bytes: number;
-  duration_ms: number | null;
-  version_id: string | null;
-};
 const sourceNames = {
   upload: "上传与复用",
   generated: "AI 生成",
@@ -159,13 +140,10 @@ function Collection({ projectId }: { projectId: string }) {
     return () => clearTimeout(timer);
   }, [search, query]);
   const list = useQuery({
-    queryKey: ["materials", projectId, deleted, kind, source, query, page],
-    queryFn: () =>
-      api.get<{ items: Material[]; total: number }>(
-        `${base}/materials?${new URLSearchParams({ deleted: String(deleted), offset: String(page * 24), query, ...(kind ? { kind } : {}), ...(source ? { source } : {}) })}`,
-      ),
-    refetchInterval: query => query.state.data?.items.some(item => ["uploading", "queued", "processing"].includes(item.status)) ? 5000 : 30_000,
-    staleTime: 5000,
+    ...materialCatalog(projectId, deleted, kind, source, query, page),
+    enabled: tab !== "search" && tab !== "processing",
+    refetchInterval: q => q.state.data?.items.some(item =>
+      ["uploading", "queued", "processing"].includes(item.status)) ? 5000 : 60_000,
   });
   useEffect(() => {
     if (list.data && page > 0 && page * 24 >= list.data.total)
@@ -451,6 +429,7 @@ function Collection({ projectId }: { projectId: string }) {
                               )}
                               alt={item.name}
                               priority={index === 0}
+                              deferUntilVisible
                             />
                           ) : item.kind === "video" ? (
                             <Film size={34} />
