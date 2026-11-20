@@ -8,6 +8,7 @@ html[data-inspiration-chrome] {
   --inspiration-fallback-surface: 240 3% 16%;
   --inspiration-fallback-border: 240 5% 25%;
   background: var(--inspiration-chrome-surface);
+  overflow: clip;
 }
 html.light[data-inspiration-chrome] {
   --inspiration-chrome-surface: #eff1f0;
@@ -16,11 +17,14 @@ html.light[data-inspiration-chrome] {
 }
 html[data-inspiration-chrome] body {
   display: block;
+  box-sizing: border-box;
   margin: 0;
-  padding: 0;
+  /* Reserve the title controls inside the viewport. A top margin on #root
+     collapses through body and creates a scrollable strip above the web app. */
+  padding: var(--inspiration-chrome-space) 0 0;
   min-height: 0;
   height: 100dvh;
-  overflow: hidden;
+  overflow: clip;
 }
 html[data-inspiration-chrome] #inspiration-window-chrome {
   position: fixed;
@@ -40,7 +44,7 @@ html[data-inspiration-chrome] #root,
 html[data-inspiration-chrome] #inspiration-recovery-content {
   box-sizing: border-box;
   position: relative;
-  margin-top: var(--inspiration-chrome-space);
+  margin: 0;
   width: 100%;
   height: var(--inspiration-content-height);
   min-height: 0;
