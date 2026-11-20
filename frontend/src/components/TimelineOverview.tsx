@@ -239,7 +239,7 @@ export function TimelineOverview({
     className: string,
     onClick: () => void,
     extra?: React.ReactNode,
-    top?: number,
+    top?: number | string,
   ) => (
     <div
       key={content[kind][index]?.id || `${kind}-${index}`}
@@ -477,7 +477,7 @@ export function TimelineOverview({
             </button>
             <div
               className="timeline-overview-lane timeline-audio-lane"
-              style={{ height: Math.max(44, displayed.audio.length * 30 + 4) }}
+              style={{ height: `max(44px, calc(${displayed.audio.length} * var(--timeline-lane-step, 30px) + 4px))` }}
             >
               {displayed.audio.map((a, i) =>
                 block(
@@ -489,7 +489,7 @@ export function TimelineOverview({
                   `timeline-audio-block ${a.muted ? "is-muted" : ""}`,
                   () => onTracks("audio", a.id),
                   <><TimelineMediaStrip project={projectId} id={a.generation_id} from={a.in_point_ms} length={a.duration_ms} audio/><span>{a.name}</span></>,
-                  4 + i * 30,
+                  `calc(4px + ${i} * var(--timeline-lane-step, 30px))`,
                 ),
               )}
               {!displayed.audio.length && (

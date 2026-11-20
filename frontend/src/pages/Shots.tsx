@@ -649,8 +649,8 @@ function ShotsWorkspace() {
                 className="shot-detail-workspace shot-creation-main"
               >
                 <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
-                  <span className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground truncate max-w-64">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 text-xs text-muted-foreground truncate max-w-64">
                       {open.scene_title ||
                         (lang === "zh" ? "当前场景" : "Current scene")}
                     </span>
@@ -658,7 +658,7 @@ function ShotsWorkspace() {
                       {tr(`status.${open.production_status}`)}
                     </Badge>
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
                     <button
                       className="studio-icon-button disabled:opacity-30"
                       aria-label={
@@ -702,6 +702,7 @@ function ShotsWorkspace() {
                       onClick={closeWorkspace}
                       className="h-8 min-w-8 px-2 rounded-md hover:bg-elevated flex items-center justify-center text-muted-foreground"
                       title={tr("shots.close")}
+                      aria-label={tr("shots.close")}
                     >
                       <X className="h-4 w-4" />
                     </button>

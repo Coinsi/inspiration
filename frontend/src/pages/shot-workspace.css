@@ -216,7 +216,22 @@
     border-bottom: 1px solid hsl(var(--border));
     padding: 10px 14px;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
+  }
+  .shot-creation-rail .shot-back {
+    flex: none;
+    min-height: 44px;
+  }
+  .shot-creation-rail .shot-scope-heading {
+    flex: 1 1 180px;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
+  }
+  .shot-creation-rail .shot-scope-heading > .studio-select-trigger {
+    width: 100%;
+    min-height: 44px;
   }
   .shot-rail-list,
   .shot-search {
@@ -236,6 +251,10 @@
     padding-top: 8px;
     padding-bottom: 8px;
     gap: 8px;
+  }
+  .shot-creation-main > div:first-child > div > button {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 .shot-title-row {

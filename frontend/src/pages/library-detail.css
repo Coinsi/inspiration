@@ -226,3 +226,20 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+@media (hover: none), (pointer: coarse) {
+  .library-preview-affordance {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .library-tool-row,
+  .library-download {
+    min-height: 44px;
+  }
+  .library-tool-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}

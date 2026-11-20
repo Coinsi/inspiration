@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 
 const cache = new URL('../node_modules/.cache/email-auth-tests/', import.meta.url);
 await mkdir(cache, { recursive: true });
@@ -53,25 +53,26 @@ const response = (data, status = 200) => new Response(JSON.stringify(data), { st
 const providers = { registration_enabled: true, providers: [{ id: 'google', name: 'Google', registration_enabled: true }] };
 const signedIn = { user: { id: 'email-user', email: 'creator@example.com', display_name: 'Creator' }, memberships: [] };
 
-async function renderLogin(path, handleRequest) {
+async function renderLogin(path, handleRequest, options = {}) {
   globalThis.localStorage = storage();
   globalThis.sessionStorage = storage();
   const redirects = [];
-  globalThis.window = { location: { assign: url => redirects.push(url) } };
+  globalThis.window = { location: { assign: url => redirects.push(url) }, inspirationDesktop: options.desktop };
   globalThis.document = { documentElement: { lang: 'zh-CN', classList: { add() {}, remove() {} } } };
   const requests = [];
-  globalThis.fetch = async (url, options) => {
-    const request = { url, method: options?.method ?? 'GET', body: options?.body ? JSON.parse(options.body) : undefined };
+  globalThis.fetch = async (url, requestOptions) => {
+    const request = { url, method: requestOptions?.method ?? 'GET', body: requestOptions?.body ? JSON.parse(requestOptions.body) : undefined };
     requests.push(request);
     if (url.endsWith('/auth/providers')) return response(providers);
-    if (url.endsWith('/me')) return response(signedIn);
+    if (url.endsWith('/me')) return options.me ? options.me(request) : response(signedIn);
     if (url.endsWith('/projects')) return response([]);
     return handleRequest(request);
   };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(['auth-providers'], providers);
   let destination;
-  function PathProbe() { destination = useLocation(); return null; }
+  let navigate;
+  function PathProbe() { destination = useLocation(); navigate = useNavigate(); return null; }
   let view;
   await act(async () => {
     view = create(React.createElement(QueryClientProvider, { client }, React.createElement(I18nProvider, null,
@@ -88,7 +89,7 @@ async function renderLogin(path, handleRequest) {
     )));
   });
   cleanups.push(async () => { await act(async () => view.unmount()); client.clear(); });
-  return { view, requests, redirects, get destination() { return destination.pathname + destination.search; } };
+  return { view, requests, redirects, navigate: path => navigate(path), get destination() { return destination.pathname + destination.search; } };
 }
 
 async function fillCredentials(view, email = 'creator@example.com', password = 'a-good-password') {
@@ -199,4 +200,125 @@ test('password visibility can be toggled without adding a confirmation field or 
   assert.equal(view.root.findByType('form').findAllByType('input').length, 2);
   await act(async () => { view.root.findByProps({ 'aria-label': '隐藏密码' }).props.onClick(); });
   assert.equal(view.root.findByProps({ autoComplete: 'new-password' }).props.type, 'password');
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function googleButton(view) {
+  return view.root.findAllByType('button').find(button => button.props.className?.includes('google-auth-button'));
+}
+
+function cancelGoogleButton(view) {
+  return view.root.findAllByType('button').find(button => button.children.includes('取消登录'));
+}
+
+test('desktop Google login and registration wait for the native bridge and accept the returned session', async () => {
+  for (const path of ['/login', '/register']) {
+    const completion = deferred();
+    const starts = [];
+    const page = await renderLogin(`${path}?next=%2Fprojects%2Fstory%3Ftab%3Dassets`, () => {
+      throw new Error('Desktop sign-in must not start the browser-cookie flow');
+    }, { desktop: {
+      googleSignIn: (...args) => { starts.push(args); return completion.promise; },
+      cancelGoogleSignIn: async () => {},
+    } });
+    await act(async () => { googleButton(page.view).props.onClick(); });
+    assert.deepEqual(starts, [['/projects/story?tab=assets', 'zh']]);
+    assert.equal(googleButton(page.view).props.disabled, true);
+    assert.match(page.view.root.findByProps({ role: 'status' }).children.join(''), /浏览器/);
+    assert.ok(cancelGoogleButton(page.view));
+    assert.equal(localStorage.getItem('inspiration_token'), null);
+    await act(async () => { completion.resolve({ access_token: 'desktop-token', next: '/projects/story?tab=assets', linked: false }); });
+    assert.equal(localStorage.getItem('inspiration_token'), 'desktop-token');
+    assert.equal(page.destination, '/projects/story?tab=assets');
+    assert.equal(page.requests.filter(request => request.url.endsWith('/me')).length, 1);
+    assert.deepEqual(page.redirects, []);
+  }
+});
+
+test('cancelled desktop results cannot overwrite a newer sign-in', async () => {
+  const attempts = [deferred(), deferred()];
+  let starts = 0;
+  let cancellations = 0;
+  const page = await renderLogin('/login', () => { throw new Error('Unexpected web auth request'); }, { desktop: {
+    googleSignIn: () => attempts[starts++].promise,
+    cancelGoogleSignIn: async () => { cancellations++; },
+  } });
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  await act(async () => { cancelGoogleButton(page.view).props.onClick(); });
+  assert.equal(cancellations, 1);
+  assert.equal(googleButton(page.view).props.disabled, false);
+  assert.match(page.view.root.findByProps({ role: 'alert' }).children.join(''), /取消/);
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  await act(async () => { attempts[1].resolve({ access_token: 'current-token', next: '/projects/current', linked: false }); });
+  await act(async () => { attempts[0].resolve({ access_token: 'cancelled-token', next: '/projects/stale', linked: false }); });
+  assert.equal(localStorage.getItem('inspiration_token'), 'current-token');
+  assert.equal(page.destination, '/projects/current');
+  assert.equal(page.requests.filter(request => request.url.endsWith('/me')).length, 1);
+});
+
+test('cancelling while desktop profile confirmation is pending removes that session and ignores its late reply', async () => {
+  const oldProfile = deferred();
+  let profiles = 0;
+  let starts = 0;
+  const page = await renderLogin('/login', () => { throw new Error('Unexpected web auth request'); }, {
+    desktop: {
+      googleSignIn: async () => ({ access_token: `desktop-token-${++starts}`, next: '/projects', linked: false }),
+      cancelGoogleSignIn: async () => {},
+    },
+    me: () => ++profiles === 1 ? oldProfile.promise : response(signedIn),
+  });
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.equal(localStorage.getItem('inspiration_token'), 'desktop-token-1');
+  await act(async () => { cancelGoogleButton(page.view).props.onClick(); });
+  assert.equal(localStorage.getItem('inspiration_token'), null);
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.equal(localStorage.getItem('inspiration_token'), 'desktop-token-2');
+  await act(async () => { oldProfile.resolve(response({ error: { code: 'UNAUTHORIZED', message: 'Late reply' } }, 401)); });
+  assert.equal(localStorage.getItem('inspiration_token'), 'desktop-token-2');
+  assert.equal(page.destination, '/projects');
+});
+
+test('desktop timeout and native failure allow a fresh retry and reject external return destinations', async () => {
+  let starts = 0;
+  const page = await renderLogin('/login?next=https%3A%2F%2Fevil.test', () => { throw new Error('Unexpected web auth request'); }, { desktop: {
+    googleSignIn: async next => {
+      assert.equal(next, '/projects');
+      if (++starts === 1) return { error: 'google_desktop_timeout' };
+      if (starts === 2) throw new Error('Private native error');
+      return { access_token: 'retry-token', next: 'https://evil.test', linked: false };
+    },
+    cancelGoogleSignIn: async () => {},
+  } });
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.match(page.view.root.findByProps({ role: 'alert' }).children.join(''), /超时/);
+  assert.equal(googleButton(page.view).props.disabled, false);
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.match(page.view.root.findByProps({ role: 'alert' }).children.join(''), /桌面登录/);
+  assert.doesNotMatch(page.view.root.findByProps({ role: 'alert' }).children.join(''), /Private/);
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.equal(starts, 3);
+  assert.equal(localStorage.getItem('inspiration_token'), 'retry-token');
+  assert.equal(page.destination, '/projects');
+});
+
+test('leaving the login route cancels desktop authorization and ignores the eventual result', async () => {
+  const completion = deferred();
+  let cancellations = 0;
+  const page = await renderLogin('/login', () => { throw new Error('Unexpected web auth request'); }, { desktop: {
+    googleSignIn: () => completion.promise,
+    cancelGoogleSignIn: async () => { cancellations++; },
+  } });
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  await act(async () => { page.navigate('/register'); });
+  assert.equal(cancellations, 1);
+  assert.equal(googleButton(page.view).props.disabled, false);
+  await act(async () => { completion.resolve({ access_token: 'abandoned-token', next: '/projects', linked: false }); });
+  assert.equal(localStorage.getItem('inspiration_token'), null);
+  assert.equal(page.destination, '/register');
+  assert.equal(page.requests.filter(request => request.url.endsWith('/me')).length, 0);
 });

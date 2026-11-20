@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 const AppShell = lazy(() => import("@/components/AppShell"));
 import { useAuth } from "@/lib/auth";
 import { WorkspaceLoading } from "@/components/WorkspaceLoading";
+import { useMobileViewport } from "@/lib/useMobileViewport";
 const Login = lazy(() => import("@/pages/Login"));
 const GoogleAuthComplete = lazy(() => import("@/pages/GoogleAuthComplete"));
 const Projects = lazy(() => import("@/pages/Projects"));
@@ -62,6 +63,7 @@ function Protected() {
 }
 
 export default function App() {
+  useMobileViewport();
   return (
     <Suspense fallback={<WorkspaceLoading />}>
       <Routes>

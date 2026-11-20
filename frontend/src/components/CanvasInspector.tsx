@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { Connection } from "@xyflow/react";
-import { History, MousePointer2 } from "lucide-react";
+import { History, MousePointer2, X } from "lucide-react";
 import { api, type Asset, type Shot, type ProviderConfig } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import type { ConfirmOptions } from "@/components/ui/confirm";
@@ -50,6 +50,7 @@ type Props = {
   dirty: boolean;
   confirm: (o?: ConfirmOptions) => Promise<boolean>;
   ungroup: () => void;
+  onClose: () => void;
 };
 export function CanvasInspector({
   projectId,
@@ -78,11 +79,12 @@ export function CanvasInspector({
   dirty,
   confirm,
   ungroup,
+  onClose,
 }: Props) {
   const base = `/projects/${projectId}`;
   return (
-    <aside className="canvas-inspector">
-      <div className="flex border-b border-border p-2 gap-1">
+    <aside className="canvas-inspector" aria-label="画布属性与记录">
+      <div className="canvas-inspector-tabs flex border-b border-border p-2 gap-1">
         {(["edit", "runs", "history"] as const).map((p) => (
           <Button
             size="sm"
@@ -93,6 +95,13 @@ export function CanvasInspector({
             {p === "edit" ? "节点" : p === "runs" ? "运行记录" : "保存历史"}
           </Button>
         ))}
+        <button
+          className="canvas-inspector-close"
+          aria-label="关闭画布面板"
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
       </div>
       <div className="p-4 space-y-4">
         {panel === "edit" &&

@@ -9,13 +9,14 @@ import {
 } from "react";
 import { api, clearToken, getToken, setToken, type Me } from "./api";
 import { useQueryClient } from "@tanstack/react-query";
-import { exchangeGoogleSession, type GoogleAuthResult } from "./google-auth";
+import { exchangeGoogleSession, startDesktopGoogleAuth, type GoogleAuthResult } from "./google-auth";
 
 interface AuthState {
   me: Me | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   completeGoogleLogin: () => Promise<Pick<GoogleAuthResult, "next" | "linked">>;
+  loginWithDesktopGoogle: (next: string, language: "zh" | "en", signal: AbortSignal) => Promise<string>;
   logout: () => Promise<void>;
   logoutError: string;
   refresh: () => Promise<void>;
@@ -50,13 +51,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const acceptSession = useCallback(async (accessToken: string, session?: Me) => {
+  const acceptSession = useCallback(async (accessToken: string, session?: Me, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
     setToken(accessToken);
     setMe(null);
-    queryClient.clear();
+    // Keep the sign-in controls available while a desktop attempt can still be cancelled.
+    if (!signal) queryClient.clear();
+    const cancel = () => {
+      if (getToken() === accessToken) {
+        clearToken();
+        setMe(null);
+      }
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
     try {
-      const result = session ?? await api.get<Me>("/me");
+      const result = session ?? await api.get<Me>("/me", signal ? { signal } : undefined);
+      signal?.throwIfAborted();
       if (getToken() !== accessToken) throw new Error("Session changed while signing in");
+      if (signal) queryClient.clear();
       setMe(result);
       setLogoutError("");
     } catch (error) {
@@ -66,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw error;
     } finally {
+      signal?.removeEventListener("abort", cancel);
       setLoading(false);
     }
   }, [queryClient]);
@@ -76,6 +89,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { next: result.next, linked: result.linked };
     });
     return googleCompletion.current;
+  }, [acceptSession]);
+
+  const loginWithDesktopGoogle = useCallback(async (next: string, language: "zh" | "en", signal: AbortSignal) => {
+    signal.throwIfAborted();
+    const result = await startDesktopGoogleAuth(next, language);
+    signal.throwIfAborted();
+    await acceptSession(result.access_token, undefined, signal);
+    return result.next;
   }, [acceptSession]);
 
   async function login(email: string, password: string) {
@@ -115,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ me, loading, login, completeGoogleLogin, logout, logoutError, refresh }}
+      value={{ me, loading, login, completeGoogleLogin, loginWithDesktopGoogle, logout, logoutError, refresh }}
     >
       {children}
     </AuthContext.Provider>

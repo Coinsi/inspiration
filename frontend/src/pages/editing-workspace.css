@@ -195,13 +195,13 @@
   .editing-project-bar .timeline-document-bar { max-width: none; width: 100%; }
   .editing-project-bar .timeline-document-bar .studio-select-trigger { max-width: none; min-width: 0; width: 100%; flex: 1; }
   .editing-workspace > .timeline-edit-bar { gap: 8px; }
-  .editing-main-actions { width: 100%; justify-content: space-between; margin: 0; }
+  .editing-main-actions { width: 100%; flex-wrap: wrap; justify-content: space-between; margin: 0; }
   .timeline-draft.editing-workspace,
   .timeline-draft.editing-workspace.has-properties { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto clamp(205px, 30svh, 300px) auto var(--track-height) auto auto; --track-label-width: 56px; gap: 7px; }
   .editing-workspace > .timeline-preview-grid { grid-column: 1; grid-row: 2; }
   .editing-workspace > .editing-media { grid-column: 1; grid-row: 5; flex-direction: row; align-items: center; padding: 10px; }
   .editing-media header { display: none; }
-  .editing-media-list { display: flex; overflow-x: auto; gap: 8px; }
+  .editing-media-list { display: flex; min-width: 0; overflow-x: auto; gap: 8px; }
   .editing-media-list .timeline-thumbnail { width: 110px; flex-shrink: 0; }
   .editing-workspace .cut-discuss { margin-left: 0; }
   .editing-workspace .timeline-track-label { padding-inline: 5px; gap: 3px; }
@@ -209,9 +209,11 @@
   .editing-workspace .timeline-overview header { padding-inline: 5px; }
   .editing-workspace .editing-preview-caption { display: none; }
   .editing-workspace > .timeline-selection-tools { grid-column: 1; grid-row: 3; padding-right: 0; }
-  .editing-workspace .editing-track-size { grid-column: 1; grid-row: 5; }
   .editing-workspace > .timeline-overview { grid-row: 4; }
-  .editing-workspace > .editing-properties { grid-column: 1; grid-row: 6; }
+  .editing-workspace > .editing-properties { grid-column: 1; grid-row: 6; max-height: none; scroll-margin-top: 16px; }
+  .editing-properties .timeline-editor-panel { overflow: visible; }
+  .editing-properties-header > button { width: 44px; height: 44px; }
+  .editing-properties .timeline-editor-tabs button { padding-inline: 8px; }
   .editing-properties .timeline-clip-inspector > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .timeline-draft.editing-workspace.is-empty,
   .timeline-draft.editing-workspace.is-empty.has-properties { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(380px, 50vh); }
@@ -227,8 +229,11 @@
   .cut-secondary-actions { display: none; }
   .cut-secondary-actions[data-open="true"] { display: flex; position: absolute; top: 100%; right: 64px; z-index: 8; flex-direction: column; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--card)); }
   .editing-main-actions > button, .editing-workspace .editing-history-action { padding-inline: 6px; }
-  .editing-workspace .timeline-live-controls { gap: 1px; padding-inline: 3px; }
-  .editing-workspace .timeline-live-controls button { min-width: 26px; width: 26px; }
+  .editing-workspace .timeline-live-controls { gap: 1px; padding-inline: 3px; flex-wrap: wrap; justify-content: center; }
+  .editing-workspace .timeline-live-controls button { min-width: 44px; width: 44px; min-height: 44px; }
+  .editing-workspace .timeline-live-controls .timeline-composition-scrub { order: 1; flex: 1 0 100%; min-height: 44px; }
+  .editing-workspace .timeline-ruler { height: 44px; }
+  .editing-workspace .timeline-trim-handle { width: 18px; }
   .editing-workspace .editing-media-list .timeline-thumbnail { display: block; width: 86px; }
   .editing-workspace .editing-media-list .timeline-thumbnail > div:last-child { padding: 3px 1px; }
 }

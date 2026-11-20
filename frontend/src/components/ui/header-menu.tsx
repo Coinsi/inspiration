@@ -56,7 +56,7 @@ export function HeaderMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        className="flex h-9 max-w-full items-center gap-2 rounded-lg px-2 text-sm hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex h-11 md:h-9 max-w-full items-center gap-2 rounded-lg px-2 text-sm hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         onClick={() => setOpen(!open)}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") {
@@ -74,7 +74,7 @@ export function HeaderMenu({
           id={id}
           role="menu"
           aria-label={label}
-          className={`absolute top-full z-[70] mt-2 w-64 max-w-[calc(100vw-32px)] rounded-xl border bg-card p-2 shadow-xl ${align === "right" ? "right-0" : "left-0"}`}
+          className={`absolute top-full z-[70] mt-2 w-64 max-w-[calc(100vw-32px)] max-h-[min(70dvh,480px)] overflow-y-auto overscroll-contain rounded-xl border bg-card p-2 shadow-xl ${align === "right" ? "right-0" : "left-0"}`}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest('[role="menuitem"]')) close();
           }}

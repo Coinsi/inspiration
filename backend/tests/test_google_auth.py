@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 import uuid
@@ -48,16 +49,36 @@ def test_google_callback_authorization_codes_are_not_access_logged():
     from app.modules.identity.google_router import GoogleCallbackAccessFilter
 
     callback = logging.LogRecord(
-        "uvicorn.access", logging.INFO, "", 0, "%s %s %s %s %s",
-        ("127.0.0.1", "GET", AUTH + "/callback?code=private-code", "1.1", 303), None,
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        "%s %s %s %s %s",
+        ("127.0.0.1", "GET", AUTH + "/callback?code=private-code", "1.1", 303),
+        None,
     )
     other = logging.LogRecord(
-        "uvicorn.access", logging.INFO, "", 0, "%s %s %s %s %s",
-        ("127.0.0.1", "POST", AUTH + "/start", "1.1", 200), None,
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        "%s %s %s %s %s",
+        ("127.0.0.1", "POST", AUTH + "/start", "1.1", 200),
+        None,
     )
     access_filter = GoogleCallbackAccessFilter()
     assert not access_filter.filter(callback)
     assert access_filter.filter(other)
+    bootstrap = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        "%s %s %s %s %s",
+        ("127.0.0.1", "GET", AUTH + "/desktop/browser?ticket=private-ticket", "1.1", 303),
+        None,
+    )
+    assert not access_filter.filter(bootstrap)
 
 
 @pytest.fixture
@@ -694,3 +715,337 @@ def test_upstream_failures_are_controlled_errors(
         google.verify_google_code(
             code="local-code", verifier="local-verifier", nonce="expected-nonce"
         )
+
+
+def desktop_attempt(client, *, next_path="/projects"):
+    verifier, state = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    response = client.post(
+        AUTH + "/desktop/start",
+        json={
+            "port": 49152,
+            "state": state,
+            "challenge": google.pkce_challenge(verifier),
+            "next": next_path,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert "set-cookie" not in response.headers
+    url = response.json()["browser_url"]
+    parsed = urlsplit(url)
+    assert parsed.scheme + "://" + parsed.netloc == ORIGIN
+    assert parsed.path == AUTH + "/desktop/browser"
+    assert len(parse_qs(parsed.query)["ticket"][0]) == 43
+    assert verifier not in url and state not in url
+    return url, verifier, state
+
+
+def desktop_authorize(browser, url):
+    response = browser.get(url)
+    assert response.status_code == 303, response.text
+    cookie = response.headers["set-cookie"].lower()
+    assert google.DESKTOP_BROWSER_COOKIE in cookie
+    assert "httponly" in cookie and "secure" in cookie and "samesite=lax" in cookie
+    parsed = urlsplit(response.headers["location"])
+    assert parsed.scheme + "://" + parsed.netloc == "https://accounts.google.com"
+    params = parse_qs(parsed.query)
+    assert params["redirect_uri"] == [CALLBACK]
+    assert params["code_challenge_method"] == ["S256"]
+    assert params["state"][0].startswith(google.DESKTOP_STATE_PREFIX)
+    return params["state"][0]
+
+
+def desktop_grant(browser, state, loopback_state):
+    response = callback(browser, state)
+    assert response.status_code == 303, response.text
+    parsed = urlsplit(response.headers["location"])
+    assert parsed.scheme == "http" and parsed.netloc == "127.0.0.1:49152"
+    assert parsed.path == "/oauth/google/" + loopback_state
+    assert "access_token" not in response.headers["location"]
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    code = parse_qs(parsed.query)["code"][0]
+    assert len(code) == 43
+    return code
+
+
+def test_desktop_handoff_between_separate_cookie_jars_and_single_use_proof(oauth, verified):
+    native, _, api = oauth
+    url, verifier, state = desktop_attempt(native, next_path="/projects/film?tab=shots")
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        oauth_state = desktop_authorize(browser, url)
+        assert browser.get(url).status_code == 400  # Bootstrap is one-time.
+        assert google.DESKTOP_BROWSER_COOKIE not in native.cookies
+        code = desktop_grant(browser, oauth_state, state)
+        assert google.EXCHANGE_COOKIE not in browser.cookies
+        assert google.DESKTOP_BROWSER_COOKIE in browser.cookies
+    assert len(verified[1]) == 1 and verified[1][0]["verifier"] != verifier
+    wrong = native.post(AUTH + "/desktop/exchange", json={"code": code, "verifier": "x" * 43})
+    assert wrong.json()["error"]["code"] == "google_exchange_invalid"
+    assert wrong.headers["cache-control"] == "no-store"
+    body = {"code": code, "verifier": verifier}
+    success = native.post(AUTH + "/desktop/exchange", json=body)
+    assert success.status_code == 200, success.text
+    assert success.json()["next"] == "/projects/film?tab=shots"
+    assert success.json()["linked"] is False
+    assert "sub" in decode_access_token(success.json()["access_token"])
+    assert "set-cookie" not in success.headers
+    assert (
+        native.post(AUTH + "/desktop/exchange", json=body).json()["error"]["code"]
+        == "google_exchange_invalid"
+    )
+
+
+def test_desktop_and_web_authorization_do_not_replace_each_others_cookies(oauth, verified):
+    native, _, api = oauth
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        browser.headers["Origin"] = ORIGIN
+        _, web = start(browser)
+        web_cookie = browser.cookies[BROWSER_COOKIE]
+        url, verifier, state = desktop_attempt(native)
+        oauth_state = desktop_authorize(browser, url)
+        assert browser.cookies[BROWSER_COOKIE] == web_cookie
+        code = desktop_grant(browser, oauth_state, state)
+        assert browser.cookies[BROWSER_COOKIE] == web_cookie
+        assert (
+            callback(browser, web["state"][0]).headers["location"]
+            == ORIGIN + "/auth/google/complete"
+        )
+        assert browser.post(AUTH + "/exchange").status_code == 200
+    assert (
+        native.post(
+            AUTH + "/desktop/exchange", json={"code": code, "verifier": verifier}
+        ).status_code
+        == 200
+    )
+
+
+def test_late_desktop_callback_does_not_clear_new_attempt_cookie(oauth, verified, monkeypatch):
+    native, _, api = oauth
+    entered, finish = threading.Event(), threading.Event()
+    original_verify = google.verify_google_code
+
+    def delayed_verify(**kwargs):
+        identity = original_verify(**kwargs)
+        if not entered.is_set():
+            entered.set()
+            assert finish.wait(timeout=10)
+        return identity
+
+    monkeypatch.setattr(google, "verify_google_code", delayed_verify)
+    url_a, _, state_a = desktop_attempt(native)
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        oauth_a = desktop_authorize(browser, url_a)
+        cookies_a = dict(browser.cookies)
+
+        def complete_a():
+            with TestClient(api, base_url=ORIGIN, follow_redirects=False) as old_tab:
+                old_tab.cookies.update(cookies_a)
+                return callback(old_tab, oauth_a)
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(complete_a)
+            try:
+                assert entered.wait(timeout=5)
+                url_b, verifier_b, state_b = desktop_attempt(native)
+                oauth_b = desktop_authorize(browser, url_b)
+                cookie_b = browser.cookies[google.DESKTOP_BROWSER_COOKIE]
+            finally:
+                finish.set()
+            late = pending.result(timeout=10)
+        assert late.headers["location"].startswith(
+            f"http://127.0.0.1:49152/oauth/google/{state_a}?code="
+        )
+        browser.cookies.extract_cookies(late)
+        assert browser.cookies[google.DESKTOP_BROWSER_COOKIE] == cookie_b
+        code_b = desktop_grant(browser, oauth_b, state_b)
+    assert (
+        native.post(
+            AUTH + "/desktop/exchange", json={"code": code_b, "verifier": verifier_b}
+        ).status_code
+        == 200
+    )
+
+
+def test_desktop_state_prefix_cannot_reclassify_web_state(oauth, verified):
+    browser, _, _ = oauth
+    _, web = start(browser)
+    invalid = callback(browser, google.DESKTOP_STATE_PREFIX + web["state"][0])
+    assert invalid.status_code == 400 and "location" not in invalid.headers
+    assert verified[1] == []
+    assert (
+        callback(browser, web["state"][0]).headers["location"] == ORIGIN + "/auth/google/complete"
+    )
+
+
+def test_desktop_callback_still_requires_its_browser_cookie(oauth, verified):
+    native, _, api = oauth
+    url, _, state = desktop_attempt(native)
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        oauth_state = desktop_authorize(browser, url)
+        rejected = callback(native, oauth_state)
+        assert rejected.status_code == 400
+        assert "location" not in rejected.headers
+        assert verified[1] == []
+        desktop_grant(browser, oauth_state, state)
+
+
+def test_desktop_cancel_is_allowlisted_loopback_error_without_account_or_grant(oauth, verified):
+    native, sessions, api = oauth
+    url, _, state = desktop_attempt(native)
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        oauth_state = desktop_authorize(browser, url)
+        denied = callback(browser, oauth_state, error="access_denied&redirect=https://evil.test")
+        assert (
+            denied.headers["location"]
+            == f"http://127.0.0.1:49152/oauth/google/{state}?error=google_cancelled"
+        )
+        assert verified[1] == []
+        replay = callback(browser, oauth_state)
+        assert not replay.headers.get("location", "").startswith("http://127.0.0.1")
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(OAuthTransaction)
+                .where(OAuthTransaction.kind == "desktop_grant")
+            )
+            == 0
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("port", 0),
+        ("port", 1023),
+        ("port", 65536),
+        ("port", "49152"),
+        ("state", "../escape"),
+        ("challenge", "x" * 42),
+        ("redirect_uri", "https://evil.test"),
+        ("mode", "link"),
+    ],
+)
+def test_desktop_start_rejects_invalid_bridge_target_and_proof(oauth, field, value):
+    native, _, _ = oauth
+    data = {"port": 49152, "state": "s" * 43, "challenge": "c" * 43}
+    data[field] = value
+    assert native.post(AUTH + "/desktop/start", json=data).status_code == 422
+
+
+def test_desktop_origin_and_safe_next_are_enforced(oauth, verified):
+    native, _, api = oauth
+    denied = native.post(
+        AUTH + "/desktop/start",
+        headers={"Origin": "https://evil.test"},
+        json={
+            "port": 49152,
+            "state": "s" * 43,
+            "challenge": "c" * 43,
+        },
+    )
+    assert denied.status_code == 403
+    url, verifier, state = desktop_attempt(native, next_path="https://evil.test/steal")
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        code = desktop_grant(browser, desktop_authorize(browser, url), state)
+    body = {"code": code, "verifier": verifier}
+    denied = native.post(
+        AUTH + "/desktop/exchange", headers={"Origin": "https://evil.test"}, json=body
+    )
+    assert denied.status_code == 403
+    response = native.post(AUTH + "/desktop/exchange", json=body)
+    assert response.status_code == 200 and response.json()["next"] == "/projects"
+
+
+@pytest.mark.parametrize("kind", ["desktop_boot", "desktop_state", "desktop_grant"])
+def test_desktop_expired_transactions_cannot_progress(oauth, verified, kind):
+    native, sessions, api = oauth
+    url, verifier, state = desktop_attempt(native)
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        if kind != "desktop_boot":
+            oauth_state = desktop_authorize(browser, url)
+        if kind == "desktop_grant":
+            code = desktop_grant(browser, oauth_state, state)
+        with sessions.begin() as db:
+            db.execute(
+                update(OAuthTransaction)
+                .where(OAuthTransaction.kind == kind)
+                .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+            )
+        if kind == "desktop_boot":
+            assert browser.get(url).status_code == 400
+        elif kind == "desktop_state":
+            assert callback(browser, oauth_state).status_code == 400
+            assert verified[1] == []
+        else:
+            response = native.post(
+                AUTH + "/desktop/exchange", json={"code": code, "verifier": verifier}
+            )
+            assert response.json()["error"]["code"] == "google_exchange_invalid"
+
+
+@pytest.mark.parametrize("change", ["disable", "version"])
+def test_desktop_exchange_rechecks_account_and_burns_invalid_grant(oauth, verified, change):
+    native, sessions, api = oauth
+    url, verifier, state = desktop_attempt(native)
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        code = desktop_grant(browser, desktop_authorize(browser, url), state)
+    with sessions.begin() as db:
+        user = db.scalar(select(User))
+        if change == "disable":
+            user.is_active = False
+        else:
+            user.auth_version += 1
+    body = {"code": code, "verifier": verifier}
+    assert "access_token" not in native.post(AUTH + "/desktop/exchange", json=body).json()
+    with sessions.begin() as db:
+        user = db.scalar(select(User))
+        user.is_active, user.auth_version = True, 0
+    assert (
+        native.post(AUTH + "/desktop/exchange", json=body).json()["error"]["code"]
+        == "google_exchange_invalid"
+    )
+
+
+def test_parallel_desktop_exchanges_succeed_once(oauth, verified):
+    native, _, api = oauth
+    url, verifier, state = desktop_attempt(native)
+    with TestClient(api, base_url=ORIGIN, follow_redirects=False) as browser:
+        code = desktop_grant(browser, desktop_authorize(browser, url), state)
+    barrier = threading.Barrier(2)
+
+    def exchange_grant():
+        with TestClient(api, base_url=ORIGIN) as second:
+            barrier.wait(timeout=5)
+            return second.post(
+                AUTH + "/desktop/exchange",
+                headers={"Origin": ORIGIN},
+                json={"code": code, "verifier": verifier},
+            ).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: exchange_grant(), range(2)))
+    assert results.count(200) == 1
+    assert sum(status >= 400 for status in results) == 1
+
+
+@pytest.mark.parametrize("action", ["start", "exchange"])
+def test_desktop_endpoints_use_existing_auth_throttling(oauth, monkeypatch, action):
+    native, _, _ = oauth
+
+    class FixedMinute(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 22, 12, 0, 1, tzinfo=UTC)
+
+    monkeypatch.setattr(auth_controls, "datetime", FixedMinute)
+    body = (
+        {"port": 49152, "state": "s" * 43, "challenge": "c" * 43}
+        if action == "start"
+        else {"code": "c" * 43, "verifier": "v" * 43}
+    )
+    replies = [native.post(AUTH + "/desktop/" + action, json=body) for _ in range(31)]
+    assert all(reply.status_code != 429 for reply in replies[:30])
+    assert replies[-1].status_code == 429

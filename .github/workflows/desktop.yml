@@ -1,0 +1,108 @@
+name: Desktop packages
+
+on:
+  push:
+    branches: ['codex/desktop-clients', 'main']
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+    tags: ['desktop-v*']
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: node -e 'const v=require("./package.json").version; if(process.env.GITHUB_REF_NAME !== `desktop-v${v}`) throw new Error("Tag must match desktop/package.json version")'
+      - run: npm test
+      - run: npm run test:smoke
+      - name: Build installer without paid signing
+        run: npm run dist:${{ matrix.platform }} -- --${{ matrix.arch }}
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: inspiration-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.platform }}-${{ matrix.arch }}
+          path: desktop/test-results/
+          if-no-files-found: ignore
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: inspiration-*
+          path: packages
+          merge-multiple: true
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages
+          sha256sum ./*.exe ./*.dmg > SHA256SUMS.txt
+          cat > ../release-notes.md <<'EOF'
+          Windows x64 和 macOS Apple Silicon / Intel 桌面客户端，连接 https://coinisi.com。
+
+          这是未使用付费证书的测试版本：Windows 未签名；Mac 使用 ad-hoc 签名、未经 Apple 公证。首次打开可能被系统拦截，请仅在确认来源可信时按系统提示允许。
+
+          支持邮箱密码登录。桌面 Google 登录需配套网页和 API 已上线。客户端需联网，建议从本页获取新版安装包。
+          EOF
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "Inspiration Desktop ${RELEASE_TAG#desktop-v}" --notes-file ../release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" ./*.exe ./*.dmg SHA256SUMS.txt --clobber

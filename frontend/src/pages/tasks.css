@@ -486,6 +486,7 @@
   }
   .task-page-header {
     align-items: start;
+    flex-wrap: wrap;
   }
   .task-page-header h1 {
     font-size: 21px;
@@ -500,6 +501,9 @@
   .task-toolbar form {
     min-width: 100%;
   }
+  .task-toolbar form > * {
+    min-width: 0;
+  }
   .task-toolbar .studio-select-trigger {
     flex: 1;
   }
@@ -510,6 +514,7 @@
     padding: 8px;
     gap: 5px;
     font-size: 12px;
+    min-height: 44px;
   }
   .task-related {
     gap: 12px;
@@ -524,6 +529,27 @@
   }
   .task-detail-body {
     padding: 14px;
+  }
+  .task-detail > header button {
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .task-detail > header {
+    padding-block: 8px;
+  }
+  .task-detail-title h3,
+  .task-source-link,
+  .task-row footer > span {
+    overflow-wrap: anywhere;
+  }
+  .task-output-bar > div {
+    flex-wrap: wrap;
+  }
+  .task-pagination {
+    gap: 8px;
+    flex-wrap: wrap;
   }
 }
 .activity-section {

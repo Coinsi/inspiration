@@ -145,6 +145,7 @@ function Workspace({ projectId }: { projectId: string }) {
     [guides, setGuides] = useState(false),
     [focused, setFocused] = useState(false),
     [exportProgress, setExportProgress] = useState<number | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"preview" | "scene" | "inspector">("preview");
   const busyRef = useRef(false),
     exportAbort = useRef<AbortController | null>(null);
   useEffect(() => () => exportAbort.current?.abort(), []);
@@ -674,8 +675,24 @@ function Workspace({ projectId }: { projectId: string }) {
                 )}
               </div>
             )}
-            <div className="director-workspace">
-              <aside className="director-scene-panel space-y-4">
+            <nav className="director-mobile-tabs" aria-label="导演台工作区">
+              {([
+                ["preview", "画面与输出"],
+                ["scene", "场景与布景"],
+                ["inspector", "对象与机位"],
+              ] as const).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  aria-pressed={mobilePanel === tab}
+                  aria-controls={`director-mobile-${tab}`}
+                  onClick={() => { setMobilePanel(tab); setFocused(false); }}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+            <div className="director-workspace" data-mobile-panel={mobilePanel}>
+              <aside id="director-mobile-scene" className="director-scene-panel space-y-4">
                 <h2 className="director-panel-title">
                   <Box className="h-4 w-4" /> 场景与布景
                 </h2>
@@ -795,7 +812,7 @@ function Workspace({ projectId }: { projectId: string }) {
                   )}
                 </div>
               </aside>
-              <section className="director-stage-panel">
+              <section id="director-mobile-preview" className="director-stage-panel">
                 <div className="director-viewport">
                   <DirectorViewport
                     ref={viewport}
@@ -874,7 +891,7 @@ function Workspace({ projectId }: { projectId: string }) {
                   </div>
                   <p className="director-view-hint">
                     {view === "layout"
-                      ? "拖动旋转 · 右键平移 · 滚轮缩放 · 选中人物可拖动坐标轴"
+                      ? <><span className="director-desktop-hint">拖动旋转 · 右键平移 · 滚轮缩放 · 选中人物可拖动坐标轴</span><span className="director-touch-hint">单指旋转 · 双指平移与缩放 · 点选对象后拖动坐标轴</span></>
                       : "实际取景 · 安全画框外不进入导出"}
                   </p>
                 </div>
@@ -1116,7 +1133,7 @@ function Workspace({ projectId }: { projectId: string }) {
                   </p>
                 </div>
               </section>
-              <aside className="director-inspector">
+              <aside id="director-mobile-inspector" className="director-inspector">
                 <div
                   className="director-inspector-tabs"
                   role="tablist"

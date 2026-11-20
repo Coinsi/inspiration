@@ -27,7 +27,7 @@ export function Modal({
   return createPortal(
     <div
       hidden={!open}
-      className={`fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8 ${!open ? "!hidden" : ""}`}
+      className={`studio-modal-layer fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8 ${!open ? "!hidden" : ""}`}
     >
       {/* 不透明底:完全遮住背景,随主题变色 */}
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
@@ -38,14 +38,13 @@ export function Modal({
         aria-labelledby={title ? titleId : undefined}
         aria-label={title ? undefined : "Dialog"}
         tabIndex={-1}
-        className="relative z-10 flex flex-col rounded-xl border border-border bg-card shadow-2xl w-full"
+        className="studio-modal-panel relative z-10 flex flex-col rounded-xl border border-border bg-card shadow-2xl w-full"
         style={{
           maxWidth: big ? "min(1180px, 95vw)" : width,
-          height: big ? "90vh" : "auto",
-          maxHeight: "90vh",
+          height: big ? "min(90dvh, 100%)" : "auto",
         }}
       >
-        <div className="flex items-center justify-between px-5 h-14 border-b border-border shrink-0">
+        <div className="studio-modal-heading flex items-center justify-between px-5 h-14 border-b border-border shrink-0">
           <div id={titleId} className="min-w-0 truncate font-medium">
             {title}
           </div>
@@ -54,6 +53,7 @@ export function Modal({
               onClick={() => setBig((b) => !b)}
               className="h-8 w-8 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
               title={big ? "还原" : "最大化"}
+              aria-label={big ? "还原" : "最大化"}
             >
               {big ? (
                 <Minimize2 className="h-4 w-4" />
@@ -65,6 +65,7 @@ export function Modal({
               onClick={onClose}
               className="h-8 w-8 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
               title="关闭"
+              aria-label="关闭"
             >
               <X className="h-4 w-4" />
             </button>

@@ -33,12 +33,26 @@
 .integrated-history.is-empty .conversation-compose textarea { min-height: 96px; font-size: 18px; }
 .integrated-history .conversation-heading { padding: 10px 22px; }
 @media (max-width: 767px) {
+  .workbench-chat-page.studio-page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .workbench-creation-tabs { flex-shrink: 0; }
+  .workbench-creation-tabs button { min-height: 44px; }
+  .conversation-workspace.integrated-history { flex: 1; min-height: 0; height: auto; }
+  .integrated-history .conversation-main { min-width: 0; }
   .integrated-history.is-empty .conversation-messages { padding: 34px 14px 24px; }
   .integrated-history .conversation-empty h3 { font-size: 25px; gap: 9px; }
   .integrated-history .conversation-empty h3 svg { width: 25px; height: 25px; }
   .integrated-history .conversation-compose { padding: 14px; border-radius: 16px; }
-  .integrated-history .conversation-tool { padding: 8px; }
+  .integrated-history .conversation-tool { padding: 8px; min-height: 44px; }
+  .integrated-history .conversation-send { width: 44px; height: 44px; }
+  .integrated-history .conversation-compose-tools { flex-wrap: wrap; }
+  .integrated-history .conversation-compose textarea { font-size: 16px; }
+  .integrated-history .conversation-heading { padding: 8px 12px; flex-wrap: wrap; }
+  .integrated-history :is(.conversation-work-trigger, .conversation-heading-title > button, .composer-model-trigger, .composer-control) { min-height: 44px; }
   .integrated-history .conversation-starters button { font-size: 13px; }
+}
+@media (max-width: 767px) and (max-height: 540px) {
+  .integrated-history.is-empty .conversation-messages { padding-block: 12px; }
+  .integrated-history.is-empty .conversation-compose textarea { min-height: 56px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .integrated-history .conversation-compose { transition: none; }

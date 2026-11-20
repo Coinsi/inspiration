@@ -257,7 +257,11 @@ function TimelineDraft({
   const [selectedTrackId, setSelectedTrackId] = useState("");
   const [trackFocus, setTrackFocus] = useState<"items" | "visuals" | "audio" | "subtitles">("items");
   const playback = useRef<import("./TimelinePlayback").PlaybackControls>(null);
-  const [propertiesOpen, setPropertiesOpen] = useState(hasContent);
+  const [propertiesOpen, setPropertiesOpen] = useState(
+    () => hasContent && !window.matchMedia("(max-width: 700px)").matches,
+  );
+  const propertiesRef = useRef<HTMLElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const [selectedVisual, setSelectedVisual] = useState("");
   const [trackTab, setTrackTab] = useState<"audio" | "subtitles">("audio");
   const openPanel = (next: typeof panel) => {
@@ -265,6 +269,16 @@ function TimelineDraft({
     setPropertiesOpen(true);
   };
   const activeClip = Math.min(clipPreview ?? 0, Math.max(0, clips.length - 1));
+  useEffect(() => {
+    if (!propertiesOpen || !window.matchMedia("(max-width: 700px)").matches) return;
+    const frame = requestAnimationFrame(() => {
+      propertiesRef.current?.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [propertiesOpen, panel, activeClip, selectedVisual, trackTab, selectedTrackId]);
   const [videoTools, setVideoTools] = useState<Generation | null>(null);
   const gens = useQuery({
     queryKey: ["gens", "timeline", timelineId],
@@ -589,6 +603,7 @@ function TimelineDraft({
   );
   return (
     <div
+      ref={workspaceRef}
       className={`timeline-draft editing-workspace ${hasContent ? "has-content" : "is-empty"} ${clips.length ? "has-clips" : ""} ${propertiesOpen ? "has-properties" : ""} ${exportOpen ? "is-exporting" : ""}`}
       tabIndex={-1}
       onKeyDown={(e) => {
@@ -1102,6 +1117,7 @@ function TimelineDraft({
         </fieldset>{" "}
       </Modal>
       <aside
+        ref={propertiesRef}
         className="editing-properties"
         id="editing-properties"
         aria-label={zh ? "剪辑属性" : "Editing inspector"}
@@ -1112,7 +1128,12 @@ function TimelineDraft({
           <button
             type="button"
             aria-label={zh ? "收起属性" : "Close inspector"}
-            onClick={() => setPropertiesOpen(false)}
+            onClick={() => {
+              setPropertiesOpen(false);
+              if (window.matchMedia("(max-width: 700px)").matches) {
+                workspaceRef.current?.querySelector(".timeline-preview-grid")?.scrollIntoView({ block: "start" });
+              }
+            }}
           >
             <X size={16} />
           </button>

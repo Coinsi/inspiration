@@ -1121,6 +1121,11 @@
   }
   .knowledge-toolbar-actions {
     width: 100%;
+    flex-wrap: wrap;
+  }
+  .knowledge-toolbar-actions > .search-field {
+    flex: 1 0 100%;
+    width: 100%;
   }
   .knowledge-search {
     flex: 1;
@@ -1130,6 +1135,7 @@
   .knowledge-toolbar-actions > button {
     font-size: 12px;
     padding-inline: 11px;
+    flex: 1;
   }
   .knowledge-toolbar-actions > button svg {
     width: 14px;
@@ -1147,6 +1153,8 @@
   }
   .knowledge-filter-options {
     gap: 15px;
+    flex-wrap: wrap;
+    max-width: 100%;
   }
   .knowledge-catalog {
     padding-top: 18px;
@@ -1214,23 +1222,40 @@
     display: none;
   }
   .knowledge-reader-workspace {
-    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .knowledge-reader-pane {
+    display: contents;
+  }
+  .knowledge-file-toolbar {
+    grid-area: 1 / 1;
+  }
+  .knowledge-file-body {
+    grid-area: 2 / 1;
+  }
+  .knowledge-reader-footnote {
+    grid-area: 3 / 1;
   }
   .knowledge-file-sidebar {
     display: none;
   }
   .show-files .knowledge-file-sidebar {
     display: flex;
-    position: absolute;
+    grid-area: 2 / 1 / 4 / 2;
     z-index: 2;
-    top: 55px;
-    bottom: 0;
     width: 100%;
+    min-height: 0;
     background: hsl(var(--card));
   }
   .knowledge-mobile-files {
     display: inline-flex;
     padding: 4px;
+    min-width: 44px;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
   }
   .knowledge-file-breadcrumb > svg {
     display: none;
@@ -1238,6 +1263,10 @@
   .knowledge-file-toolbar {
     padding: 10px 12px;
     gap: 7px;
+    flex-wrap: wrap;
+  }
+  .knowledge-file-breadcrumb {
+    flex: 1 1 100%;
   }
   .knowledge-file-controls {
     gap: 5px;
@@ -1295,6 +1324,24 @@
   }
   .knowledge-editor-notices:not(:empty) {
     padding: 0 16px;
+  }
+  .knowledge-icon-button {
+    width: 44px;
+    height: 44px;
+  }
+  .knowledge-tabs button,
+  .knowledge-categories button,
+  .knowledge-filter-options button,
+  .knowledge-card-footer button,
+  .knowledge-reader-action,
+  .knowledge-file-controls button,
+  .knowledge-mobile-files,
+  .knowledge-file-tree button {
+    min-height: 44px;
+  }
+  .knowledge-filter-options > button[aria-label="清除筛选"] {
+    min-width: 44px;
+    justify-content: center;
   }
 }
 @media (prefers-reduced-motion: reduce) {

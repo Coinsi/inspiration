@@ -629,7 +629,10 @@
   .writing-editor-header { flex-wrap: wrap; gap: 10px; }
   .writing-document-identity { flex: 1 1 100%; }
   .writing-editor-header h1 { font-size: 17px; }
-  .writing-header-actions { width: 100%; justify-content: flex-end; }
+  .writing-header-actions { position: relative; width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+  .writing-production-tools { position: static; }
+  .writing-production-tools > div { width: min(300px, 100%); max-height: min(420px, 65dvh); overflow-y: auto; }
+  .writing-production-tools > summary { min-height: 44px; }
   .writing-header-actions .writing-view-button > span { display: inline; }
   .writing-header-actions .writing-view-button { width: auto; padding: 0 8px; }
   .writing-editor-panel { min-height: 70vh; }

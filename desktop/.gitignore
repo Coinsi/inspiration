@@ -1,0 +1,6 @@
+node_modules/
+dist/
+build/icon.png
+build/icon.ico
+build/icon.icns
+test-results/

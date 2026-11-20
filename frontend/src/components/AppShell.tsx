@@ -17,7 +17,7 @@ import {
   Server,
   SlidersHorizontal,
 } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   NavLink,
   Outlet,
@@ -81,6 +81,10 @@ export default function AppShell() {
   }, []);
   useEffect(() => setMobileOpen(false), [location.pathname, location.search]);
   const mobileRef = useDialogFocus(mobileOpen, () => setMobileOpen(false));
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (workspaceRef.current) workspaceRef.current.inert = narrow && mobileOpen;
+  }, [narrow, mobileOpen]);
   const { t, lang } = useI18n();
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -138,7 +142,7 @@ export default function AppShell() {
           : "Inspiration";
 
   const iconBtn =
-    "h-8 w-8 rounded-md hover:bg-elevated flex items-center justify-center text-muted-foreground shrink-0 transition-colors";
+    "h-11 w-11 md:h-8 md:w-8 rounded-md hover:bg-elevated flex items-center justify-center text-muted-foreground shrink-0 transition-colors";
   const activeStage = WORKSPACE_STAGES.find((stage) =>
     stage.routes.includes(
       ["assets", "assets/trash", "library", "evidence", "generated"].includes(
@@ -353,8 +357,8 @@ export default function AppShell() {
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-16 shrink-0 items-center gap-1.5 sm:gap-3 bg-bg px-3 md:px-8">
+      <div ref={workspaceRef} className="flex min-w-0 flex-1 flex-col">
+        <header className="workspace-header flex min-h-16 shrink-0 items-center gap-1.5 sm:gap-3 bg-bg px-3 md:px-8">
           <button
             className={cn(iconBtn, "md:hidden")}
             onClick={() => setMobileOpen(true)}
@@ -373,12 +377,13 @@ export default function AppShell() {
           <ChevronRight className="hidden h-3 w-3 text-faint md:block" />
           <HeaderMenu
             align="left"
-            className="max-w-[38vw] sm:max-w-64"
+            className="flex-1 sm:flex-none sm:max-w-64"
             label={lang === "zh" ? "项目菜单" : "Project menu"}
             trigger={
               <>
-                <span className="truncate text-sm">
-                  {project?.name ?? "Inspiration"}
+                <span className="min-w-0 text-left">
+                  <span className="block truncate text-sm">{project?.name ?? "Inspiration"}</span>
+                  <span className="block truncate text-xs text-muted-foreground sm:hidden">{pageTitle}</span>
                 </span>
                 <ChevronDown size={13} className="shrink-0" />
               </>

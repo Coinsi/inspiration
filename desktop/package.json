@@ -1,0 +1,25 @@
+{
+  "name": "inspiration-desktop",
+  "productName": "Inspiration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Inspiration cloud creative workspace for Windows and macOS",
+  "author": "Inspiration",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:smoke": "node scripts/smoke.cjs",
+    "test:google-auth": "node scripts/google-auth-smoke.cjs",
+    "icons": "node scripts/icons.cjs",
+    "pack": "npm run icons && electron-builder --dir --publish never",
+    "dist:win": "npm run icons && electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "npm run icons && electron-builder --mac dmg --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3",
+    "playwright": "1.64.1",
+    "sharp": "0.35.5"
+  }
+}

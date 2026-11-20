@@ -645,6 +645,33 @@
   top: 3px;
   touch-action: none;
 }
+
+@media (max-width: 700px) {
+  .cuts-page button,
+  .cuts-page .studio-select-trigger,
+  .cuts-page input:not([type="checkbox"]):not([type="range"]) {
+    min-height: 44px;
+  }
+  .cuts-page input:not([type="checkbox"]):not([type="range"]),
+  .cuts-page textarea { font-size: 16px; }
+  .timeline-overview { --timeline-lane-step: 48px; }
+  .timeline-overview header > div { flex-wrap: wrap; gap: 8px; }
+  .timeline-overview header button { min-width: 44px; }
+  .timeline-ruler { height: 44px; }
+  .timeline-overview-scroll { overscroll-behavior-x: contain; }
+  .timeline-audio-lane,
+  .timeline-caption-lane,
+  .timeline-visual-lane { min-height: 52px; }
+  .cuts-page .timeline-audio-lane .timeline-drag-shell,
+  .cuts-page .timeline-visual-lane .timeline-drag-shell,
+  .cuts-page .timeline-caption-lane .timeline-drag-shell { height: 44px; }
+  .timeline-drag-shell .timeline-trim-handle { width: 18px; }
+  .timeline-drag-shell > button[data-drag-mode="move"] { padding-inline: 20px; }
+  .timeline-live-controls { flex-wrap: wrap; }
+  .timeline-live-controls > button { min-width: 44px; }
+  .timeline-live-controls .timeline-composition-scrub { min-width: 90px; min-height: 44px; }
+  .timeline-selection-tools > button { min-width: 44px; }
+}
 .timeline-drag-shell > button[data-drag-mode="move"] {
   position: absolute;
   inset: 0;

@@ -1,0 +1,23 @@
+/* Shared controls retain their desktop density; touch surfaces get finger-sized targets. */
+.studio-modal-panel { max-height: 90dvh; }
+@media (max-width: 767px) {
+  .studio-modal-layer {
+    top: var(--visual-viewport-top, 0px);
+    bottom: auto;
+    height: var(--visual-viewport-height, 100dvh);
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+  .studio-modal-panel { max-height: 100%; min-width: 0; }
+  .studio-modal-heading { padding-inline: 16px; gap: 8px; }
+  .studio-modal-heading button { min-width: 44px; min-height: 44px; }
+  .studio-modal-panel > :last-child { overscroll-behavior: contain; overflow-wrap: anywhere; }
+  /* A readable input size also prevents iOS from zooming the viewport on focus. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea {
+    font-size: 16px;
+  }
+  .studio-input { min-height: 44px; }
+}
+@media (pointer: coarse) {
+  .studio-button, .studio-select-trigger { min-height: 44px; min-width: 44px; }
+  .studio-button, .studio-select-trigger, .studio-select-option { touch-action: manipulation; }
+}

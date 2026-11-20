@@ -387,6 +387,12 @@
     gap: 10px;
     margin-bottom: 20px;
   }
+  .settings-heading-icon {
+    flex-shrink: 0;
+  }
+  .settings-hero > div:not(.settings-heading-icon) {
+    min-width: 0;
+  }
   .settings-hero h1 {
     font-size: 23px;
   }
@@ -406,6 +412,8 @@
     border-bottom: 1px solid hsl(var(--border));
     padding: 10px 0;
     gap: 4px;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
   }
   .settings-sidebar > div {
     flex-shrink: 0;
@@ -420,6 +428,7 @@
     gap: 7px;
     margin: 0;
     white-space: nowrap;
+    min-height: 44px;
   }
   .settings-sidebar strong {
     font-size: 12px;
@@ -451,16 +460,20 @@
   }
   .settings-quota-summary {
     padding: 20px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-wrap: anywhere;
   }
   .settings-quota-summary strong {
     font-size: 26px;
   }
   .settings-theme-options {
     width: 100%;
+    flex-wrap: wrap;
   }
   .settings-theme-options button {
     flex: 1;
     justify-content: center;
+    padding-inline: 16px;
   }
   .settings-content .model-center-heading {
     align-items: flex-start;
@@ -480,5 +493,16 @@
   }
   .skill-related-links > span {
     width: 100%;
+  }
+  .settings-connection-card {
+    padding: 18px;
+    gap: 12px;
+  }
+  .settings-connection-card > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .settings-save-row {
+    flex-wrap: wrap;
   }
 }

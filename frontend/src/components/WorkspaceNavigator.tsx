@@ -26,7 +26,7 @@ export function WorkspaceNavigator({
   );
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/50 px-4 pt-[12vh] backdrop-blur-sm"
+      className="studio-modal-layer fixed inset-0 z-[100] flex items-start justify-center bg-black/50 px-4 pt-[12vh] backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -36,9 +36,9 @@ export function WorkspaceNavigator({
         role="dialog"
         aria-modal="true"
         aria-labelledby="navigator-title"
-        className="w-full max-w-xl overflow-hidden rounded-2xl border bg-card shadow-2xl"
+        className="studio-modal-panel flex min-h-0 w-full max-w-xl flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl"
       >
-        <div className="border-b p-4">
+        <div className="shrink-0 border-b p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 id="navigator-title" className="text-sm font-medium">
               {zh
@@ -48,7 +48,7 @@ export function WorkspaceNavigator({
             <button
               onClick={onClose}
               aria-label={zh ? "关闭快速导航" : "Close quick navigation"}
-              className="rounded-lg p-2 text-muted-foreground hover:bg-elevated"
+              className="h-11 w-11 flex shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:bg-elevated"
             >
               <X className="h-4 w-4" />
             </button>
@@ -75,7 +75,7 @@ export function WorkspaceNavigator({
           />
         </div>
         <div
-          className="max-h-[52vh] overflow-y-auto p-2"
+          className="min-h-0 max-h-[52dvh] flex-1 overflow-y-auto p-2"
           onKeyDown={(e) => {
             if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
             const links = Array.from(

@@ -26,6 +26,7 @@ export function AccountMenu() {
         </p>
       )}
       <HeaderMenu
+        className="shrink-0"
         label={zh ? "用户菜单" : "Account menu"}
         trigger={
           <>
@@ -34,7 +35,7 @@ export function AccountMenu() {
               name={me?.user.display_name}
               size={28}
             />
-            <ChevronDown size={12} />
+            <ChevronDown size={12} className="hidden sm:block" />
           </>
         }
       >

@@ -10,7 +10,7 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,10 @@ import { useTheme } from "@/lib/theme";
 import { LoginBackground } from "@/components/LoginBackground";
 import { preloadEntry } from "@/lib/preload-entry";
 import { GoogleAuthButton } from "@/components/GoogleAuthButton";
-import { googleAuthError, safeAuthNext, startGoogleAuth, type AuthProviders } from "@/lib/google-auth";
+import { cancelDesktopGoogleAuth, getDesktopGoogleAuth, googleAuthError, safeAuthNext, startGoogleAuth, type AuthProviders } from "@/lib/google-auth";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, loginWithDesktopGoogle } = useAuth();
   const location = useLocation();
   const registering = location.pathname === "/register";
   const requestedPath = new URLSearchParams(location.search).get("next") || "";
@@ -40,6 +40,8 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [passwordBusy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const desktopAttempt = useRef<AbortController | null>(null);
+  const desktopGoogle = !!getDesktopGoogleAuth();
   const busy = passwordBusy || googleBusy;
   const providers = useQuery({
     queryKey: ["auth-providers"],
@@ -50,10 +52,50 @@ export default function Login() {
   const google = providers.data?.providers.find((provider) => provider.id === "google");
   const showGoogle = google && (!registering || google.registration_enabled);
 
+  useEffect(() => {
+    setGoogleBusy(false);
+    return () => {
+      const attempt = desktopAttempt.current;
+      if (!attempt) return;
+      desktopAttempt.current = null;
+      attempt.abort();
+      void cancelDesktopGoogleAuth().catch(() => {});
+    };
+  }, [location.key]);
+
+  function cancelGoogleLogin() {
+    const attempt = desktopAttempt.current;
+    if (!attempt) return;
+    desktopAttempt.current = null;
+    attempt.abort();
+    setGoogleBusy(false);
+    setError(googleAuthError("google_cancelled", zh));
+    void cancelDesktopGoogleAuth().catch(() => {});
+  }
+
   async function signInWithGoogle() {
-    if (busy) return;
+    if (busy || desktopAttempt.current) return;
     setGoogleBusy(true);
     setError(null);
+    if (desktopGoogle) {
+      const attempt = new AbortController();
+      desktopAttempt.current = attempt;
+      try {
+        const next = await loginWithDesktopGoogle(returnPath, zh ? "zh" : "en", attempt.signal);
+        if (desktopAttempt.current !== attempt || attempt.signal.aborted) return;
+        desktopAttempt.current = null;
+        navigate(safeAuthNext(next), { replace: true });
+      } catch (reason) {
+        if (desktopAttempt.current === attempt && !attempt.signal.aborted)
+          setError(googleAuthError(reason, zh));
+      } finally {
+        if (desktopAttempt.current === attempt) {
+          desktopAttempt.current = null;
+          setGoogleBusy(false);
+        }
+      }
+      return;
+    }
     try {
       await startGoogleAuth(returnPath);
     } catch (reason) {
@@ -198,6 +240,16 @@ export default function Login() {
               <GoogleAuthButton loading={googleBusy} disabled={busy} onClick={() => void signInWithGoogle()}>
                 {registering ? (zh ? "使用 Google 注册" : "Sign up with Google") : (zh ? "使用 Google 登录" : "Sign in with Google")}
               </GoogleAuthButton>
+              {desktopGoogle && googleBusy && (
+                <div className="mt-3 text-sm text-muted-foreground">
+                  <p role="status">
+                    {zh ? "请在浏览器中完成 Google 登录，完成后会自动返回客户端。" : "Complete Google sign-in in your browser. You will return to the app automatically."}
+                  </p>
+                  <Button type="button" variant="ghost" className="mt-2" onClick={cancelGoogleLogin}>
+                    {zh ? "取消登录" : "Cancel sign-in"}
+                  </Button>
+                </div>
+              )}
               <div className="login-google-divider">
                 {zh ? "或使用邮箱和密码" : "or use your email and password"}
               </div>

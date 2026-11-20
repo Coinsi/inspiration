@@ -26,17 +26,42 @@
 .home-brand { font-size: 22px; }.home-brand small { display: none; }
 @media (max-width: 767px) {
   .studio-shell, .studio-home { padding: 0; }
+  .studio-shell {
+    height: var(--visual-viewport-height, 100dvh);
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+  }
+  .workspace-header { padding-top: env(safe-area-inset-top); }
+  .workspace-header button[aria-haspopup="menu"] { min-height: 44px; }
+  .studio-shell .app-main { overscroll-behavior-y: contain; padding-bottom: env(safe-area-inset-bottom); }
   .studio-shell > div.flex, .home-main { border-radius: 0; }
-  .studio-shell .studio-sidebar { background: hsl(var(--surface)); }
   .home-project-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
   .home-project-filters { display: contents; }
   .home-project-toolbar > h2 { grid-row: 1; grid-column: 1; }
   .home-project-trash { grid-row: 1; grid-column: 2; justify-self: end; }
   .home-project-search { grid-row: 2; grid-column: 1; min-width: 0; }
   .home-project-sort { grid-row: 2; grid-column: 2; }
+  .studio-shell .studio-sidebar {
+    background: hsl(var(--surface));
+    width: min(300px, calc(100vw - 48px));
+    height: var(--visual-viewport-height, 100dvh);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: studio-drawer-enter 160ms ease-out;
+  }
+  .studio-sidebar-toggle { width: 44px; height: 44px; flex-basis: 44px; }
+  .studio-sidebar :is(nav a, nav button, .shell-conversation-list > button) { min-height: 44px; }
+  .home-header { padding-top: max(12px, env(safe-area-inset-top)); }
+  .home-content { padding-bottom: max(36px, env(safe-area-inset-bottom)); }
+  .creative-composer textarea { font-size: 16px; }
+  .creative-send { width: 44px; height: 44px; }
+  .creative-mode, .creative-suggestions button { min-height: 44px; }
+  .creative-project { max-width: none; min-width: 0; flex-basis: 100%; order: 1; }
+  .creative-project .studio-select-trigger { max-width: none; }
 }
+@keyframes studio-drawer-enter { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .shell-conversation-list > button, .studio-sidebar-toggle, .studio-sidebar nav > div > div > button svg { transition: none; }
+  .studio-shell .studio-sidebar { animation: none; }
 }
 .workspace-loading { padding: clamp(24px, 4vw, 48px); width: 100%; }
 .workspace-loading-title, .workspace-loading-toolbar, .workspace-loading-grid > div { background: hsl(var(--elevated)); border-radius: 10px; }

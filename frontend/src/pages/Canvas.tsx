@@ -39,7 +39,6 @@ import {
   ImagePlus,
   Film,
   Music,
-  X,
   History,
   AlignLeft,
 } from "lucide-react";
@@ -251,7 +250,7 @@ function Editor({
     [saved, setSaved] = useState("");
   const [error, setError] = useState(""),
     [working, setBusy] = useState(false),
-    [hand, setHand] = useState(false),
+    [hand, setHand] = useState(() => window.matchMedia("(pointer: coarse)").matches),
     [panel, setPanel] = useState<"edit" | "runs" | "history">("edit");
   const busy = working || readOnly;
   const [past, setPast] = useState<Graph[]>([]),
@@ -2002,6 +2001,7 @@ function Editor({
                 size="icon"
                 variant={hand ? "ghost" : "default"}
                 aria-label="区域选择"
+                aria-pressed={!hand}
                 onClick={() => setHand(false)}
               >
                 <MousePointer2 size={16} />
@@ -2010,6 +2010,7 @@ function Editor({
                 size="icon"
                 variant={hand ? "default" : "ghost"}
                 aria-label="抓手平移"
+                aria-pressed={hand}
                 onClick={() => setHand(true)}
               >
                 <Hand size={16} />
@@ -2065,16 +2066,8 @@ function Editor({
               </Button>
             </div>
           </div>
-          {inspectorOpen && (
-            <button
-              className="canvas-inspector-close"
-              aria-label="关闭画布面板"
-              onClick={() => setInspectorOpen(false)}
-            >
-              <X size={16} />
-            </button>
-          )}
           <CanvasInspector
+            onClose={() => setInspectorOpen(false)}
             {...{
               projectId,
               path,
@@ -2222,9 +2215,8 @@ function Editor({
         />
       )}
       <p className="canvas-keyboard-hint">
-        拖线到空白处新增节点 <span>·</span> Shift 多选 <span>·</span>{" "}
-        空格拖动画布 <span>·</span> Ctrl / ⌘ D 复制 <span>·</span> Ctrl / ⌘ Z
-        撤销
+        <span className="canvas-desktop-hint">拖线到空白处新增节点 · Shift 多选 · 空格拖动画布 · Ctrl / ⌘ D 复制 · Ctrl / ⌘ Z 撤销</span>
+        <span className="canvas-touch-hint">单指平移 · 双指缩放 · 双击节点编辑 · 切换箭头框选</span>
       </p>
     </>
   );

@@ -106,7 +106,7 @@ export function PromptLibrary({
         </Button>
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs text-muted-foreground mb-2">
+            <p className="break-words text-xs text-muted-foreground mb-2">
               {categories[selected.category] ?? selected.category} · {selected.code}
             </p>
             <DetailHeading className="text-xl font-semibold break-words">{selected.name}</DetailHeading>
@@ -180,7 +180,7 @@ export function PromptLibrary({
             key={key}
             aria-pressed={category === key}
             onClick={() => setCategory(key)}
-            className={`px-3 py-1.5 text-sm rounded-lg ${category === key ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-elevated"}`}
+            className={`min-h-11 sm:min-h-0 px-3 py-1.5 text-sm rounded-lg ${category === key ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-elevated"}`}
           >
             {label}
           </button>

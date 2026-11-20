@@ -199,7 +199,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
             : "The original is unavailable or in the trash. Independent frames and clips are retained."}
         </p>
       )}
-      <div className="mb-5 flex gap-2 border-b pb-3">
+      <div className="mb-5 flex flex-wrap gap-2 border-b pb-3">
         <Button
           variant={view === "videos" ? "default" : "ghost"}
           size="sm"
@@ -320,7 +320,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
           )}
           {(!!list.data?.total || !!search || deleted || folder !== "all") && (
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-surface p-3">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 w-full flex-wrap items-center gap-2">
                 <SearchField
                   label={zh ? "搜索素材" : "Search media"}
                   value={search}
@@ -328,7 +328,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                   placeholder={
                     zh ? "搜索名称、说明或标签" : "Find media by name"
                   }
-                  className="w-64 max-w-full"
+                  className="w-full sm:w-64 max-w-full"
                 />
                 <StudioSelect
                   aria-label={zh ? "素材排序" : "Sort media"}
@@ -457,7 +457,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                     >
                       <div className="relative aspect-video bg-elevated">
                         {organizing && (
-                          <label className="absolute left-2 top-2 z-10 flex items-center rounded bg-background/90 p-2 shadow-sm">
+                          <label className="absolute left-2 top-2 z-10 flex min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center rounded bg-background/90 p-2 shadow-sm">
                             <input
                               type="checkbox"
                               aria-label={`${zh ? "选择" : "Select"} ${item.name}`}
@@ -511,7 +511,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                               setOpenId(item.id);
                             }}
                           >
-                            <span className="grid h-11 w-11 place-items-center rounded-full border border-white/30 bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                            <span className="library-preview-affordance grid h-11 w-11 place-items-center rounded-full border border-white/30 bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                               {kind === "image" ? (
                                 <ImageIcon className="h-5 w-5" />
                               ) : (
@@ -547,7 +547,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
                             : `${item.usage_count} references · ${item.versions.length} versions`}
                         </p>
                         {v?.error && (
-                          <p role="alert" className="text-xs text-danger">
+                          <p role="alert" className="break-words text-xs text-danger">
                             {v.error}
                           </p>
                         )}

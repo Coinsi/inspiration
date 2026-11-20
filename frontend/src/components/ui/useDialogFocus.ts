@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 const focusable =
   'button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"]), select:not(:disabled):not([tabindex="-1"]), textarea:not(:disabled):not([tabindex="-1"]), summary, [tabindex="0"]';
 const stack: symbol[] = [];
+let previousBodyOverflow = "";
 
 /** Trap the topmost overlay only, and restore the invoking control on close. */
 export function useDialogFocus(open: boolean, onClose: () => void) {
@@ -18,6 +19,10 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
   useEffect(() => {
     if (!open) return;
     const id = Symbol();
+    if (stack.length === 0) {
+      previousBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
     stack.push(id);
     const previous = returnFocus.current;
     const frame = requestAnimationFrame(() => {
@@ -69,6 +74,7 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
     return () => {
       cancelAnimationFrame(frame);
       stack.splice(stack.indexOf(id), 1);
+      if (stack.length === 0) document.body.style.overflow = previousBodyOverflow;
       document.removeEventListener("keydown", keydown, true);
       if (previous?.isConnected) previous.focus();
     };

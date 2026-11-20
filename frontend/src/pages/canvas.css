@@ -101,13 +101,13 @@
   box-shadow: 0 18px 65px #0003;
 }
 .canvas-inspector > div:first-child {
-  padding-right: 32px;
+  padding-right: 8px;
 }
 .canvas-inspector-close {
-  position: absolute;
-  z-index: 23;
-  right: 24px;
-  top: 26px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
   padding: 5px;
   border-radius: 6px;
   color: hsl(var(--muted));
@@ -473,6 +473,9 @@
 .canvas-keyboard-hint {
   display: none;
 }
+.canvas-touch-hint {
+  display: none;
+}
 .canvas-picker {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);
@@ -553,6 +556,12 @@
   .canvas-page-header {
     padding: 8px 12px 0;
     gap: 6px;
+    flex-wrap: wrap;
+  }
+  .canvas-page-header > div {
+    min-width: 0;
+    flex: 1;
+    justify-content: flex-end;
   }
   .canvas-page-header h1 {
     font-size: 12px;
@@ -563,7 +572,8 @@
   }
   .canvas-page-header button {
     padding-inline: 8px;
-    font-size: 11px;
+    font-size: 12px;
+    height: 44px;
   }
   .canvas-document-bar {
     padding: 6px 12px 9px;
@@ -571,51 +581,82 @@
     gap: 3px;
   }
   .canvas-document-bar > input {
-    width: calc(100% - 100px) !important;
-    height: 28px;
+    width: calc(100% - 106px) !important;
+    min-width: 0;
+    height: 44px;
+    font-size: 16px;
   }
   .canvas-save-status {
     max-width: 90px;
   }
   .canvas-document-bar > button {
-    height: 30px;
+    height: 44px;
+    min-width: 44px;
   }
   .canvas-document-bar > button:nth-last-child(2) {
-    margin-left: auto;
+    margin-left: 0;
   }
   .canvas-addbar {
     left: 10px;
     top: 12px;
   }
   .canvas-addbar > button {
-    height: 30px;
+    height: 44px;
     padding-inline: 10px;
   }
+  .canvas-add-menu {
+    max-height: max(120px, min(420px, calc(100dvh - 440px)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .canvas-bottom-tools {
-    bottom: 16px;
+    bottom: 10px;
     padding: 4px;
     gap: 1px;
   }
   .canvas-bottom-tools button {
-    width: 30px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
   }
   .canvas-surface .react-flow__controls {
-    bottom: 65px;
+    bottom: 70px;
     left: 0;
   }
+  .canvas-surface .react-flow__controls-button {
+    width: 40px;
+    height: 40px;
+  }
   .canvas-inspector {
-    width: min(320px, calc(100% - 20px));
+    width: calc(100% - 20px);
     right: 10px;
-    top: 10px;
-    bottom: 68px;
+    top: auto;
+    bottom: 0;
+    max-height: calc(100% - 72px);
+    height: min(62dvh, 520px);
+    border-radius: 16px 16px 0 0;
+    overscroll-behavior: contain;
+  }
+  .canvas-inspector-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: hsl(var(--card));
   }
   .canvas-inspector-close {
-    right: 18px;
-    top: 23px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .canvas-inspector button,
+  .canvas-inspector .studio-select-trigger {
+    min-height: 44px;
+  }
+  .canvas-inspector input:not([type="checkbox"]),
+  .canvas-inspector textarea {
+    font-size: 16px;
   }
   .canvas-selection-actions {
-    top: 67px;
+    top: 78px;
     max-width: calc(100% - 20px);
     overflow: auto;
   }
@@ -628,6 +669,20 @@
   .canvas-picker-grid {
     grid-template-columns: 1fr;
   }
+  .canvas-keyboard-hint {
+    display: block;
+    flex-shrink: 0;
+    padding: 7px 12px;
+    font-size: 11px;
+    text-align: center;
+    color: hsl(var(--muted));
+  }
+  .canvas-desktop-hint { display: none; }
+  .canvas-touch-hint { display: inline; }
+  .canvas-empty { gap: 10px; }
+  .canvas-empty-mark { width: 48px; height: 48px; margin: 0; }
+  .canvas-empty h2 { font-size: 20px; }
+  .canvas-empty button { min-height: 44px; }
 }
 
 .canvas-node-composer .canvas-node-generate {
@@ -1158,11 +1213,15 @@
   .canvas-tools-menu {
     left: 0;
     max-width: calc(100vw - 70px);
+    max-height: max(120px, min(380px, calc(100dvh - 440px)));
+    overscroll-behavior: contain;
   }
   .canvas-reuse-toggle {
-    max-width: 140px;
+    max-width: none;
+    flex: 1 0 100%;
+    min-height: 36px;
     white-space: normal;
-    font-size: 10px;
+    font-size: 12px;
   }
   .canvas-library-controls {
     grid-template-columns: 1fr 1fr;

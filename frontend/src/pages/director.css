@@ -14,6 +14,10 @@
   min-height: 640px;
   min-width: 0;
 }
+.director-mobile-tabs,
+.director-touch-hint {
+  display: none;
+}
 .director-page-header {
   display: flex;
   align-items: center;
@@ -474,4 +478,72 @@
   .director-delivery {
     padding: 12px;
   }
+}
+
+/* Keep the preview and each editing panel usable at phone width. */
+@media (max-width: 760px) {
+  .director-mobile-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: hsl(var(--bg));
+    border-top: 1px solid hsl(var(--border));
+  }
+  .director-mobile-tabs button {
+    min-height: 44px;
+    flex: 1;
+    padding: 8px 4px;
+    font-size: 13px;
+    border-radius: 8px;
+    color: hsl(var(--muted));
+  }
+  .director-mobile-tabs button[aria-pressed="true"] {
+    background: hsl(var(--primary) / .12);
+    color: hsl(var(--fg));
+  }
+  .director-workspace { display: block; }
+  .director-workspace[data-mobile-panel="preview"] > .director-scene-panel,
+  .director-workspace[data-mobile-panel="preview"] > .director-inspector,
+  .director-workspace[data-mobile-panel="scene"] > .director-stage-panel,
+  .director-workspace[data-mobile-panel="scene"] > .director-inspector,
+  .director-workspace[data-mobile-panel="inspector"] > .director-stage-panel,
+  .director-workspace[data-mobile-panel="inspector"] > .director-scene-panel {
+    display: none;
+  }
+  .director-page button,
+  .director-page .studio-select-trigger,
+  .director-page input:not([type="checkbox"]):not([type="range"]) {
+    min-height: 44px;
+  }
+  .director-page input:not([type="checkbox"]):not([type="range"]),
+  .director-page textarea { font-size: 16px; }
+  .director-document-bar > .studio-select-trigger { flex: 1; min-width: 0; }
+  .director-document-bar > div { flex-wrap: wrap; }
+  .director-document-bar > span { display: block; flex: 1 0 100%; }
+  .director-scene-panel,
+  .director-inspector { max-height: none; border-inline: 0; }
+  .director-object-list { max-height: none; }
+  .director-viewport { min-height: 340px; height: 48dvh; }
+  .director-view-toolbar { top: 8px; left: 8px; }
+  .director-view-toolbar button { padding-inline: 8px; }
+  .director-view-actions { top: 68px; right: 8px; }
+  .director-view-actions button { min-width: 44px; }
+  .director-angle-toolbar { top: 68px; left: 8px; }
+  .director-angle-toolbar button { min-width: 44px; }
+  .director-desktop-hint { display: none; }
+  .director-touch-hint { display: inline; }
+  .director-view-hint { font-size: 11px; }
+  .director-playback { gap: 8px; padding-inline: 12px; }
+  .director-playback button { width: 44px; flex-shrink: 0; }
+  .director-playback input { min-height: 44px; }
+  .director-motion-track { height: 44px; margin-inline: 20px; }
+  .director-motion-track::before { top: 21px; }
+  .director-motion-track button { width: 36px; top: 0; font-size: 12px; }
+  .director-motion-playhead { height: 44px; }
+  .director-delivery .director-panel-title { flex-wrap: wrap; }
+  .director-delivery .studio-select-trigger { max-width: 100%; }
+  .director-inspector input[type="color"] { width: 44px; }
 }

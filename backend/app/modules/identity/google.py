@@ -30,6 +30,9 @@ CALLBACK_PATH = "/api/v1/auth/google/callback"
 COOKIE_PATH = "/api/v1/auth/google"
 BROWSER_COOKIE = "oauth_google_browser"
 EXCHANGE_COOKIE = "oauth_google_exchange"
+DESKTOP_BROWSER_COOKIE = "oauth_google_desktop_browser"
+DESKTOP_BROWSER_PATH = "/api/v1/auth/google/desktop/browser"
+DESKTOP_STATE_PREFIX = "desktop."
 STATE_TTL = 600
 EXCHANGE_TTL = 60
 _OPAQUE_TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
@@ -168,7 +171,7 @@ def safe_next(raw: str) -> str:
 
 
 def authorization_url(*, state: str, verifier: str, nonce: str) -> str:
-    challenge = jwt.utils.base64url_encode(hashlib.sha256(verifier.encode()).digest()).decode()
+    challenge = pkce_challenge(verifier)
     return (
         AUTHORIZATION_URL
         + "?"
@@ -188,8 +191,14 @@ def authorization_url(*, state: str, verifier: str, nonce: str) -> str:
     )
 
 
+def pkce_challenge(verifier: str) -> str:
+    return jwt.utils.base64url_encode(hashlib.sha256(verifier.encode()).digest()).decode()
+
+
 def store_transaction(db, *, browser: str, kind: str, payload: dict, ttl: int) -> str:
     token = secrets.token_urlsafe(32)
+    if kind == "desktop_state":
+        token = DESKTOP_STATE_PREFIX + token
     now = datetime.now(UTC)
     db.execute(delete(OAuthTransaction).where(OAuthTransaction.expires_at < now))
     db.add(
@@ -206,8 +215,15 @@ def store_transaction(db, *, browser: str, kind: str, payload: dict, ttl: int) -
 
 
 def consume_transaction(db, *, token: str, browser: str, kind: str) -> dict:
-    error = "google_state_invalid" if kind == "state" else "google_exchange_invalid"
-    if not _OPAQUE_TOKEN.fullmatch(token) or not _OPAQUE_TOKEN.fullmatch(browser):
+    error = (
+        "google_state_invalid" if kind in {"state", "desktop_state"} else "google_exchange_invalid"
+    )
+    opaque = token
+    if kind == "desktop_state":
+        if not token.startswith(DESKTOP_STATE_PREFIX):
+            raise GoogleAuthError(error)
+        opaque = token[len(DESKTOP_STATE_PREFIX) :]
+    if not _OPAQUE_TOKEN.fullmatch(opaque) or not _OPAQUE_TOKEN.fullmatch(browser):
         raise GoogleAuthError(error)
     # The delete commits independently before network I/O or account changes. A failed
     # verification must not resurrect a consumed state when the request rolls back.
@@ -225,6 +241,27 @@ def consume_transaction(db, *, token: str, browser: str, kind: str) -> dict:
         transaction.commit()
     if payload is None:
         raise GoogleAuthError(error)
+    return payload
+
+
+def consume_desktop_bootstrap(db, ticket: str) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", ticket):
+        raise GoogleAuthError("google_state_invalid")
+    # The bootstrap is a short-lived capability to start authorization, never to
+    # redeem it. The application verifier is separate and absent from this URL.
+    with Session(bind=db.get_bind()) as transaction:
+        payload = transaction.scalar(
+            delete(OAuthTransaction)
+            .where(
+                OAuthTransaction.token_hash == token_hash(ticket),
+                OAuthTransaction.kind == "desktop_boot",
+                OAuthTransaction.expires_at > datetime.now(UTC),
+            )
+            .returning(OAuthTransaction.payload)
+        )
+        transaction.commit()
+    if payload is None:
+        raise GoogleAuthError("google_state_invalid")
     return payload
 
 

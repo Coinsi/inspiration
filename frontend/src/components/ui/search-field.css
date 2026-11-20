@@ -79,3 +79,11 @@
     transition: none;
   }
 }
+@media (pointer: coarse) {
+  .search-field { min-height: 44px; padding-right: 0; }
+  .search-field-end { width: 44px; }
+  .search-field-end button { width: 44px; height: 44px; }
+}
+@media (max-width: 767px) {
+  .search-field > input { font-size: 16px; }
+}

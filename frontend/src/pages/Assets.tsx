@@ -223,7 +223,7 @@ function AssetsContent() {
         </div>
       </div>
       <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-border pb-4">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
           {selecting ? (
             <>
               <span className="text-sm text-muted-foreground">
@@ -298,7 +298,7 @@ function AssetsContent() {
                 }
                 value={q}
                 onValueChange={setQ}
-                className="w-72 max-w-full"
+                className="w-full sm:w-72 max-w-full"
               />
               <div className="flex rounded-lg border bg-card p-0.5">
                 {(
@@ -322,18 +322,18 @@ function AssetsContent() {
                     title={v.label}
                     aria-pressed={view === v.key}
                     onClick={() => setView(v.key)}
-                    className={`p-2 rounded-md ${view === v.key ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}
+                    className={`min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 p-2 rounded-md ${view === v.key ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}
                   >
                     <v.icon size={16} />
                   </button>
                 ))}
               </div>
-              <details className="relative">
-                <summary className="cursor-pointer rounded-lg border px-3 py-2 text-sm">
+              <details className="relative w-full sm:w-auto">
+                <summary className="cursor-pointer rounded-lg border px-3 py-3 sm:py-2 text-sm">
                   {zh ? "筛选与管理" : "Filter & manage"}
                   {tag ? " · 1" : ""}
                 </summary>
-                <div className="absolute top-full right-0 mt-2 z-20 w-60 rounded-xl border bg-card shadow-xl p-4 space-y-3">
+                <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-2 z-20 w-full sm:w-60 rounded-xl border bg-card shadow-xl p-4 space-y-3">
                   <Input
                     aria-label={tr("assets.filterTag")}
                     placeholder={tr("assets.filterTag")}
@@ -796,7 +796,65 @@ function ListView({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-card">
+    <>
+      <div className="space-y-2 sm:hidden">
+        {assets.map((a) => {
+          const locked = a.status === "locked";
+          return (
+            <button
+              key={a.id}
+              type="button"
+              aria-label={`${a.name} · ${tr(`asset.${a.type}`)}`}
+              aria-pressed={selecting ? selected.has(a.id) : undefined}
+              disabled={selecting && locked}
+              onClick={() => (selecting ? onToggle(a.id) : onOpen(a.id))}
+              className={`flex w-full items-start gap-3 rounded-lg border bg-card p-3 text-left transition-colors active:bg-elevated ${selecting && selected.has(a.id) ? "border-primary bg-primary/10" : "border-border"} disabled:opacity-50`}
+            >
+              <span className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-elevated">
+                {a.representative_blob_hash ? (
+                  <img
+                    src={blobUrl(projectId, a.representative_blob_hash, "thumbnail")}
+                    loading="lazy"
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <ImageOff className="h-5 w-5 text-muted-foreground" />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <span className="min-w-0 break-words">{a.name}</span>
+                  {locked && (
+                    <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </span>
+                <span className="mt-1 block break-all text-xs text-muted-foreground">
+                  {tr(`asset.${a.type}`)} · {a.code}
+                </span>
+                <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>{tr("detail.ref")} {a.ref_count ?? 0}</span>
+                  <span>{tr("detail.gen")} {a.gen_count ?? 0}</span>
+                  <span>{tr("assets.colShots")} {a.shot_count ?? 0}</span>
+                </span>
+                {!!a.tags?.length && (
+                  <span className="mt-2 block break-words text-xs text-muted-foreground">
+                    {a.tags.slice(0, 3).map((tag) => `#${tag}`).join(" · ")}
+                  </span>
+                )}
+              </span>
+              {selecting && !locked && (
+                selected.has(a.id) ? (
+                  <CheckSquare className="h-5 w-5 shrink-0 text-primary" />
+                ) : (
+                  <Square className="h-5 w-5 shrink-0 text-muted-foreground" />
+                )
+              )}
+            </button>
+          );
+        })}
+      </div>
+    <div className="hidden overflow-x-auto rounded-lg border border-border bg-card sm:block">
       <table className="min-w-[620px] w-full text-sm">
         <thead className="border-b border-border bg-elevated/40">
           <tr>
@@ -904,6 +962,7 @@ function ListView({
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
@@ -920,7 +979,7 @@ function Chip({
     <button
       onClick={onClick}
       aria-pressed={active}
-      className={`text-sm px-3 py-1.5 rounded-md border transition-colors ${
+      className={`min-h-11 sm:min-h-0 text-sm px-3 py-1.5 rounded-md border transition-colors ${
         active
           ? "bg-primary/15 border-primary/40 text-primary"
           : "border-border text-muted-foreground hover:text-foreground"

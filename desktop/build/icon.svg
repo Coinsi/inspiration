@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="200" fill="#102d27"/>
+  <!-- Reuses the three-bar mark and colors from docs/screenshots/brand-banner.svg. -->
+  <path d="M252 348h148v428H252z" fill="#72a580"/>
+  <path d="M438 216h148v560H438z" fill="#a5c1a1"/>
+  <path d="M624 512h148v264H624z" fill="#e6d1a0"/>
+</svg>
