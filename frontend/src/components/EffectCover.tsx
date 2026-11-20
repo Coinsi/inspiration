@@ -1,19 +1,65 @@
 import { useRef, useState } from "react";
-import { ImagePlus, ImageOff, Upload, X } from "lucide-react";
+import { ImagePlus, ImageOff, Maximize2, Upload, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Lightbox } from "@/components/ImageViewer";
 import "./effect-cover.css";
 
-export function EffectCover({ src, name, detail = false }: { src?: string; name: string; detail?: boolean }) {
+type CoverLayout = "tile" | "detail" | "original";
+
+export function EffectCover({ src, name, layout = "tile", zoomable = false }: {
+  src?: string;
+  name: string;
+  layout?: CoverLayout;
+  zoomable?: boolean;
+}) {
   const [failed, setFailed] = useState<string | null>(null);
-  const safe = !!src && (/^https?:\/\//i.test(src) || src.startsWith("data:image/jpeg;base64,"));
-  return <div className={`effect-cover ${detail ? "effect-cover-detail" : ""}`}>
-    {safe && failed !== src ? <img src={src} alt={`${name}的效果图`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(src!)} /> :
-      <div className="effect-cover-empty">{src ? <ImageOff size={28} /> : <ImagePlus size={28} />}<span>{src ? "效果图暂时无法显示" : "尚未添加效果图"}</span></div>}
-  </div>;
+  const [expanded, setExpanded] = useState(false);
+  const [proportions, setProportions] = useState<{ src: string; ratio: number }>();
+  const className = `effect-cover effect-cover-${layout}`;
+  if (!src || failed === src || !(/^https?:\/\//i.test(src) || src.startsWith("data:image/jpeg;base64,"))) {
+    return (
+      <div className={className}>
+        <div className="effect-cover-empty">
+          {src ? <ImageOff size={28} /> : <ImagePlus size={28} />}
+          <span>{src ? "效果图暂时无法显示" : "尚未添加效果图"}</span>
+        </div>
+      </div>
+    );
+  }
+  const alt = `${name}的效果图`;
+  const ratio = proportions?.src === src ? proportions.ratio : 1;
+  const picture = (
+    <img
+      src={src}
+      alt={alt}
+      loading={zoomable ? "eager" : "lazy"}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(src)}
+      onLoad={layout === "original" ? ({ currentTarget: image }) => {
+        setProportions({ src, ratio: image.naturalWidth / image.naturalHeight });
+      } : undefined}
+    />
+  );
+  return (
+    <div className={className} data-wide={ratio >= 1.5 || undefined} data-narrow={ratio < .5 || undefined}>
+      {zoomable ? (
+        <button type="button" className="effect-cover-zoom" aria-label={`放大查看${alt}`} onClick={() => setExpanded(true)}>
+          {picture}
+          <span aria-hidden="true"><Maximize2 size={15} /></span>
+        </button>
+      ) : picture}
+      {expanded && <Lightbox src={src} filename={name} alt={alt} referrerPolicy="no-referrer" onClose={() => setExpanded(false)} />}
+    </div>
+  );
 }
 
-export function EffectCoverEditor({ value, onChange, onBusyChange }: { value: string; onChange: (value: string) => void; onBusyChange?: (busy: boolean) => void }) {
+export function EffectCoverEditor({ value, onChange, onBusyChange, previewLayout = "detail" }: {
+  value: string;
+  onChange: (value: string) => void;
+  onBusyChange?: (busy: boolean) => void;
+  previewLayout?: "original" | "detail";
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -42,8 +88,10 @@ export function EffectCoverEditor({ value, onChange, onBusyChange }: { value: st
   }
   return <div className="effect-cover-editor">
     <div className="text-sm font-medium">效果封面</div>
-    <p className="text-xs text-muted-foreground">上传实际产出或示例截图，让浏览者直观看到使用效果。建议使用横图。</p>
-    {value && <EffectCover src={value} name="封面预览" detail />}
+    <p className="text-xs text-muted-foreground">
+      {previewLayout === "original" ? "上传效果图或示例截图，预览会保留图片原比例。" : "上传实际产出或示例截图，让浏览者直观看到使用效果。建议使用横图。"}
+    </p>
+    {value && <EffectCover src={value} name="封面预览" layout={previewLayout} />}
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant="outline" size="sm" disabled={processing} onClick={() => input.current?.click()}><Upload size={14} />{processing ? "正在处理图片…" : value ? "更换图片" : "上传效果图"}</Button>
       {value && <Button type="button" variant="ghost" size="sm" disabled={processing} onClick={() => onChange("")}><X size={14} />移除封面</Button>}

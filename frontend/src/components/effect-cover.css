@@ -12,9 +12,114 @@
 .knowledge-cover-card > .knowledge-card-top .knowledge-tile svg { width: 16px; height: 16px; }
 .knowledge-cover-card > .knowledge-card-main { padding: 0 20px; }
 .knowledge-cover-card > .knowledge-card-footer { margin: 18px 20px; }
-.prompt-cover-card { overflow: hidden; border-radius: 14px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); text-align: left; min-width: 0; transition: border-color 180ms ease, transform 180ms ease; }
-.prompt-cover-card:hover { border-color: hsl(var(--primary) / .5); transform: translateY(-2px); }
-.prompt-cover-body { padding: 20px; }
-.prompt-cover-card:hover img, .knowledge-cover-button:hover img { transform: scale(1.025); }
+.knowledge-cover-button:hover img { transform: scale(1.025); }
+
+.effect-cover-original {
+  aspect-ratio: auto;
+  width: fit-content;
+  max-width: 100%;
+  background: transparent;
+}
+.effect-cover-original img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: var(--cover-max-height, min(30rem, 65svh));
+  margin-inline: auto;
+  object-fit: contain;
+}
+.effect-cover-original .effect-cover-empty {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: .5rem;
+  padding: 1rem 1.125rem 0;
+}
+.effect-cover-original .effect-cover-empty svg { width: 1rem; height: 1rem; }
+.effect-cover-editor .effect-cover-original {
+  --cover-max-height: min(18rem, 40svh);
+  max-width: 100%;
+  border-radius: .625rem;
+}
+.effect-cover-zoom {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  border-radius: .75rem;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.effect-cover-zoom span {
+  position: absolute;
+  right: .625rem;
+  bottom: .625rem;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  color: white;
+  background: rgb(0 0 0 / 55%);
+}
+.effect-cover-zoom:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: -3px; }
+
+.prompt-library { container: prompt-library / inline-size; }
+.prompt-gallery { columns: 17rem 3; column-gap: 1rem; }
+.prompt-cover-card {
+  display: inline-block;
+  vertical-align: top;
+  width: 100%;
+  margin-bottom: 1rem;
+  break-inside: avoid;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: .875rem;
+  background: hsl(var(--card));
+  text-align: left;
+  transition: border-color 180ms ease;
+}
+.prompt-cover-card:hover { border-color: hsl(var(--primary) / .5); }
+.prompt-cover-card .effect-cover-original { width: 100%; }
+.prompt-cover-body { padding: 1rem 1.125rem 1.125rem; }
+.prompt-cover-card:has([data-narrow]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .875rem;
+}
+.prompt-cover-card .effect-cover-original[data-narrow] {
+  --cover-max-height: min(12rem, 32svh);
+  flex: none;
+  width: fit-content;
+  max-width: 36%;
+  border-radius: .375rem;
+}
+.prompt-cover-card:has([data-narrow]) .prompt-cover-body { min-width: 0; padding: 0; }
 .prompt-cover-card:focus-visible, .knowledge-cover-button:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: -3px; }
-@media (prefers-reduced-motion: reduce) { .effect-cover img, .prompt-cover-card { transition: none; } .prompt-cover-card:hover, .prompt-cover-card:hover img, .knowledge-cover-button:hover img { transform: none; } }
+
+.prompt-detail-content {
+  --cover-max-height: min(48svh, 26rem);
+  display: grid;
+  align-items: start;
+  gap: 1.25rem;
+}
+.prompt-detail-content > .effect-cover { justify-self: center; }
+.prompt-detail-content .effect-cover-empty { padding: 0; }
+.prompt-detail-text {
+  min-width: 0;
+  max-width: 72ch;
+  font-size: .9375rem;
+  line-height: 1.85;
+}
+@container prompt-library (min-width: 42rem) {
+  .prompt-detail-content:has(.effect-cover-zoom):not(:has([data-wide])) {
+    --cover-max-height: min(66svh, 38rem);
+    grid-template-columns: fit-content(43%) minmax(0, 1fr);
+    column-gap: clamp(1.5rem, 3cqi, 2.5rem);
+  }
+  .prompt-detail-content > .effect-cover { justify-self: start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .effect-cover img, .prompt-cover-card { transition: none; }
+  .knowledge-cover-button:hover img { transform: none; }
+}

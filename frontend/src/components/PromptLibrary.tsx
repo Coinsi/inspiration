@@ -1,7 +1,7 @@
 import { EffectCover } from "./EffectCover";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Copy, Type } from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, Type } from "lucide-react";
 import { api, type Prompt, type Fragment } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -27,6 +27,7 @@ type Entry = {
 };
 export function PromptLibrary({
   projectId,
+  listHeader,
   onInsert,
   onEdit,
   onEditFragment,
@@ -34,6 +35,7 @@ export function PromptLibrary({
   deleting,
 }: {
   projectId: string;
+  listHeader?: ReactNode;
   onInsert?: (text: string) => void;
   onEdit?: (prompt: Prompt) => void;
   onEditFragment?: (fragment: Fragment) => void;
@@ -43,6 +45,13 @@ export function PromptLibrary({
   const [query, setQuery] = useState(""),
     [category, setCategory] = useState(""),
     [selectedId, setSelectedId] = useState<string | null>(null);
+  const lastViewedId = useRef<string | null>(null);
+  const lastViewedCard = useRef<HTMLButtonElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (selectedId) backButton.current?.focus();
+    else lastViewedCard.current?.focus();
+  }, [selectedId]);
   const toast = useToast();
   const prompts = useQuery({
     queryKey: ["prompts", projectId],
@@ -87,86 +96,78 @@ export function PromptLibrary({
     template: "完整提示词",
     ...PROMPT_CATEGORIES,
   };
+  const DetailHeading = listHeader ? "h1" : "h3";
   if (selected)
     return (
-      <div className="space-y-5">
-        <Button variant="ghost" onClick={() => setSelectedId(null)}>
+      <div className="prompt-library space-y-5">
+        <Button ref={backButton} variant="ghost" onClick={() => setSelectedId(null)}>
           <ArrowLeft size={15} />
           返回提示词列表
         </Button>
-        <div>
-          <p className="text-xs text-muted-foreground mb-2">
-            {categories[selected.category] ?? selected.category} ·{" "}
-            {selected.code}
-          </p>
-          <h3 className="text-xl font-semibold">{selected.name}</h3>
-        </div>
-        {selected.cover_image && <EffectCover src={selected.cover_image} name={selected.name} detail />}
-        <div className="rounded-xl bg-elevated p-5 text-sm leading-7 whitespace-pre-wrap break-words max-h-[45vh] overflow-auto">
-          {selected.text || "尚未填写内容"}
-        </div>
-        {!!selected.negative && (
-          <details className="text-sm">
-            <summary className="cursor-pointer text-muted-foreground">
-              反向提示词（单独保存，不追加到正向指令）
-            </summary>
-            <p className="mt-3 whitespace-pre-wrap break-words">
-              {selected.negative}
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground mb-2">
+              {categories[selected.category] ?? selected.category} · {selected.code}
             </p>
-          </details>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {onInsert && (
+            <DetailHeading className="text-xl font-semibold break-words">{selected.name}</DetailHeading>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {onInsert && (
+              <Button disabled={!selected.text.trim()} onClick={() => onInsert(selected.text)}>
+                追加到创作指令
+              </Button>
+            )}
             <Button
+              variant="outline"
               disabled={!selected.text.trim()}
-              onClick={() => onInsert(selected.text)}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(selected.text);
+                  toast.push("提示词已复制", "success");
+                } catch {
+                  toast.push("复制失败，请选中文字后复制", "error");
+                }
+              }}
             >
-              追加到创作指令
+              <Copy size={14} />
+              复制内容
             </Button>
+            {selected.fragment && onEditFragment && (
+              <Button variant="ghost" disabled={deleting} onClick={() => onEditFragment(selected.fragment!)}>
+                编辑片段
+              </Button>
+            )}
+            {selected.fragment && onDeleteFragment && (
+              <Button variant="ghost" disabled={deleting} onClick={() => onDeleteFragment(selected.fragment!)}>
+                {deleting ? "正在删除…" : "删除片段"}
+              </Button>
+            )}
+            {selected.prompt && onEdit && (
+              <Button variant="ghost" onClick={() => onEdit(selected.prompt!)}>编辑提示词</Button>
+            )}
+          </div>
+        </header>
+        <div className="prompt-detail-content">
+          {selected.cover_image && (
+            <EffectCover src={selected.cover_image} name={selected.name} layout="original" zoomable />
           )}
-          <Button
-            variant="outline"
-            disabled={!selected.text.trim()}
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(selected.text);
-                toast.push("提示词已复制", "success");
-              } catch {
-                toast.push("复制失败，请选中文字后复制", "error");
-              }
-            }}
-          >
-            <Copy size={14} />
-            复制内容
-          </Button>
-          {selected.fragment && onEditFragment && (
-            <Button
-              variant="ghost"
-              disabled={deleting}
-              onClick={() => onEditFragment(selected.fragment!)}
-            >
-              编辑片段
-            </Button>
-          )}
-          {selected.fragment && onDeleteFragment && (
-            <Button
-              variant="ghost"
-              disabled={deleting}
-              onClick={() => onDeleteFragment(selected.fragment!)}
-            >
-              {deleting ? "正在删除…" : "删除片段"}
-            </Button>
-          )}
-          {selected.prompt && onEdit && (
-            <Button variant="ghost" onClick={() => onEdit(selected.prompt!)}>
-              编辑提示词
-            </Button>
-          )}
+          <div className="prompt-detail-text">
+            <p className="whitespace-pre-wrap break-words">{selected.text || "尚未填写内容"}</p>
+            {!!selected.negative && (
+              <details className="mt-5 text-sm">
+                <summary className="cursor-pointer text-muted-foreground">
+                  反向提示词（单独保存，不追加到正向指令）
+                </summary>
+                <p className="mt-3 whitespace-pre-wrap break-words">{selected.negative}</p>
+              </details>
+            )}
+          </div>
         </div>
       </div>
     );
   return (
-    <div className="space-y-5">
+    <div className="prompt-library space-y-5">
+      {listHeader}
       <SearchField
         label="搜索提示词"
         placeholder="搜索名称、内容或编号…"
@@ -205,27 +206,28 @@ export function PromptLibrary({
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="prompt-gallery">
             {filtered.map((e) => (
               <button
                 key={e.id}
+                ref={lastViewedId.current === e.id ? lastViewedCard : undefined}
                 aria-label={`查看提示词 ${e.name}`}
-                onClick={() => setSelectedId(e.id)}
+                onClick={() => {
+                  lastViewedId.current = e.id;
+                  setSelectedId(e.id);
+                }}
                 className="prompt-cover-card"
               >
-                <EffectCover src={e.cover_image} name={e.name} />
+                <EffectCover src={e.cover_image} name={e.name} layout="original" />
                 <div className="prompt-cover-body">
-                <div className="flex items-center justify-between text-xs text-muted-foreground mb-5">
-                  <Type size={18} />
-                  <span>{categories[e.category] ?? e.category}</span>
-                </div>
-                <h3 className="text-base font-medium truncate">{e.name}</h3>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground line-clamp-3 min-h-[72px] break-words">
-                  {e.text || "尚未填写内容"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-5">
-                  查看与使用 →
-                </p>
+                  <p className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    {categories[e.category] ?? e.category}
+                    <ChevronRight size={14} aria-hidden="true" />
+                  </p>
+                  <h3 className="mt-1.5 text-base font-semibold line-clamp-2 break-words">{e.name}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground line-clamp-3 break-words">
+                    {e.text || "尚未填写内容"}
+                  </p>
                 </div>
               </button>
             ))}

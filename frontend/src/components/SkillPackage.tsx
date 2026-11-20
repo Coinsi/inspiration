@@ -96,7 +96,7 @@ export function SkillReader({
     >
       {skill && (
         <>
-          {skill.cover_image && <EffectCover src={skill.cover_image} name={skill.name} detail />}
+          {skill.cover_image && <EffectCover src={skill.cover_image} name={skill.name} layout="detail" />}
           <div className="knowledge-reader-intro">
             <p>{skill.description}</p>
             <span>{skill.source}</span>

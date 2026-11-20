@@ -8,13 +8,15 @@ import { getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // 拉取图片(blob 端点带 token,同源)→ 触发浏览器下载,文件名可控
-async function downloadImage(src: string, filename: string) {
+async function downloadImage(src: string, filename: string, referrerPolicy?: ReferrerPolicy) {
   const urlToFetch = new URL(src, window.location.href);
   const token = getToken();
   const authenticated = urlToFetch.origin === window.location.origin && urlToFetch.pathname.startsWith("/api/");
   const res = await fetch(src, {
+    referrerPolicy,
     headers: authenticated && token ? { Authorization: `Bearer ${token}` } : {},
   });
+  if (!res.ok) throw new Error(`Image download failed (${res.status})`);
   const blob = await res.blob();
   const ext = blob.type.includes("png")
     ? "png"
@@ -40,16 +42,19 @@ export function Lightbox({
   previewSrc,
   alt,
   filename,
+  referrerPolicy,
   onClose,
 }: {
   src: string;
   previewSrc?: string;
   alt?: string;
   filename: string;
+  referrerPolicy?: ReferrerPolicy;
   onClose: () => void;
 }) {
   const { t: tr, lang } = useI18n();
   const [downloading, setDownloading] = useState(false);
+  const [downloadFailed, setDownloadFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -57,8 +62,11 @@ export function Lightbox({
 
   const doDownload = async () => {
     setDownloading(true);
+    setDownloadFailed(false);
     try {
-      await downloadImage(src, filename);
+      await downloadImage(src, filename, referrerPolicy);
+    } catch {
+      setDownloadFailed(true);
     } finally {
       setDownloading(false);
     }
@@ -71,7 +79,7 @@ export function Lightbox({
       aria-modal="true"
       aria-label={alt || filename}
       tabIndex={-1}
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-8"
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 px-1 py-12 sm:p-8"
       onClick={onClose}
     >
       {/* 工具条 */}
@@ -101,12 +109,13 @@ export function Lightbox({
         </button>
       </div>
       {previewSrc && previewSrc !== src && !loaded && (
-        <img src={previewSrc} alt="" aria-hidden="true" onClick={event => event.stopPropagation()}
+        <img src={previewSrc} referrerPolicy={referrerPolicy} alt="" aria-hidden="true" onClick={event => event.stopPropagation()}
           className="absolute max-h-[calc(100%-4rem)] max-w-[calc(100%-4rem)] rounded-lg object-contain" />
       )}
       <img
         key={attempt}
         src={src}
+        referrerPolicy={referrerPolicy}
         alt={alt}
         onLoad={() => setLoaded(true)}
         onError={() => setFailed(true)}
@@ -114,6 +123,11 @@ export function Lightbox({
         className={cn("relative max-h-full max-w-full rounded-lg object-contain shadow-2xl",
           previewSrc && previewSrc !== src && !loaded && "opacity-0")}
       />
+      {downloadFailed && !failed && (
+        <p role="status" className="absolute bottom-4 rounded-lg bg-black/75 px-3 py-2 text-sm text-white">
+          {lang === "zh" ? "下载失败，可以长按或右键保存图片。" : "Download failed. Touch and hold or right-click the image to save it."}
+        </p>
+      )}
       {failed && <button type="button"
         className="absolute bottom-5 rounded-lg bg-black/70 px-4 py-2 text-sm text-white"
         onClick={event => {

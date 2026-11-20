@@ -141,20 +141,22 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
   }
   return (
     <div className="max-w-6xl mx-auto p-5 md:p-8 space-y-7">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">提示词库</h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            收藏好用的表达，让下一次创作更轻松。
-          </p>
-        </div>
-        <Button onClick={() => open("new")}>
-          <Plus size={16} />
-          新建提示词
-        </Button>
-      </header>
       <PromptLibrary
         projectId={projectId}
+        listHeader={
+          <header className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">提示词库</h1>
+              <p className="text-sm text-muted-foreground mt-2">
+                收藏好用的表达，让下一次创作更轻松。
+              </p>
+            </div>
+            <Button onClick={() => open("new")}>
+              <Plus size={16} />
+              新建提示词
+            </Button>
+          </header>
+        }
         onEdit={open}
         onEditFragment={open}
         deleting={remove.isPending}
@@ -238,7 +240,7 @@ function PromptWorkspace({ projectId }: { projectId: string }) {
                 placeholder="记录画面、光线、镜头或风格描述…"
               />
             </label>
-            <EffectCoverEditor value={cover} onChange={setCover} onBusyChange={setCoverBusy} />
+            <EffectCoverEditor value={cover} previewLayout="original" onChange={setCover} onBusyChange={setCoverBusy} />
             {kind === "prompt" && (
               <details open={!!negative || undefined}>
                 <summary className="text-sm text-muted-foreground cursor-pointer">
