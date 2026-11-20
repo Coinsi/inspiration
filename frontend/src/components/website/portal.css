@@ -25,4 +25,4 @@
 @media(max-width:600px){.portal-hero-copy>p:last-child{white-space:normal;text-wrap:balance}.portal-feature-symbol{gap:10px}.portal-feature-symbol>svg{width:32px;height:32px}}
 
 .portal-home .site-github-link{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
-@media(max-width:600px){.portal-nav nav{gap:24px}}
+@media(max-width:600px){.portal-nav nav{justify-content:space-between;gap:8px}.portal-nav nav a{min-height:40px;gap:5px}}

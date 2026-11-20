@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, BookOpen, Box, Clapperboard, FileText, Home, Images, Moon, Pause, Play, Plus, Sun, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Box, Clapperboard, Download, FileText, Home, Images, Moon, Pause, Play, Plus, Sun, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { SiteMedia } from "./SiteMedia";
@@ -99,7 +99,7 @@ export function PortalHome({ content: c, mediaTypes, preview = false, authentica
   } : undefined}>
     <header className="portal-nav">
       <Link className="portal-brand" to="/"><Clapperboard size={27} />{c.brand}</Link>
-      <nav aria-label="全局导航"><Link to="/" aria-current="page"><Home size={17} />首页</Link><Link to={destination()}><Images size={17} />项目</Link><Link to="/blog"><BookOpen size={17} />博客</Link><GitHubLink /></nav>
+      <nav aria-label="全局导航"><Link to="/" aria-current="page"><Home size={17} />首页</Link><Link to={destination()}><Images size={17} />项目</Link><Link to="/blog"><BookOpen size={17} />博客</Link><Link to="/download"><Download size={17} />下载</Link><GitHubLink /></nav>
       <div className="portal-account"><button aria-label={theme === "dark" ? "切换浅色" : "切换深色"} onClick={toggle}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><Link to={authenticated ? "/projects" : "/login"}>{authenticated ? "进入工作台" : "注册 / 登录"}<ArrowRight size={15} /></Link></div>
     </header>
     <main>
@@ -145,6 +145,6 @@ export function PortalHome({ content: c, mediaTypes, preview = false, authentica
         {articles.data?.items.length ? <div className="portal-blog-grid">{articles.data.items.map(a => <Link key={a.slug} to={`/blog/${a.slug}`}><span>{a.category}</span><h3>{a.title}</h3><p>{a.excerpt}</p><span>阅读全文 <ArrowRight size={15} /></span></Link>)}</div> : <p className="portal-journal-empty">{articles.error ? "文章暂时未能加载。" : "创作指南、产品更新与灵感笔记。"}<Link to="/blog">前往博客 <ArrowRight size={15} /></Link></p>}
       </section>
     </main>
-    <footer className="portal-footer portal-width"><Link className="portal-brand" to="/"><Clapperboard size={22} />{c.brand}</Link><p>{c.footer}</p><Link to="/blog">博客</Link><GitHubLink /><small>© {new Date().getFullYear()} {c.brand}</small></footer>
+    <footer className="portal-footer portal-width"><Link className="portal-brand" to="/"><Clapperboard size={22} />{c.brand}</Link><p>{c.footer}</p><Link to="/blog">博客</Link><Link to="/download">客户端下载</Link><GitHubLink /><small>© {new Date().getFullYear()} {c.brand}</small></footer>
   </div>;
 }

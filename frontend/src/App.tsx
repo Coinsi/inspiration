@@ -8,6 +8,7 @@ const Login = lazy(() => import("@/pages/Login"));
 const GoogleAuthComplete = lazy(() => import("@/pages/GoogleAuthComplete"));
 const Projects = lazy(() => import("@/pages/Projects"));
 const Landing = lazy(() => import("@/pages/Landing"));
+const Download = lazy(() => import("@/pages/Download"));
 const ModelAdmin = lazy(() => import("@/pages/ModelAdmin"));
 const WebsiteAdmin = lazy(() => import("@/pages/WebsiteAdmin"));
 const Blog = lazy(() => import("@/pages/Blog"));
@@ -68,6 +69,7 @@ export default function App() {
     <Suspense fallback={<WorkspaceLoading />}>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/download" element={<Download />} />
         <Route path="/blog" element={<Blog />} />
         <Route path="/blog/:slug" element={<BlogArticle />} />
         <Route path="/login" element={<Login />} />

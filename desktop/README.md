@@ -45,7 +45,7 @@ npm run dist:mac -- --x64
 2. 完成后到 Actions 对应运行的 Artifacts 下载三个压缩包，解压得到安装包。测试产物保留 14 天。
 3. 合并到默认分支之后，也可在 Actions 页面手动运行。`workflow_dispatch` 在 workflow 尚未进入默认分支时可能没有 UI 入口，分支 push 触发不受此限制。
 4. 正式准备版本时更新 `desktop/package.json` 和 lockfile 的版本，再推送匹配的 `desktop-v0.1.0` 等标签。标签必须指向包含桌面代码和 workflow 的提交。
-5. 标签构建全部成功后生成 **Release 草稿**，附三个安装包和 SHA256 校验值。检查后再手动发布。重新运行只更新草稿，拒绝替换已发布版本。
+5. 标签构建成功后可以生成 **Release 草稿**，附三个安装包和 SHA256 校验值。也可以将验收过的分支构建产物原样上传到草稿。流水线保留已有 Release 的安装包，审核后再发布。
 
 流水线使用 GitHub 自带 token，无须额外签名 Secrets。仓库或组织需要允许 Actions 运行以及发布 job 的 `contents: write`；私有仓库需要可用构建额度。
 

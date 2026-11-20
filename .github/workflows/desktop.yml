@@ -83,7 +83,7 @@ jobs:
           pattern: inspiration-*
           path: packages
           merge-multiple: true
-      - name: Create or update draft release
+      - name: Create draft release if absent
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -91,18 +91,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists. Its tested installer files are preserved."
+            exit 0
+          fi
           cd packages
           sha256sum ./*.exe ./*.dmg > SHA256SUMS.txt
           cat > ../release-notes.md <<'EOF'
           Windows x64 和 macOS Apple Silicon / Intel 桌面客户端，连接 https://coinisi.com。
 
-          这是未使用付费证书的测试版本：Windows 未签名；Mac 使用 ad-hoc 签名、未经 Apple 公证。首次打开可能被系统拦截，请仅在确认来源可信时按系统提示允许。
+          Windows 安装包未签名。Mac 安装包使用 ad-hoc 签名，未经 Apple 公证。首次打开可能显示系统提示。
 
           支持邮箱密码登录。桌面 Google 登录需配套网页和 API 已上线。客户端需联网，建议从本页获取新版安装包。
           EOF
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          else
-            gh release create "$RELEASE_TAG" --draft --verify-tag --title "Inspiration Desktop ${RELEASE_TAG#desktop-v}" --notes-file ../release-notes.md
-          fi
-          gh release upload "$RELEASE_TAG" ./*.exe ./*.dmg SHA256SUMS.txt --clobber
+          gh release create "$RELEASE_TAG" ./*.exe ./*.dmg SHA256SUMS.txt --draft --verify-tag \
+            --title "Inspiration Desktop ${RELEASE_TAG#desktop-v}" --notes-file ../release-notes.md

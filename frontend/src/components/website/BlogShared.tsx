@@ -133,6 +133,7 @@ export function BlogFrame({ children }: { children: ReactNode }) {
             <Link to="/blog" aria-current="page">
               博客
             </Link>
+            <Link to="/download">下载</Link>
           </div>
           <Link
             className="site-button small"
@@ -156,6 +157,7 @@ export function BlogFrame({ children }: { children: ReactNode }) {
             © {new Date().getFullYear()} {brand}
           </span>
           <Link to="/blog">创作手记</Link>
+          <Link to="/download">客户端下载</Link>
           <GitHubLink />
           <Link to="/">
             返回官网 <ArrowUpRight size={13} />
