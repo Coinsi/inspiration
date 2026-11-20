@@ -38,7 +38,7 @@ let deferSend=false,releaseSend,failNextSend=false;
 try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  page.on('pageerror',error=>errors.push(error.message));
- await page.route('**/api/v1/**',async route=>{
+ const serveApi=async route=>{
   const url=new URL(route.request().url()),path=url.pathname.replace('/api/v1/projects/fixture',''),method=route.request().method();
   const ok=json=>route.fulfill({json});
   if(method!=='GET')writes.push(`${method} ${path}`);
@@ -69,8 +69,14 @@ try{
   if(path==='/conversations/chat')return ok(conversation);
   if(path==='/production/runs/run')return ok(run);
   unexpected.push(`${method} ${path}`);return route.fulfill({status:500,json:{error:{message:'Unexpected fixture endpoint'}}});
- });
+ };
+ await page.route('**/api/v1/**', serveApi);
  const url=`http://127.0.0.1:${server.address().port}/projects/fixture/workbench?conversation=chat`;
+ const phone = await browser.newPage({viewport:{width:390,height:844}, isMobile:true, hasTouch:true});
+ try {
+   await phone.route('**/api/v1/**', serveApi);
+   await checkMobileModelSelection(phone, url);
+ } finally { await phone.close(); }
  await page.goto(url);
  const composer=page.getByRole('textbox',{name:'对话消息',exact:true});
  const tray=page.locator('.conversation-compose .conversation-attachment-tray');
@@ -211,3 +217,106 @@ try{
   assert.deepEqual(writes,Array(4).fill('POST /conversations/chat/messages'));
   console.log('PASS Workspace immediate send acknowledgment, media mode reset, original request/refs restoration and undo, result reference append/undo, history attachment reuse, mobile settings and no overflow, current-only waiting/completion, partial-result recreate guard, stable retry after response failure and revision advance. Deterministic API fixtures; no provider calls.');
 }finally{releaseSend?.();await browser.close();await new Promise(resolve=>server.close(resolve));}
+
+async function checkMobileModelSelection(page, url) {
+  const imageName = 'Seedream · 创作团队的高清图像模型';
+  const catalog = [
+    { provider_name: 'text-model', kind: 'llm', display_name: '对话模型', config: {} },
+    { provider_name: 'image-model', kind: 'generation', display_name: imageName, config: { modality: 'image' } },
+    { provider_name: 'video-model', kind: 'generation', display_name: '视频模型', config: { modality: 'video' } },
+  ].map(model => ({ ...model, enabled: true, capabilities: {} }));
+  const draft = '保留草稿，用横构图画海边的灯塔。';
+  const prefix = 'conversation.undefined.fixture.chat';
+  const emptyChat = { ...conversation, messages: [] };
+  let submitted, releaseCatalog, catalogState = 'available', failCapabilities = false;
+  const firstCatalog = new Promise(resolve => { releaseCatalog = resolve; });
+  const requestedCapabilities = [];
+  await page.addInitScript(({ prefix, draft }) => {
+    if (localStorage.getItem(prefix + '.mediaModels') !== null) return;
+    localStorage.setItem(prefix + '.mediaModels', JSON.stringify({ image: 'retired-image' }));
+    localStorage.setItem(prefix + '.mode', JSON.stringify('image'));
+    localStorage.setItem(prefix + '.draft', JSON.stringify(draft));
+  }, { prefix, draft });
+  await page.route('**/projects/fixture/conversations/chat', route => route.fulfill({ json: emptyChat }));
+  await page.route('**/projects/fixture/conversations/chat/messages', route => {
+    submitted = route.request().postDataJSON();
+    return route.fulfill({ json: emptyChat });
+  });
+  await page.route('**/projects/fixture/providers', async route => {
+    await firstCatalog;
+    if (catalogState === 'error') return route.fulfill({ status: 503, json: { error: { message: '暂时无法连接' } } });
+    return route.fulfill({ json: catalogState === 'empty' ? [] : catalog });
+  });
+  await page.route('**/providers/**/capabilities', route => {
+    requestedCapabilities.push(new URL(route.request().url()).pathname.split('/').at(-2));
+    if (failCapabilities) return route.fulfill({ status: 503, json: { error: { message: '暂时无法读取模型能力' } } });
+    return route.fallback();
+  });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  const picker = page.getByRole('button', { name: '选择创作模型', exact: true });
+  const changeModel = page.getByRole('button', { name: '重新选择模型', exact: true });
+  const mode = page.getByRole('button', { name: '本轮创作方式' });
+  const send = page.getByRole('button', { name: '发送消息' });
+  const input = page.getByRole('textbox', { name: '对话消息' });
+  try {
+    await mode.waitFor();
+    assert.ok(await picker.isVisible(), 'the model selector must be visible with more settings closed');
+    assert.equal(await page.locator('.conversation-compose [role=alert]').count(), 0, 'a pending catalog is not a retired model');
+  } finally { releaseCatalog(); }
+  await changeModel.waitFor();
+  assert.ok(await send.isDisabled());
+  assert.deepEqual(requestedCapabilities, []);
+  await changeModel.tap();
+  const dialog = page.getByRole('dialog', { name: '选择创作模型' });
+  const choice = dialog.getByRole('option').filter({ hasText: imageName });
+  await choice.waitFor();
+  assert.ok(await dialog.evaluate(el => el.contains(document.activeElement) && document.activeElement.tagName !== 'INPUT'));
+  assert.equal(await dialog.getByRole('option').count(), 1);
+  const search = dialog.getByRole('searchbox', { name: '搜索模型' });
+  await search.fill('没有这个模型');
+  await dialog.getByText('没有匹配的模型，试试其他名称。').waitFor();
+  await search.fill('Seedream');
+  await choice.tap();
+  await page.waitForFunction(() => !document.querySelector('.conversation-send')?.disabled);
+  assert.equal(await input.inputValue(), draft);
+  assert.equal(await changeModel.count(), 0);
+  for (const width of [320, 360, 390, 430, 767]) {
+    await page.setViewportSize({ width, height: 844 });
+    const controls = [mode, picker, page.getByRole('button', { name: '添加内容' }), page.getByRole('button', { name: '创作设置' }), send];
+    const bounds = await Promise.all(controls.map(control => control.boundingBox()));
+    assert.ok(bounds.every(box => box && box.x >= 0 && box.x + box.width <= width + 1));
+    assert.ok(bounds[1].width >= 88, 'model name and dropdown arrow remain readable');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  }
+  await page.setViewportSize({width:390, height:844});
+  await page.screenshot({path:resolve(out, 'mobile-model-selection.png')});
+  await page.reload();
+  await picker.filter({ hasText: imageName }).waitFor();
+  await send.tap();
+  await page.waitForFunction(() => document.querySelector('textarea')?.value === '');
+  assert.equal(submitted.media.provider, 'image-model');
+  assert.equal(submitted.content, draft);
+  await picker.filter({ hasText: '对话模型' }).waitFor();
+  failCapabilities = true;
+  await mode.tap();
+  await page.getByRole('option', { name: '视频', exact: true }).tap();
+  await picker.filter({ hasText: '视频模型' }).waitFor();
+  await input.fill(draft);
+  const retryCaps = page.getByRole('button', { name: '重新读取模型能力' });
+  await retryCaps.waitFor();
+  failCapabilities = false;
+  await retryCaps.tap();
+  await page.waitForFunction(() => !document.querySelector('.conversation-send')?.disabled);
+  assert.deepEqual(new Set(requestedCapabilities), new Set(['image-model', 'video-model']));
+  catalogState = 'error';
+  await page.reload();
+  const retryList = page.getByRole('button', { name: '重新读取模型列表' });
+  await retryList.waitFor();
+  assert.equal(await page.getByRole('link', { name: '配置模型' }).count(), 0);
+  catalogState = 'empty';
+  await retryList.tap();
+  await page.getByRole('link', { name: '配置模型' }).waitFor();
+  assert.equal(await changeModel.count(), 0);
+  assert.equal(await retryCaps.count(), 0);
+  assert.equal(await input.inputValue(), draft);
+}

@@ -89,6 +89,7 @@ import "./conversation-layout.css";
 const TaskInspector = lazy(() =>
   import("@/pages/Agent").then((m) => ({ default: m.AgentWorkspace })),
 );
+const modeLabels: Record<CreationMode, string> = { text: "对话", image: "图片", video: "视频" };
 type CutSelection = { timelineId: string; revision: number; clipId?: string; track?: "audio" | "visuals" | "subtitles"; name: string; start: number; end: number; projectId: string; workId: string };
 type Target = { target_type: string; target_id: string };
 type Message = {
@@ -196,6 +197,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   );
   const [contextOpen, setContextOpen] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [fileDrag, setFileDrag] = useState(false);
   const attachments = useConversationAttachments(projectId, scopeKey);
@@ -283,11 +285,11 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     providers.data || [],
     attachments.items,
   );
-  const displayedModels = mode === "text" ? null : media.models;
   const workId = selected ? detail.data?.work_id || "" : draftWork;
   const models = (providers.data || []).filter(
     (p) => p.kind === "llm" && p.enabled && !p.config.hidden_from_catalog,
   );
+  const displayedModels = mode === "text" ? models : media.models;
   const selectedProvider = models.some((m) => m.provider_name === provider)
     ? provider
     : models.find((m) => m.config.is_default)?.provider_name ||
@@ -347,7 +349,14 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       sessionStorage.setItem(storageKey, JSON.stringify(messages.filter(m => ["queued", "running"].includes(m.status)).map(m => m.id)));
     } catch { /* Completion hints are optional; saved results remain in the conversation. */ }
   }, [detail.data, scopeKey]);
-  useEffect(() => { setComposerUndo(null); setComposerNotice(""); setMoreOpen(false); setCompletionNotice(""); setSubmission(null); }, [scopeKey]);
+  useEffect(() => {
+    setComposerUndo(null);
+    setComposerNotice("");
+    setMoreOpen(false);
+    setModelPickerOpen(false);
+    setCompletionNotice("");
+    setSubmission(null);
+  }, [scopeKey]);
   useEffect(() => {
     if (!moreOpen) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") setMoreOpen(false); };
@@ -806,7 +815,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   const addLocalFiles = (files: FileList | File[]) => {
     const { accepted, errors } = preflightAttachmentFiles(files, {
       mode, capabilities: media.capabilities,
-      capabilitiesLoading: media.capabilitiesLoading,
+      capabilitiesLoading: providers.isPending || media.capabilitiesLoading,
       capabilitiesError: media.capabilitiesError,
       references: [...media.refs, ...attachments.items],
     });
@@ -1328,77 +1337,95 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             disabled={!!detail.data?.archived || busy}
           />
           <div className="conversation-compose-tools">
-            {latest?.execution_kind === "production" && ["queued", "running"].includes(latest.context.production?.status || "") &&
-              <button type="button" className="conversation-tool" aria-label="停止后续步骤" title="停止后续步骤；已提交的生成仍可能完成" disabled={control.isPending}
-                onClick={() => control.mutate({message: latest, action: "cancel"})}><Square size={17} /></button>}
-            <SelectField
-              label="本轮创作方式"
-              className="composer-control composer-mode-select"
-              value={mode}
-              disabled={busy}
-              onChange={(value) => setMode(value as CreationMode)}
-              options={[
-                { value: "text", label: "对话", icon: <Type size={17} aria-hidden="true" /> },
-                { value: "image", label: "图片", icon: <Image size={17} aria-hidden="true" /> },
-                { value: "video", label: "视频", icon: <Video size={17} aria-hidden="true" /> },
-              ]}
-            />
-            <div className={`conversation-extra-controls${moreOpen ? " is-open" : ""}`} id="conversation-extra-controls">
-            <ComposerModelPicker
-              models={displayedModels || models}
-              value={mode === "text" ? selectedProvider : media.provider}
-              onChange={mode === "text" ? setProvider : media.choose}
-              manage={() => setModelsOpen(true)}
-              disabled={busy}
-              loading={providers.isPending}
-              error={providers.error?.message}
-              retry={() => {
-                void providers.refetch();
-              }}
-            />
-            {mode !== "text" && (
-              <ConversationMediaControls
-                projectId={projectId}
-                media={media}
-                mode={mode}
-                disabled={busy || !!detail.data?.archived}
-                showReferences={false}
+            <div className="conversation-model-controls">
+              <SelectField
+                label="本轮创作方式"
+                className="composer-control composer-mode-select"
+                value={mode}
+                disabled={busy}
+                onChange={(value) => setMode(value as CreationMode)}
+                options={[
+                  { value: "text", label: modeLabels.text, icon: <Type size={17} aria-hidden="true" /> },
+                  { value: "image", label: modeLabels.image, icon: <Image size={17} aria-hidden="true" /> },
+                  { value: "video", label: modeLabels.video, icon: <Video size={17} aria-hidden="true" /> },
+                ]}
               />
-            )}
-
-            <button
-              className="conversation-tool"
-              type="button"
-              disabled={busy}
-              onClick={() => { setSkillOpen(true); setMoreOpen(false); }}
-              title="选用已有的创作方法"
-            >
-              <Sparkles size={17} />
-              <span>技能</span>
-            </button>
+              <ComposerModelPicker
+                models={displayedModels}
+                value={mode === "text" ? selectedProvider : media.provider}
+                open={modelPickerOpen}
+                onOpenChange={setModelPickerOpen}
+                onChange={mode === "text" ? setProvider : media.choose}
+                manage={() => setModelsOpen(true)}
+                disabled={busy}
+                loading={providers.isPending}
+                error={providers.error?.message}
+                retry={() => void providers.refetch()}
+              />
             </div>
-            <ConversationAddMenu disabled={busy || !!detail.data?.archived} onFiles={addLocalFiles} onLibrary={() => setAttachmentPickerOpen(true)} onObjects={() => { setMode("text"); setContextOpen(true); }} />
-            <button type="button" className="conversation-tool conversation-more" aria-label="创作设置" aria-expanded={moreOpen} aria-controls="conversation-extra-controls" onClick={() => setMoreOpen(value => !value)}><MoreHorizontal size={18}/></button>
-            {!draft.trim() && mode === "text" && (attachments.items.length > 0 || media.refs.length > 0) ? <button type="button" className="conversation-send" aria-label="发送附件" disabled={!ready} onClick={() => void send.mutateAsync("").catch(() => undefined)}>{send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}</button> : <ComposerPrimitive.Send
-              className="conversation-send"
-              type="button"
-              aria-label="发送消息"
-              disabled={!ready}
-            >
-              {send.isPending ? (
-                <Loader2 size={19} className="conversation-spinner" />
-              ) : (
-                <ArrowUp size={19} />
+            <div className={`conversation-extra-controls${moreOpen ? " is-open" : ""}`} id="conversation-extra-controls">
+              {mode !== "text" && (
+                <ConversationMediaControls
+                  projectId={projectId}
+                  media={media}
+                  mode={mode}
+                  disabled={busy || !!detail.data?.archived}
+                  showReferences={false}
+                />
               )}
-            </ComposerPrimitive.Send>}
+              <button
+                className="conversation-tool"
+                type="button"
+                disabled={busy}
+                onClick={() => { setSkillOpen(true); setMoreOpen(false); }}
+                title="选用已有的创作方法"
+              >
+                <Sparkles size={17} />
+                <span>技能</span>
+              </button>
+            </div>
+            <div className="conversation-compose-actions">
+              <ConversationAddMenu disabled={busy || !!detail.data?.archived} onFiles={addLocalFiles} onLibrary={() => setAttachmentPickerOpen(true)} onObjects={() => { setMode("text"); setContextOpen(true); }} />
+              <button type="button" className="conversation-tool conversation-more" aria-label="创作设置" aria-expanded={moreOpen} aria-controls="conversation-extra-controls" onClick={() => setMoreOpen(value => !value)}><MoreHorizontal size={18}/></button>
+              {latest?.execution_kind === "production" && ["queued", "running"].includes(latest.context.production?.status || "") &&
+                <button type="button" className="conversation-tool" aria-label="停止后续步骤" title="停止后续步骤；已提交的生成仍可能完成" disabled={control.isPending}
+                  onClick={() => control.mutate({message: latest, action: "cancel"})}><Square size={17} /></button>}
+              {!draft.trim() && mode === "text" && (attachments.items.length > 0 || media.refs.length > 0) ? <button type="button" className="conversation-send" aria-label="发送附件" disabled={!ready} onClick={() => void send.mutateAsync("").catch(() => undefined)}>{send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}</button> : <ComposerPrimitive.Send
+                className="conversation-send"
+                type="button"
+                aria-label="发送消息"
+                disabled={!ready}
+              >
+                {send.isPending ? (
+                  <Loader2 size={19} className="conversation-spinner" />
+                ) : (
+                  <ArrowUp size={19} />
+                )}
+              </ComposerPrimitive.Send>}
+            </div>
           </div>
           {ongoing && !send.isPending && <p className="conversation-compose-context">可继续讨论；本次生成仍按原要求进行。</p>}
           {attachments.error && <p className="conversation-attachment-notice" role="alert">{attachments.error}</p>}
           {attachmentProblem && <p className="conversation-attachment-notice" role="alert">{attachmentProblem}</p>}
           {attachments.items.length > 0 && !attachmentProblem && <p className="conversation-attachment-notice">{!attachments.ready ? "附件准备好后即可发送。刷新后未完成的上传需要重新选择原文件续传。" : mode !== "text" && !draft.trim() ? "参考素材已就绪，请描述想生成的内容。" : "发送后自动保留到对话附件，可随时再次引用。"}</p>}
-          {mode !== "text" && media.error && media.error !== attachmentProblem && (
-            <p className="conversation-error" role="alert">
-              {media.error} <button onClick={media.retry}>重新检查</button>
+          {providers.isError && (
+            <p className="conversation-model-notice" role="alert">
+              暂时无法读取模型列表。<button type="button" onClick={() => void providers.refetch()}>重新读取模型列表</button>
+            </p>
+          )}
+          {providers.isSuccess && !displayedModels.length && (
+            <p className="conversation-model-notice" role="status">
+              暂无可用的{modeLabels[mode]}模型。<Link to={`${root}/settings?section=channels`}>配置模型</Link>
+            </p>
+          )}
+          {providers.isSuccess && media.needsModelSelection && (
+            <p className="conversation-model-notice" role="status">
+              上次使用的{modeLabels[mode]}模型已不可用。<button type="button" disabled={busy} onClick={() => setModelPickerOpen(true)}>重新选择模型</button>
+            </p>
+          )}
+          {providers.isSuccess && media.retryCapabilities && (
+            <p className="conversation-model-notice" role="alert">
+              {media.capabilitiesError} <button type="button" onClick={media.retryCapabilities}>重新读取模型能力</button>
             </p>
           )}
           {imported.error && (
@@ -1413,12 +1440,6 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 这项素材不能作为图片参考，请在素材库中选择图片。
               </p>
             )}
-          {!(displayedModels || models).length && !providers.isPending && (
-            <p className="conversation-note">
-              请先配置当前类型的可用模型。
-              <Link to={`${root}/settings?section=channels`}>配置模型</Link>
-            </p>
-          )}
           {blocked && (
             <p className="conversation-note">
               {statuses[latest!.status]}
@@ -1457,7 +1478,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 </div>
         )}
       </div>
-      <ConversationAttachmentPicker mode={mode} capabilities={mode === "text" ? undefined : media.capabilities} capabilitiesLoading={mode !== "text" && media.capabilitiesLoading} capabilitiesError={mode === "text" ? null : media.capabilitiesError} onRetryCapabilities={media.retry} projectId={projectId} open={attachmentPickerOpen} onClose={() => setAttachmentPickerOpen(false)} references={media.refs} uploads={attachments} pickReference={item => media.setRefs(current => current.some(value => value.id === item.id && value.source_type === item.source_type) ? current.filter(value => !(value.id === item.id && value.source_type === item.source_type)) : current.length + attachments.items.length < 8 ? [...current, item] : current)} />
+      <ConversationAttachmentPicker mode={mode} capabilities={mode === "text" ? undefined : media.capabilities} capabilitiesLoading={mode !== "text" && (providers.isPending || media.capabilitiesLoading)} capabilitiesError={mode === "text" ? null : media.capabilitiesError} onRetryCapabilities={media.retryCapabilities} projectId={projectId} open={attachmentPickerOpen} onClose={() => setAttachmentPickerOpen(false)} references={media.refs} uploads={attachments} pickReference={item => media.setRefs(current => current.some(value => value.id === item.id && value.source_type === item.source_type) ? current.filter(value => !(value.id === item.id && value.source_type === item.source_type)) : current.length + attachments.items.length < 8 ? [...current, item] : current)} />
       {contextOpen && (
         <ConversationObjectDialog
           projectId={projectId}

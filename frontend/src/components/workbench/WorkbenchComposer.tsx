@@ -106,6 +106,7 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
     [references, setReferences] = useState(false),
     [agentOpen, setAgentOpen] = useState(false),
     [offset, setOffset] = useState(0);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const sending = useRef(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [clearedPrompt, setClearedPrompt] = useState<string | null>(null);
@@ -540,6 +541,8 @@ export function WorkbenchComposer({ projectId }: { projectId: string }) {
             <ComposerModelPicker
               models={options}
               value={provider}
+              open={modelPickerOpen}
+              onOpenChange={setModelPickerOpen}
               onChange={(value) => {
                 setChoices((c) => ({ ...c, [mode]: value }));
                 submit.reset();

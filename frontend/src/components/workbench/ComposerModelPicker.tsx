@@ -2,13 +2,14 @@ import { SearchField } from "@/components/ui/search-field";
 import { verificationLabel } from "@/lib/model-config-scope";
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, ChevronRight, Settings2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cpu, Settings2 } from "lucide-react";
 import type { ProviderConfig } from "@/lib/api";
 import { ModelBrandIcon } from "./ModelBrandIcon";
 
@@ -54,6 +55,8 @@ function price(model: ProviderConfig) {
 export function ComposerModelPicker({
   models,
   value,
+  open,
+  onOpenChange,
   onChange,
   manage,
   disabled,
@@ -63,6 +66,8 @@ export function ComposerModelPicker({
 }: {
   models: ProviderConfig[];
   value: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onChange: (value: string) => void;
   manage?: () => void;
   disabled: boolean;
@@ -70,12 +75,10 @@ export function ComposerModelPicker({
   error?: string;
   retry: () => void;
 }) {
-  const [open, setOpen] = useState(false),
-    [search, setSearch] = useState(""),
-    [group, setGroup] = useState("");
-  const [position, setPosition] = useState<CSSProperties>({
-    visibility: "hidden",
-  });
+  const [search, setSearch] = useState("");
+  const [group, setGroup] = useState("");
+  const id = useId();
+  const [position, setPosition] = useState<CSSProperties>({ position: "fixed" });
   const root = useRef<HTMLDivElement>(null),
     panel = useRef<HTMLDivElement>(null),
     trigger = useRef<HTMLButtonElement>(null);
@@ -95,48 +98,73 @@ export function ComposerModelPicker({
       .includes(search.trim().toLowerCase()),
   );
   const groups = [...new Set(visible.map(family))];
-  const active = groups.includes(group) ? group : groups[0];
+  const preferredGroup = group || brand;
+  const active = groups.includes(preferredGroup) ? preferredGroup : groups[0];
   const close = () => {
-    setOpen(false);
-    trigger.current?.focus();
+    onOpenChange(false);
+    trigger.current?.focus({ preventScroll: true });
   };
   useLayoutEffect(() => {
     if (!open) return;
+    const viewport = window.visualViewport;
     const positionPanel = () => {
       const rect = trigger.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(880, window.innerWidth - 24);
-      const above = rect.top - 20,
-        below = window.innerHeight - rect.bottom - 20;
+      const left = viewport?.offsetLeft ?? 0;
+      const top = viewport?.offsetTop ?? 0;
+      const right = left + (viewport?.width ?? window.innerWidth);
+      const bottom = top + (viewport?.height ?? window.innerHeight);
+      const width = Math.min(880, right - left - 24);
+      const anchorTop = Math.min(rect.top, bottom);
+      const anchorBottom = Math.max(rect.bottom, top);
+      const above = anchorTop - top - 22;
+      const below = bottom - anchorBottom - 22;
       const up = above >= 360 || above > below;
-      const height = Math.max(120, Math.min(520, up ? above : below));
+      let available = up ? above : below;
+      let vertical: CSSProperties = up
+        ? { bottom: window.innerHeight - anchorTop + 10 }
+        : { top: anchorBottom + 10 };
+      // When the keyboard leaves too little room beside the trigger, use the visible viewport.
+      if (available < 240) {
+        available = bottom - top - 24;
+        vertical = { top: top + 12 };
+      }
       setPosition({
         position: "fixed",
         width,
-        maxHeight: height,
-        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
-        ...(up
-          ? { bottom: window.innerHeight - rect.top + 10 }
-          : { top: rect.bottom + 10 }),
+        maxHeight: Math.min(520, available),
+        left: Math.max(left + 12, Math.min(rect.left, right - width - 12)),
+        ...vertical,
       });
     };
     positionPanel();
     window.addEventListener("resize", positionPanel);
     window.addEventListener("scroll", positionPanel, true);
+    viewport?.addEventListener("resize", positionPanel);
+    viewport?.addEventListener("scroll", positionPanel);
     return () => {
       window.removeEventListener("resize", positionPanel);
       window.removeEventListener("scroll", positionPanel, true);
+      viewport?.removeEventListener("resize", positionPanel);
+      viewport?.removeEventListener("scroll", positionPanel);
     };
   }, [open]);
   useEffect(() => {
-    if (!open) return;
-    panel.current?.querySelector("input")?.focus();
+    if (!open) {
+      setSearch("");
+      setGroup("");
+      return;
+    }
+    const focusTarget = window.matchMedia("(pointer: coarse)").matches
+      ? panel.current
+      : panel.current?.querySelector("input");
+    focusTarget?.focus({ preventScroll: true });
     const outside = (e: Event) => {
       if (
         !root.current?.contains(e.target as Node) &&
         !panel.current?.contains(e.target as Node)
       )
-        setOpen(false);
+        onOpenChange(false);
     };
     document.addEventListener("pointerdown", outside);
     document.addEventListener("focusin", outside);
@@ -144,7 +172,7 @@ export function ComposerModelPicker({
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("focusin", outside);
     };
-  }, [open]);
+  }, [open, onOpenChange]);
   return (
     <div className="composer-model-picker" ref={root}>
       <button
@@ -152,24 +180,18 @@ export function ComposerModelPicker({
         className="composer-control composer-model-trigger"
         type="button"
         aria-label="选择创作模型"
+        aria-describedby={id + "-value"}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        title={triggerLabel || "选择模型"}
         disabled={disabled}
-        onClick={() => {
-          if (!open) {
-            setSearch("");
-            setGroup(selected ? family(selected) : "");
-          }
-          setOpen(!open);
-        }}
+        onClick={() => onOpenChange(!open)}
       >
         <span className="composer-brand-mark">
-          <ModelBrandIcon
-            brand={selected ? family(selected) : "选择模型"}
-            size={22}
-          />
+          {selected ? <ModelBrandIcon brand={brand} size={22} /> : <Cpu size={18} aria-hidden="true" />}
         </span>
-        <span>
+        <span id={id + "-value"}>
           {loading
             ? "读取模型…"
             : triggerLabel || (value ? "模型不可用，请重选" : "选择模型")}
@@ -180,6 +202,8 @@ export function ComposerModelPicker({
         createPortal(
           <div
             ref={panel}
+            id={id}
+            tabIndex={-1}
             className="composer-model-menu"
             style={position}
             role="dialog"
@@ -386,7 +410,7 @@ export function ComposerModelPicker({
                 <button
                   type="button"
                   onClick={() => {
-                    setOpen(false);
+                    onOpenChange(false);
                     manage();
                   }}
                 >

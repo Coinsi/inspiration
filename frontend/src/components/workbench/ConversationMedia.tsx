@@ -25,7 +25,6 @@ import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
 import { ComposerParameters } from "./ComposerParameters";
 import { composerParameters, type MediaCapabilities } from "./mediaParameters";
-import { referenceProblem } from "./referenceProblem";
 import { referenceInput } from "./referenceInput";
 import {
   ComposerReferences,
@@ -78,14 +77,12 @@ export function useConversationMedia(
       !p.config.hidden_from_catalog &&
       p.config.modality === mode,
   );
-  const unavailable =
-    !!choices[mode] && !models.some((p) => p.provider_name === choices[mode]);
-  const provider = unavailable
-    ? ""
-    : models.find((p) => p.provider_name === choices[mode])?.provider_name ||
-      models.find((p) => p.config.is_default)?.provider_name ||
-      models[0]?.provider_name ||
-      "";
+  const savedChoice = choices[mode];
+  const selected = savedChoice
+    ? models.find((model) => model.provider_name === savedChoice)
+    : models.find((model) => model.config.is_default) ?? models[0];
+  const provider = selected?.provider_name ?? "";
+  const needsModelSelection = !!savedChoice && !selected && models.length > 0;
   const caps = useQuery({
     queryKey: ["capabilities", projectId, provider],
     queryFn: () =>
@@ -103,12 +100,10 @@ export function useConversationMedia(
   const references = refs.map((r) =>
     referenceInput(r, mode === "image" ? "reference" : r.role),
   );
-  const problem = unavailable
-    ? "原来选择的模型已不可用，请重新选择模型后发送。"
-    : referenceProblem(caps.data, mode === "text" ? [] : refs.map(r => ({ ...r, role: mode === "image" ? "reference" : r.role })));
   return {
     models,
     provider,
+    needsModelSelection,
     choices,
     parameters,
     restore: (
@@ -124,7 +119,8 @@ export function useConversationMedia(
     schema,
     capabilities: caps.data,
     capabilitiesLoading: caps.isFetching,
-    capabilitiesError: caps.error?.message || (unavailable ? "原来选择的模型已不可用，请重新选择模型后发送。" : null),
+    capabilitiesError: caps.error?.message,
+    retryCapabilities: provider && caps.isError ? () => void caps.refetch() : undefined,
     videoReferencesAvailable: mode === "video" && !!caps.data?.features.includes("video_reference"),
     controls,
     ratioFromImage,
@@ -138,10 +134,7 @@ export function useConversationMedia(
       !!provider &&
       !!caps.data?.modalities.includes(mode) &&
       !caps.isFetching &&
-      !caps.error &&
-      !problem,
-    error: problem || caps.error?.message,
-    retry: () => void caps.refetch(),
+      !caps.error,
     request: {
       provider,
       request_type: mode,
