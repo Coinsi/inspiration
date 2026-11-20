@@ -176,23 +176,7 @@ export default function Projects() {
         </header>
 
         <main className="home-content">
-          <section className="home-hero">
-            <StudioScenes />
-            <p className="studio-eyebrow">
-              INSPIRATION · {zh ? "AI 影视创作工作台" : "AI FILMMAKING STUDIO"}
-            </p>
-            <h1>
-              {zh ? (
-                <>
-                  把脑海里的画面，<span>拍成你的故事</span>
-                </>
-              ) : (
-                <>
-                  Your imagination.<span>Your next story.</span>
-                </>
-              )}
-            </h1>
-          </section>
+          <StudioScenes />
           <section id="project-list" className="space-y-6 scroll-mt-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
