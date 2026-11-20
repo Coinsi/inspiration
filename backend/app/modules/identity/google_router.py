@@ -126,6 +126,13 @@ def _desktop_failure(error):
     )
 
 
+@router.get("/desktop/capabilities")
+def desktop_capabilities():
+    # Read-only negotiation lets clients reject a stale cloud deployment before
+    # opening a browser or creating any login state. No session is required.
+    return _no_cache(JSONResponse({"protocol": 1, "enabled": google.google_enabled()}))
+
+
 @router.post("/desktop/start")
 def desktop_start(
     data: GoogleDesktopStartIn, request: Request, response: Response, db: Session = DB

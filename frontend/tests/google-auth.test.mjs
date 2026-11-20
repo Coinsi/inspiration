@@ -20,7 +20,7 @@ await build({
   outfile: fileURLToPath(output), bundle: true, packages: 'external', platform: 'node', format: 'esm', jsx: 'automatic', loader: { '.css': 'empty' },
 });
 const authModule = await import(output.href);
-const { AuthProvider, useAuth, startGoogleAuth, exchangeGoogleSession, safeAuthNext, getGoogleAttempt, googleAuthError, ApiError, I18nProvider, GoogleAuthComplete } = authModule;
+const { AuthProvider, useAuth, startGoogleAuth, startDesktopGoogleAuth, exchangeGoogleSession, safeAuthNext, getGoogleAttempt, googleAuthError, ApiError, I18nProvider, GoogleAuthComplete } = authModule;
 const originalGlobals = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window, document: globalThis.document };
 afterEach(() => Object.assign(globalThis, originalGlobals));
 
@@ -62,6 +62,39 @@ test('Google start validates the authorization host and sends only the safe retu
   globalThis.fetch = async () => response({ authorization_url: 'https://evil.test/oauth' });
   await assert.rejects(startGoogleAuth('/projects'), error => error.code === 'google_unavailable');
   assert.equal(redirects.length, 1);
+});
+
+test('desktop sign-in checks cloud support before invoking the bridge and retries without cached capability failures', async () => {
+  browser();
+  let starts = 0;
+  window.inspirationDesktop = {
+    googleSignIn: async () => { starts++; return { access_token: 'desktop-token', next: '/projects', linked: false }; },
+    cancelGoogleSignIn: async () => {},
+  };
+  const cases = [
+    [response({ detail: 'Not Found' }, 404), 'google_desktop_server_outdated'],
+    [response({ detail: 'Method Not Allowed' }, 405), 'google_desktop_server_outdated'],
+    [new Response('<html>Old frontend fallback</html>', { headers: { 'Content-Type': 'text/html' } }), 'google_desktop_server_outdated'],
+    [response({ protocol: 2, enabled: true }), 'google_desktop_update_required'],
+    [response({ protocol: 1, enabled: false }), 'google_unavailable'],
+    [response({ detail: 'Unavailable' }, 503), 'google_desktop_unavailable'],
+  ];
+  for (const [reply, code] of cases) {
+    globalThis.fetch = async (url, request) => {
+      assert.equal(url, '/api/v1/auth/google/desktop/capabilities');
+      assert.equal(request.method, 'GET');
+      assert.equal(request.credentials, 'omit');
+      assert.equal(request.cache, 'no-store');
+      return reply;
+    };
+    await assert.rejects(startDesktopGoogleAuth('/projects', 'zh'), error => error.code === code);
+  }
+  assert.equal(starts, 0);
+  globalThis.fetch = async () => response({ protocol: 1, enabled: true });
+  assert.equal((await startDesktopGoogleAuth('/projects', 'zh')).access_token, 'desktop-token');
+  assert.equal(starts, 1);
+  assert.match(googleAuthError('google_desktop_server_outdated', true), /云端.*邮箱密码/);
+  assert.match(googleAuthError('google_desktop_update_required', false), /Update the app/);
 });
 
 test('a remounted completion consumer shares one exchange, clears old user queries and survives an old 401', async () => {

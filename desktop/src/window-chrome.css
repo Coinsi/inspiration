@@ -1,0 +1,90 @@
+/* Local Electron chrome. No web deployment or application build is required. */
+html[data-inspiration-chrome] {
+  --inspiration-chrome-height: 36px;
+  /* Electron reports this in CSS pixels, including browser zoom and OS scaling. */
+  --inspiration-chrome-space: max(var(--inspiration-chrome-height), env(titlebar-area-height, 0px));
+  --inspiration-content-height: calc(100dvh - var(--inspiration-chrome-space));
+  --inspiration-chrome-surface: #28282a;
+  --inspiration-fallback-surface: 240 3% 16%;
+  --inspiration-fallback-border: 240 5% 25%;
+  background: var(--inspiration-chrome-surface);
+}
+html.light[data-inspiration-chrome] {
+  --inspiration-chrome-surface: #eff1f0;
+  --inspiration-fallback-surface: 150 6% 94%;
+  --inspiration-fallback-border: 145 7% 86%;
+}
+html[data-inspiration-chrome] body {
+  display: block;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+html[data-inspiration-chrome] #inspiration-window-chrome {
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--inspiration-chrome-space);
+  box-sizing: border-box;
+  z-index: 2147483647;
+  background: hsl(var(--surface, var(--inspiration-fallback-surface)));
+  border-bottom: 1px solid hsl(var(--border, var(--inspiration-fallback-border)) / .35);
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+/* Reserve the whole row, not just a corner: the existing header can retain every
+   control at the 960px minimum width. Native window buttons live above this row. */
+html[data-inspiration-chrome] #root,
+html[data-inspiration-chrome] #inspiration-recovery-content {
+  box-sizing: border-box;
+  position: relative;
+  margin-top: var(--inspiration-chrome-space);
+  width: 100%;
+  height: var(--inspiration-content-height);
+  min-height: 0;
+  overflow: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+/* These are the published application's viewport-owning shells. Inner scrolling
+   stays with the existing app-main / workspace rather than adding a second frame. */
+html[data-inspiration-chrome] #root .studio-shell,
+html[data-inspiration-chrome] #root > .h-dvh,
+html[data-inspiration-chrome] #root > .h-screen {
+  height: var(--inspiration-content-height);
+  min-height: 0;
+}
+html[data-inspiration-chrome] #root .studio-home,
+html[data-inspiration-chrome] #root .login-scene {
+  min-height: var(--inspiration-content-height);
+}
+html[data-inspiration-chrome] #root .home-sidebar {
+  height: calc(var(--inspiration-content-height) - 16px);
+}
+html[data-inspiration-chrome] #root .conversation-workspace {
+  height: calc(var(--inspiration-content-height) - 140px);
+}
+html[data-inspiration-chrome] #root .timeline-draft.editing-workspace {
+  height: calc(var(--inspiration-content-height) - 145px);
+}
+/* Portalled menus retain viewport coordinates. Only full-window backdrop layers
+   reserve the chrome row, so measured popover positions remain correct. */
+html[data-inspiration-chrome] .studio-modal-layer,
+html[data-inspiration-chrome] .fixed.inset-0 {
+  top: var(--inspiration-chrome-space);
+}
+html[data-inspiration-chrome] #inspiration-recovery-content {
+  display: grid;
+  place-items: center;
+  background: var(--inspiration-chrome-surface);
+  color: #efeff1;
+}
+html[data-inspiration-chrome] #inspiration-recovery-content p { color: #b8b8bd; }
+html[data-inspiration-chrome] #inspiration-recovery-content a {
+  background: #efeff1;
+  color: #28282a;
+}
+html[data-inspiration-fullscreen="true"] { --inspiration-chrome-space: 0px; }
+html[data-inspiration-fullscreen="true"] #inspiration-window-chrome { display: none; }

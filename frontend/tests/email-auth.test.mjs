@@ -64,6 +64,7 @@ async function renderLogin(path, handleRequest, options = {}) {
     const request = { url, method: requestOptions?.method ?? 'GET', body: requestOptions?.body ? JSON.parse(requestOptions.body) : undefined };
     requests.push(request);
     if (url.endsWith('/auth/providers')) return response(providers);
+    if (url.endsWith('/auth/google/desktop/capabilities')) return options.capabilities ? options.capabilities(request) : response({ protocol: 1, enabled: true });
     if (url.endsWith('/me')) return options.me ? options.me(request) : response(signedIn);
     if (url.endsWith('/projects')) return response([]);
     return handleRequest(request);
@@ -304,6 +305,49 @@ test('desktop timeout and native failure allow a fresh retry and reject external
   assert.equal(starts, 3);
   assert.equal(localStorage.getItem('inspiration_token'), 'retry-token');
   assert.equal(page.destination, '/projects');
+});
+
+test('a missing cloud desktop API clears login busy state and allows retry after the server is updated', async () => {
+  let supported = false;
+  let starts = 0;
+  const page = await renderLogin('/login', () => { throw new Error('Unexpected web auth request'); }, {
+    capabilities: () => supported ? response({ protocol: 1, enabled: true }) : response({ detail: 'Not Found' }, 404),
+    desktop: {
+      googleSignIn: async () => { starts++; return { access_token: 'updated-cloud-token', next: '/projects', linked: false }; },
+      cancelGoogleSignIn: async () => {},
+    },
+  });
+  await fillCredentials(page.view);
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.equal(starts, 0);
+  assert.match(page.view.root.findByProps({ role: 'alert' }).children.join(''), /云端尚未支持桌面 Google 登录/);
+  assert.equal(googleButton(page.view).props.disabled, false);
+  assert.equal(page.view.root.findByProps({ type: 'submit' }).props.disabled, false);
+  assert.equal(page.view.root.findByProps({ type: 'email' }).props.value, 'creator@example.com');
+  supported = true;
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  assert.equal(starts, 1);
+  assert.equal(page.destination, '/projects');
+  assert.equal(localStorage.getItem('inspiration_token'), 'updated-cloud-token');
+});
+
+test('cancelling during capability negotiation does not open a browser when the late probe finishes', async () => {
+  const support = deferred();
+  let starts = 0;
+  const page = await renderLogin('/login', () => { throw new Error('Unexpected web auth request'); }, {
+    capabilities: () => support.promise,
+    desktop: {
+      googleSignIn: async () => { starts++; return { access_token: 'unwanted-token', next: '/projects', linked: false }; },
+      cancelGoogleSignIn: async () => {},
+    },
+  });
+  await act(async () => { googleButton(page.view).props.onClick(); });
+  await act(async () => { page.view.root.findAllByType('button').find(button => button.children.includes('取消登录')).props.onClick(); });
+  await act(async () => { support.resolve(response({ protocol: 1, enabled: true })); });
+  assert.equal(starts, 0);
+  assert.equal(localStorage.getItem('inspiration_token'), null);
+  assert.equal(googleButton(page.view).props.disabled, false);
+  assert.match(page.view.root.findByProps({ role: 'alert' }).children.join(''), /取消/);
 });
 
 test('leaving the login route cancels desktop authorization and ignores the eventual result', async () => {

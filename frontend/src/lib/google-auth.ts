@@ -31,9 +31,36 @@ export function getDesktopGoogleAuth(): DesktopGoogleAuth | undefined {
     : undefined;
 }
 
-export async function startDesktopGoogleAuth(next: string, language: "zh" | "en"): Promise<GoogleAuthResult> {
+async function requireDesktopGoogleSupport(signal?: AbortSignal): Promise<void> {
+  try {
+    const timeout = AbortSignal.timeout(12_000);
+    const response = await fetch("/api/v1/auth/google/desktop/capabilities", {
+      method: "GET", credentials: "omit", cache: "no-store", redirect: "error",
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (response.status === 404 || response.status === 405)
+      throw new ApiError("google_desktop_server_outdated", "The server does not support desktop sign-in");
+    if (!response.ok)
+      throw new ApiError("google_desktop_unavailable", "Desktop sign-in is unavailable");
+    const support = await response.json().catch(() => null);
+    if (!support || !Number.isInteger(support.protocol) || typeof support.enabled !== "boolean")
+      throw new ApiError("google_desktop_server_outdated", "The server does not advertise desktop sign-in");
+    if (support.protocol !== 1)
+      throw new ApiError("google_desktop_update_required", "Desktop sign-in requires a different client version");
+    if (!support.enabled) throw new ApiError("google_unavailable", "Google sign-in is unavailable");
+  } catch (error) {
+    if (signal?.aborted) throw new ApiError("google_cancelled", "Desktop sign-in was cancelled");
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("google_network_error", "Could not check desktop sign-in support");
+  }
+}
+
+export async function startDesktopGoogleAuth(next: string, language: "zh" | "en", signal?: AbortSignal): Promise<GoogleAuthResult> {
   const bridge = getDesktopGoogleAuth();
   if (!bridge) throw new ApiError("google_desktop_unavailable", "Desktop sign-in is unavailable");
+  await requireDesktopGoogleSupport(signal);
+  // A cancellation during the probe must not start a native attempt afterward.
+  if (signal?.aborted) throw new ApiError("google_cancelled", "Desktop sign-in was cancelled");
   let result;
   try {
     result = await bridge.googleSignIn(safeAuthNext(next), language);
@@ -122,6 +149,8 @@ export function googleAuthError(error: unknown, zh: boolean): string {
     google_unavailable: ["Google 登录暂不可用，请稍后重试或使用账号密码登录。", "Google sign-in is unavailable. Try again later or use your password."],
     google_desktop_timeout: ["等待浏览器授权已超时，请重新点击 Google 登录。", "Browser authorization timed out. Start Google sign-in again."],
     google_desktop_unavailable: ["暂时无法打开桌面登录，请重试或使用邮箱密码登录。", "Desktop sign-in is unavailable. Try again or use your email and password."],
+    google_desktop_server_outdated: ["云端尚未支持桌面 Google 登录，请先使用邮箱密码登录，或在浏览器中使用网页版。云端更新后可重新尝试。", "The server does not support desktop Google sign-in yet. Use your email and password, or open the web app in your browser. Try again after the server is updated."],
+    google_desktop_update_required: ["当前客户端与云端的 Google 登录版本不兼容，请更新客户端，或先使用邮箱密码登录。", "This client is not compatible with the server's Google sign-in version. Update the app or use your email and password."],
     google_state_invalid: ["这次授权已过期或无法验证，请重新开始 Google 登录。", "This authorization expired or could not be verified. Start Google sign-in again."],
     google_token_invalid: ["无法验证 Google 身份，请重新登录。", "We could not verify your Google identity. Please sign in again."],
     google_network_error: ["暂时无法连接 Google，请检查网络后重试。", "We could not reach Google. Check your connection and try again."],

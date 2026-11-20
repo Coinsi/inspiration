@@ -5,6 +5,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { CLOUD_ORIGIN, resolveOrigin, isInternal, isExternal, isGoogleAuth } = require('./policy.cjs');
 const { googleSignIn } = require('./google-sign-in.cjs');
+const { checkForUpdates } = require('./updates.cjs');
+const { getWindowChromeOptions, attachWindowChrome } = require('./window-chrome.cjs');
 
 // Packaged apps always use the production origin.
 const origin = resolveOrigin(app.isPackaged ? CLOUD_ORIGIN : process.env.INSPIRATION_DESKTOP_ORIGIN, !app.isPackaged);
@@ -13,6 +15,8 @@ const fallback = pathToFileURL(path.join(__dirname, 'offline.html')).href;
 let mainWindow;
 let googleNoticeOpen = false;
 let googleAttempt;
+let updateCheckRunning = false;
+let startupUpdateScheduled = false;
 
 function loadHome() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -20,7 +24,7 @@ function loadHome() {
 }
 
 function isSignInPage(url) {
-  return isInternal(url, origin) && ['/login', '/register'].includes(new URL(url).pathname);
+  return isInternal(url, origin) && /^\/(login|register)\/?$/.test(new URL(url).pathname);
 }
 
 function isSignInSender(event) {
@@ -62,15 +66,24 @@ function installGoogleSignIn() {
 async function handleExternal(url) {
   if (isGoogleAuth(url)) {
     if (googleNoticeOpen) return;
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) return;
+    const source = win.webContents.getURL();
+    const signingIn = isSignInPage(source);
     googleNoticeOpen = true;
+    // A legacy login page expected to navigate away and keeps its submit button
+    // busy when this embedded-browser navigation is blocked. Restore the form.
+    if (signingIn) win.reload();
     try {
-      const { response } = await dialog.showMessageBox(mainWindow, {
+      const { response } = await dialog.showMessageBox(win, {
         type: 'info', title: 'Google 登录',
-        message: '此页面的 Google 操作需要通过网页版完成。',
-        detail: '若要登录桌面客户端，请从客户端登录页发起 Google 登录。账户绑定可在网页版的账户安全中完成。',
-        buttons: ['返回客户端', '在浏览器中使用'], defaultId: 0, cancelId: 0,
+        message: signingIn ? '当前网站版本尚未启用桌面 Google 登录。' : '请在浏览器中管理 Google 账号绑定。',
+        detail: signingIn
+          ? '可以回到登录页使用邮箱和密码，或在浏览器中使用网页版。网页版会单独保持你的登录。'
+          : '在网页版打开个人设置 → 账户安全，即可管理 Google 账号。',
+        buttons: ['返回客户端', '打开网页版'], defaultId: 0, cancelId: 0,
       });
-      if (response === 1) await shell.openExternal(`${origin}/login`);
+      if (response === 1) await shell.openExternal(signingIn ? source : `${origin}/login`);
     } finally { googleNoticeOpen = false; }
     return;
   }
@@ -82,10 +95,47 @@ async function handleExternal(url) {
   if (response === 1) await shell.openExternal(url);
 }
 
+async function showUpdate(manual) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || updateCheckRunning) return;
+  updateCheckRunning = true;
+  try {
+    const result = await checkForUpdates({ currentVersion: app.getVersion() });
+    if (win.isDestroyed()) return;
+    if (result.status === 'available') {
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'info', title: '检查更新',
+        message: `Inspiration ${result.version} 已发布`,
+        detail: `当前版本为 ${app.getVersion()}。你可以下载安装包，完成手头工作后再安装。`,
+        buttons: ['下载更新', '稍后'], defaultId: 0, cancelId: 1,
+      });
+      if (response === 0) await shell.openExternal(result.downloadUrl);
+    } else if (manual) {
+      const current = result.status === 'up-to-date';
+      await dialog.showMessageBox(win, {
+        type: 'info', title: '检查更新',
+        message: current ? '暂无可用更新' : '暂时无法检查更新',
+        detail: current ? `当前版本为 ${app.getVersion()}。` : '请确认网络可以访问 GitHub 后重试。',
+        buttons: ['确定'],
+      });
+    }
+  } finally {
+    updateCheckRunning = false;
+  }
+}
+
+function scheduleStartupUpdate() {
+  if (!app.isPackaged || startupUpdateScheduled) return;
+  startupUpdateScheduled = true;
+  setTimeout(() => { void showUpdate(false).catch(() => {}); }, 5_000).unref();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440, height: 960, minWidth: 960, minHeight: 640,
     title: 'Inspiration', backgroundColor: '#102d27', show: false,
+    ...getWindowChromeOptions(),
+    autoHideMenuBar: process.platform === 'win32',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       partition: 'persist:inspiration',
@@ -95,6 +145,7 @@ function createWindow() {
     },
   });
   const win = mainWindow;
+  const chrome = attachWindowChrome(win, { origin, fallback, ipcMain });
   const contents = win.webContents;
   const ses = contents.session;
   ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
@@ -130,8 +181,11 @@ function createWindow() {
     googleAttempt?.abort();
     void win.loadFile(path.join(__dirname, 'offline.html')).catch(() => {});
   });
-  win.once('ready-to-show', () => {
+  win.once('ready-to-show', async () => {
+    await chrome.ready;
+    if (win.isDestroyed()) return;
     if (!(process.env.INSPIRATION_DESKTOP_SMOKE === '1' && !app.isPackaged)) win.show();
+    scheduleStartupUpdate();
   });
   win.on('closed', () => { googleAttempt?.abort(); mainWindow = null; });
   // Chromium handles file inputs and blob downloads, including authenticated exports.
@@ -165,6 +219,7 @@ function installMenu() {
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' },
     ] },
     { label: '帮助', submenu: [
+      { label: '检查更新…', click: () => { void showUpdate(true).catch(() => {}); } },
       { label: '下载安装包', click: () => shell.openExternal('https://github.com/Coinsi/inspiration/releases') },
       { label: '关于 Inspiration', click: () => dialog.showMessageBox(mainWindow, {
         message: `Inspiration ${app.getVersion()}`,

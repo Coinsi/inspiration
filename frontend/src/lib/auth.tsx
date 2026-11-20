@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithDesktopGoogle = useCallback(async (next: string, language: "zh" | "en", signal: AbortSignal) => {
     signal.throwIfAborted();
-    const result = await startDesktopGoogleAuth(next, language);
+    const result = await startDesktopGoogleAuth(next, language, signal);
     signal.throwIfAborted();
     await acceptSession(result.access_token, undefined, signal);
     return result.next;

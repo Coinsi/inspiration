@@ -19,6 +19,12 @@
 - `npm run test:google-auth` 六项通过。真实 Electron 登录页连接独立 Chrome 与实际回环端口，验证取消、重试、错误状态、会话隔离、返回原页面与刷新恢复。证据在 `desktop/test-results/google-auth-verified/report.json`。
 - Google 与云端 API 使用测试数据，测试捕获系统浏览器打开请求后交给独立浏览器执行。正式 Google 账户、系统默认浏览器调起和 macOS 实机仍待验证。
 
+## 0.1.1 测试包
+
+- Windows 实际 Electron 启动检查通过，原生菜单默认收起，拖动区让出窗口控件的位置；旧版网页的 Google 按钮会恢复可用，并指明服务端需要更新。
+- 更新检查仅匹配正式 Release 中对应系统和架构的安装包。14 项桌面 Node 测试及真实 Electron 的手动检查入口通过。
+- 62 项前端测试、76 项后端 Google 测试和 6 项桌面回跳检查通过。回跳测试使用本地模拟服务。正式站点的桌面授权接口仍返回 404，普通 Google 网页登录接口存在。
+
 ## 尚未验证
 
 - GitHub Actions 尚未运行：本地更改未提交、未推送。

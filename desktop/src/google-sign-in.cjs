@@ -21,6 +21,8 @@ async function post(origin, endpoint, body, signal) {
     redirect: 'error',
     signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
   });
+  if (response.status === 404 || response.status === 405)
+    return { error: 'google_desktop_server_outdated' };
   const data = await response.json().catch(() => null);
   if (response.ok && data) return data;
   const code = data?.error?.code;

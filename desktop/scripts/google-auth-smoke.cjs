@@ -37,6 +37,10 @@ async function fixtureServer() {
     const read = async () => { let body = ''; for await (const chunk of req) body += chunk; return JSON.parse(body); };
     try {
       if (url.pathname === '/api/v1/auth/providers') return json(200, { registration_enabled: true, providers: [{ id: 'google', name: 'Google', registration_enabled: true }] });
+      if (url.pathname === '/api/v1/auth/google/desktop/capabilities') {
+        assert.equal(req.method, 'GET');
+        return json(200, { protocol: 1, enabled: true });
+      }
       if (url.pathname === '/api/v1/auth/google/desktop/start') {
         assert.equal(req.method, 'POST');
         assert.equal(req.headers.origin, origin);

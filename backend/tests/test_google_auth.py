@@ -224,6 +224,22 @@ def test_provider_is_hidden_without_complete_configuration(oauth, monkeypatch):
             assert client.post(AUTH + "/start", json={"mode": "login"}).status_code >= 400
 
 
+def test_desktop_capabilities_is_read_only_and_reports_current_configuration(oauth, monkeypatch):
+    client, sessions, _ = oauth
+    client.headers.pop("Origin")
+    for enabled in (True, False):
+        if not enabled:
+            monkeypatch.setattr(settings, "google_client_secret", "")
+        response = client.get(AUTH + "/desktop/capabilities")
+        assert response.status_code == 200
+        assert response.json() == {"protocol": 1, "enabled": enabled}
+        assert response.headers["cache-control"] == "no-store"
+        assert "set-cookie" not in response.headers
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(OAuthTransaction)) == 0
+        assert db.scalar(select(func.count()).select_from(AuthAttempt)) == 0
+
+
 def test_start_uses_pkce_nonce_and_protected_browser_cookie(oauth):
     client, _, _ = oauth
     response, params = start(client)
