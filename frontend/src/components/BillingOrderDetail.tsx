@@ -108,6 +108,24 @@ export function BillingOrderDetail({
           <dt>{zh ? "付款金额" : "Payment"}</dt>
           <dd>{money(order.amount_minor, order.currency, zh)}</dd>
         </div>
+        {order.conversion && (
+          <>
+            <div>
+              <dt>{zh ? "套餐标价" : "Plan list price"}</dt>
+              <dd>
+                {money(
+                  order.conversion.original_amount_minor,
+                  order.conversion.original_currency,
+                  zh,
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>{zh ? "下单时换算比例" : "Rate at checkout"}</dt>
+              <dd>1 USD = {order.conversion.rate} CNY</dd>
+            </div>
+          </>
+        )}
         <div>
           <dt>
             {membership

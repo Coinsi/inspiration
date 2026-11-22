@@ -1,12 +1,14 @@
 """User checkout and super-admin payment operations."""
 
 import ipaddress
+import re
 import uuid
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
@@ -43,7 +45,7 @@ Current = Annotated[User, Depends(get_current_user)]
 Super = Annotated[User, Depends(super_admin)]
 Currency = Literal["cny", "usd", "eur", "gbp", "hkd", "sgd", "jpy"]
 Name = Annotated[str, Field(min_length=1, max_length=100)]
-Money = Annotated[int, Field(strict=True, gt=0, le=10**9)]
+Money = Annotated[int, Field(strict=True, gt=0, le=orders.MAX_AMOUNT_MINOR)]
 Credits = Annotated[int, Field(strict=True, gt=0, le=10**10)]
 Reason = Annotated[str, Field(min_length=1, max_length=500)]
 
@@ -57,6 +59,25 @@ class SettingsIn(Input):
     payment_required: bool
     public_origin: str = Field(max_length=300)
     checkout_minutes: int = Field(strict=True, ge=35, le=120)
+    subscription_usd_to_cny_rate: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=6, allow_inf_nan=False
+    )
+
+    @field_validator("subscription_usd_to_cny_rate", mode="before")
+    @classmethod
+    def validate_subscription_rate(cls, value):
+        if value is None:
+            return None
+        if (
+            not isinstance(value, str)
+            or len(value) > 24
+            or not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,6})?", value.strip())
+        ):
+            raise ValueError("汇率须为普通十进制字符串，最多保留6位小数")
+        rate = Decimal(value.strip())
+        if rate > orders.MAX_CONVERSION_RATE:
+            raise ValueError("汇率不能超过999999.999999")
+        return rate if rate else None
 
 
 class PackIn(Input):
@@ -100,6 +121,7 @@ class CheckoutIn(Input):
     plan_id: uuid.UUID | None = None
     provider_id: uuid.UUID
     idempotency_key: uuid.UUID
+    expected_amount_minor: Money | None = None
 
 
 class RefundIn(Input):
@@ -189,6 +211,7 @@ def _settings_view(preferences: BillingSettings) -> dict:
         "payment_required": preferences.payment_required,
         "public_origin": preferences.public_origin,
         "checkout_minutes": preferences.checkout_minutes,
+        "subscription_usd_to_cny_rate": orders.rate_text(preferences.subscription_usd_to_cny_rate),
     }
 
 
@@ -198,8 +221,8 @@ def _audit(db, user, action, ident=None):
 
 @router.get("/billing/catalog")
 def catalog(db: DB, _: Current):
-    enabled = orders.config(db).enabled
-    if not enabled:
+    preferences = orders.config(db)
+    if not preferences.enabled:
         return {"enabled": False, "packs": [], "plans": [], "providers": []}
     providers = list(
         db.scalars(
@@ -209,18 +232,47 @@ def catalog(db: DB, _: Current):
     currencies = {provider.currency for provider in providers}
     packs = db.scalars(
         select(BillingPack)
-        .where(BillingPack.active, BillingPack.currency.in_(currencies))
+        .where(BillingPack.active)
         .order_by(BillingPack.currency, BillingPack.amount_minor)
     )
     plans = db.scalars(
         select(MembershipPlan)
-        .where(MembershipPlan.active, MembershipPlan.currency.in_(currencies))
+        .where(MembershipPlan.active)
         .order_by(MembershipPlan.sort_order, MembershipPlan.created_at, MembershipPlan.id)
     )
+    plan_views = []
+    for plan in plans:
+        quotes = [
+            quote
+            for currency in currencies
+            if (
+                quote := orders.settlement_quote(
+                    plan, currency, preferences.subscription_usd_to_cny_rate
+                )
+            )
+        ]
+        if not quotes:
+            continue
+        view = _plan_view(plan)
+        converted = {
+            quote.currency: quote.amount_minor
+            for quote in quotes
+            if quote.conversion_rate is not None
+        }
+        if converted:
+            view["payment_amounts"] = converted
+        plan_views.append(view)
     return {
         "enabled": True,
-        "packs": [_pack_view(pack) for pack in packs],
-        "plans": [_plan_view(plan) for plan in plans],
+        "packs": [
+            _pack_view(pack)
+            for pack in packs
+            if any(
+                orders.settlement_quote(pack, currency, preferences.subscription_usd_to_cny_rate)
+                for currency in currencies
+            )
+        ],
+        "plans": plan_views,
         "providers": [_provider_view(provider) for provider in providers],
     }
 
@@ -293,6 +345,7 @@ def create_order(data: CheckoutIn, request: Request, db: DB, user: Current):
         plan_id=data.plan_id,
         client_ip=address,
         is_mobile=any(item in user_agent for item in ("mobile", "android", "iphone", "ipad")),
+        expected_amount_minor=data.expected_amount_minor,
     )
     return orders.order_view(db, row)
 
@@ -374,31 +427,51 @@ def admin_settings(db: DB, _: Super):
 
 @router.patch("/admin/billing/settings")
 def change_settings(data: SettingsIn, db: DB, user: Super):
+    # Hold the existing configuration while validating opening purchases. An
+    # older client cannot race a new rate edit and put its stale read back.
+    current = db.scalar(
+        select(BillingSettings)
+        .where(BillingSettings.id == 1)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     values = data.model_dump()
+    rate_provided = "subscription_usd_to_cny_rate" in data.model_fields_set
+    if not rate_provided:
+        values["subscription_usd_to_cny_rate"] = (
+            current.subscription_usd_to_cny_rate if current else None
+        )
     if data.enabled or data.public_origin:
         values["public_origin"] = orders.public_checkout_origin(data.public_origin)
     if data.enabled:
-        offered_currencies = (
-            select(BillingPack.currency)
-            .where(BillingPack.active)
-            .union_all(select(MembershipPlan.currency).where(MembershipPlan.active))
-        )
-        compatible = db.scalar(
-            select(BillingProvider.id)
-            .where(BillingProvider.active, BillingProvider.currency.in_(offered_currencies))
-            .limit(1)
+        currencies = set(db.scalars(select(BillingProvider.currency).where(BillingProvider.active)))
+        products = [
+            *db.scalars(select(BillingPack).where(BillingPack.active)),
+            *db.scalars(select(MembershipPlan).where(MembershipPlan.active)),
+        ]
+        compatible = any(
+            orders.settlement_quote(product, currency, values["subscription_usd_to_cny_rate"])
+            for product in products
+            for currency in currencies
         )
         if not compatible:
-            raise CapabilityUnsupported("启用收款前请至少配置一个在售商品和同币种支付渠道")
-    db.execute(
+            raise CapabilityUnsupported(
+                "启用收款前请至少配置一个在售商品和可结算的支付渠道："
+                "币种相同，或已配置美元会员的人民币结算汇率"
+            )
+    updates = {**values, "updated_at": func.now()}
+    if not rate_provided:
+        # Also protect first-save races where there was no singleton to lock.
+        updates.pop("subscription_usd_to_cny_rate")
+    row = db.scalar(
         insert(BillingSettings)
         .values(id=1, **values)
-        .on_conflict_do_update(
-            index_elements=[BillingSettings.id], set_={**values, "updated_at": func.now()}
-        )
+        .on_conflict_do_update(index_elements=[BillingSettings.id], set_=updates)
+        .returning(BillingSettings)
+        .execution_options(populate_existing=True)
     )
     _audit(db, user, "billing.settings_updated")
-    return values
+    return _settings_view(row)
 
 
 @router.get("/admin/billing/packs")

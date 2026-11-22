@@ -27,9 +27,32 @@ const {
   membershipAnnualPricing,
   membershipPeriod,
   membershipLabel,
+  billingPaymentQuote,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
 );
+
+test("membership conversion uses the server quote without changing direct prices or points packs", () => {
+  const plan = {
+    currency: "usd", amount_minor: 2000,
+    payment_amounts: { usd: 9999, cny: 14488, eur: 1800 },
+  };
+  assert.deepEqual(billingPaymentQuote(plan, { currency: "usd" }, true), {
+    amount_minor: 2000, currency: "usd", converted: false,
+  });
+  assert.deepEqual(billingPaymentQuote(plan, { currency: "cny" }, true), {
+    amount_minor: 14488, currency: "cny", converted: true,
+  });
+  assert.equal(billingPaymentQuote(plan, { currency: "cny" }), null);
+  assert.equal(billingPaymentQuote(plan, { currency: "eur" }, true), null);
+  assert.equal(billingPaymentQuote({ ...plan, currency: "eur" }, { currency: "cny" }, true), null);
+  for (const amount of [undefined, null, 0, -1, 123.45, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(billingPaymentQuote({ ...plan, payment_amounts: { cny: amount } }, { currency: "cny" }, true), null);
+  }
+  assert.equal(billingPaymentQuote({ currency: "usd", amount_minor: 2000 }, { currency: "cny" }, true), null);
+  assert.equal(billingPaymentQuote(undefined, { currency: "cny" }, true), null);
+  assert.equal(billingPaymentQuote(plan, undefined, true), null);
+});
 
 test("membership period groups the configured term and preserves other durations", () => {
   assert.equal(membershipPeriod({ duration: 1, duration_unit: "month" }), "monthly");

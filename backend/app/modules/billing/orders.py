@@ -5,7 +5,9 @@ import io
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from urllib.parse import urlsplit
 
@@ -31,6 +33,55 @@ from app.modules.billing.providers import CheckoutRequest, PaymentEvidence, get_
 
 logger = logging.getLogger(__name__)
 MAX_ACTIVE_ORDERS = 5
+MAX_AMOUNT_MINOR = 10**9
+MAX_CONVERSION_RATE = Decimal("999999.999999")
+
+
+class PaymentQuoteChanged(Conflict):
+    code = "PAYMENT_QUOTE_CHANGED"
+
+
+@dataclass(frozen=True)
+class SettlementQuote:
+    currency: str
+    amount_minor: int
+    original_amount_minor: int | None = None
+    conversion_rate: Decimal | None = None
+
+
+def rate_text(rate: Decimal | None) -> str | None:
+    """Keep a configured rate exact in JSON; zero means disabled."""
+    return format(rate.normalize(), "f") if rate is not None and rate > 0 else None
+
+
+def settlement_quote(
+    product: BillingPack | MembershipPlan, currency: str, rate: Decimal | None
+) -> SettlementQuote | None:
+    """One price rule for catalog, opening purchases, and checkout.
+
+    USD and CNY both use hundredths. Converted amounts stay within the same
+    supported money range as configured prices, including one payable cent.
+    This never applies a membership exchange rate to permanent points packs.
+    """
+    if not 1 <= product.amount_minor <= MAX_AMOUNT_MINOR:
+        return None
+    if product.currency == currency:
+        return SettlementQuote(currency, product.amount_minor)
+    if (
+        not isinstance(product, MembershipPlan)
+        or product.currency != "usd"
+        or currency != "cny"
+        or rate is None
+        or not rate.is_finite()
+        or not 0 < rate <= MAX_CONVERSION_RATE
+    ):
+        return None
+    amount = int(
+        (Decimal(product.amount_minor) * rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    if not 1 <= amount <= MAX_AMOUNT_MINOR:
+        return None
+    return SettlementQuote(currency, amount, product.amount_minor, rate)
 
 
 def now() -> datetime:
@@ -134,6 +185,7 @@ def create_order(
     plan_id: uuid.UUID | None = None,
     client_ip: str | None = None,
     is_mobile: bool = False,
+    expected_amount_minor: int | None = None,
 ) -> BillingOrder:
     if (pack_id is None) == (plan_id is None):
         raise CapabilityUnsupported("请选择一个积分包或会员套餐")
@@ -163,8 +215,18 @@ def create_order(
         raise CapabilityUnsupported("当前未开放购买")
     if not product or not product.active or not provider or not provider.active:
         raise CapabilityUnsupported("此商品或支付渠道已下架")
-    if product.currency != provider.currency:
+    quote = settlement_quote(product, provider.currency, preferences.subscription_usd_to_cny_rate)
+    if quote is None:
+        if (
+            expected_amount_minor is not None
+            and isinstance(product, MembershipPlan)
+            and product.currency == "usd"
+            and provider.currency == "cny"
+        ):
+            raise PaymentQuoteChanged("人民币结算报价已失效，请刷新套餐并重新确认支付方式")
         raise CapabilityUnsupported("此支付渠道不支持该商品的币种")
+    if quote.conversion_rate is not None and expected_amount_minor != quote.amount_minor:
+        raise PaymentQuoteChanged("支付金额已更新，请刷新套餐并重新确认人民币实付金额")
     provider_for(provider)
     timestamp = now()
     pending = db.scalar(
@@ -191,8 +253,10 @@ def create_order(
         idempotency_key=idempotency_key,
         pack_name=product.name,
         provider_name=provider.name,
-        currency=product.currency,
-        amount_minor=product.amount_minor,
+        currency=quote.currency,
+        amount_minor=quote.amount_minor,
+        original_amount_minor=quote.original_amount_minor,
+        conversion_rate=quote.conversion_rate,
         credits=product.credits,
         public_origin=public_checkout_origin(preferences.public_origin),
         expires_at=timestamp + timedelta(minutes=preferences.checkout_minutes),
@@ -457,6 +521,12 @@ def order_view(
             and (order.plan_id is None or memberships.can_refund(db, order))
         ),
     }
+    if order.conversion_rate is not None:
+        result["conversion"] = {
+            "original_amount_minor": order.original_amount_minor,
+            "original_currency": "usd",
+            "rate": rate_text(order.conversion_rate),
+        }
     if admin:
         owner = db.get(User, order.user_id)
         result.update(user_id=order.user_id, user_email=owner.email if owner else None)

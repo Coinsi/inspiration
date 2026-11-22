@@ -12,6 +12,7 @@ export interface MembershipPlan extends CreditPack {
   features: string[];
   original_amount_minor: number | null;
   monthly_plan_id?: string | null;
+  payment_amounts?: Partial<Record<string, number>>;
   duration: number;
   duration_unit: "day" | "week" | "month";
   sort_order: number;
@@ -82,6 +83,11 @@ export interface PaymentOrder {
   currency: string;
   amount_minor: number;
   credits: number;
+  conversion?: {
+    original_amount_minor: number;
+    original_currency: "usd";
+    rate: string;
+  } | null;
   checkout_url?: string | null;
   qr_payload?: string | null;
   qr_image_url?: string | null;
@@ -101,6 +107,29 @@ export interface BillingSettings {
   payment_required: boolean;
   public_origin: string;
   checkout_minutes: number;
+  subscription_usd_to_cny_rate?: string | null;
+}
+
+export function billingPaymentQuote(
+  product: CreditPack | MembershipPlan | undefined,
+  provider: PaymentProvider | undefined,
+  membership = false,
+): { amount_minor: number; currency: string; converted: boolean } | null {
+  if (!product || !provider) return null;
+  const converted = product.currency !== provider.currency;
+  let amount: number | undefined = product.amount_minor;
+  if (converted) {
+    if (
+      !membership ||
+      product.currency !== "usd" ||
+      provider.currency !== "cny" ||
+      !("payment_amounts" in product)
+    )
+      return null;
+    amount = product.payment_amounts?.cny;
+  }
+  if (amount == null || !Number.isSafeInteger(amount) || amount <= 0) return null;
+  return { amount_minor: amount, currency: provider.currency, converted };
 }
 
 export interface PaymentProviderType {

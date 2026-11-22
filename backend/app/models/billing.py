@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -30,10 +32,16 @@ class BillingSettings(Base, TimestampMixin):
     payment_required: Mapped[bool] = mapped_column(Boolean, default=False)
     public_origin: Mapped[str] = mapped_column(String(300), default="")
     checkout_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    subscription_usd_to_cny_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
 
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_billing_settings_singleton"),
         CheckConstraint("checkout_minutes between 35 and 120", name="ck_billing_checkout_minutes"),
+        CheckConstraint(
+            "subscription_usd_to_cny_rate is null or "
+            "subscription_usd_to_cny_rate between 0 and 999999.999999",
+            name="ck_billing_subscription_rate",
+        ),
     )
 
 
@@ -120,6 +128,8 @@ class BillingOrder(Base, TimestampMixin):
     public_origin: Mapped[str] = mapped_column(String(300))
     currency: Mapped[str] = mapped_column(String(3))
     amount_minor: Mapped[int] = mapped_column(BigInteger)
+    original_amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    conversion_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     credits: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(24), default="pending")
     provider_order_id: Mapped[str | None] = mapped_column(String(200))
@@ -153,6 +163,16 @@ class BillingOrder(Base, TimestampMixin):
             "(pack_id is null and plan_id is not null and membership_days is not null "
             "and membership_days between 1 and 3650)",
             name="ck_billing_order_product",
+        ),
+        CheckConstraint(
+            "(original_amount_minor is null and conversion_rate is null) or "
+            "(original_amount_minor is not null and conversion_rate is not null "
+            "and plan_id is not null and currency = 'cny' "
+            "and original_amount_minor between 1 and 1000000000 "
+            "and conversion_rate > 0 and conversion_rate <= 999999.999999 "
+            "and amount_minor between 1 and 1000000000 "
+            "and amount_minor = round(original_amount_minor * conversion_rate))",
+            name="ck_billing_order_conversion",
         ),
         Index("ix_billing_order_reconcile", "status", "next_check_at"),
         Index("ix_billing_order_plan_id", "plan_id"),

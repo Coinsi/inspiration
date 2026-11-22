@@ -9,12 +9,13 @@ import { BillingPlanCards } from "@/components/BillingPlanCards";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { loadPlanPreview } from "@/lib/billingPlanPreview";
 import {
   billingDate,
+  billingPaymentQuote,
   money,
   membershipPurchaseDuration,
   paymentOrderLabel,
@@ -71,6 +72,7 @@ export default function Billing() {
   const [offset, setOffset] = useState(0);
   const [membershipOffset, setMembershipOffset] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [quoteNeedsRefresh, setQuoteNeedsRefresh] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const [refundOpen, setRefundOpen] = useState(false);
@@ -160,9 +162,16 @@ export default function Billing() {
   const product = kind === "membership" ? plan : pack;
   const providers =
     catalog.data?.providers.filter(
-      (p) => p.active && p.currency === product?.currency,
+      (p) => p.active && billingPaymentQuote(product, p, kind === "membership"),
     ) ?? [];
-  const provider = providers.find((p) => p.id === providerId) ?? providers[0];
+  const provider = providerId
+    ? providers.find((p) => p.id === providerId)
+    : providers[0];
+  const paymentQuote = billingPaymentQuote(
+    product,
+    provider,
+    kind === "membership",
+  );
   const selectedOrder = order.data;
   const canRefund =
     selectedOrder?.status === "completed" &&
@@ -197,11 +206,33 @@ export default function Billing() {
     return { pathname: "/billing", search: next.toString() };
   }
 
+  async function refreshPaymentQuote() {
+    const updated = await catalog.refetch();
+    if (updated.isError) {
+      setQuoteNeedsRefresh(true);
+      setError(
+        zh
+          ? "付款金额暂时无法更新，请刷新付款金额后再试。"
+          : "The payment amount could not be updated. Refresh it before trying again.",
+      );
+      return;
+    }
+    setQuoteNeedsRefresh(false);
+    setError(
+      zh
+        ? "付款金额或支付方式已变化，请重新核对后再创建订单。"
+        : "The payment amount or method has changed. Review it before creating the order again.",
+    );
+  }
+
   async function createOrder() {
     if (
       preview ||
       !product ||
       !provider ||
+      !paymentQuote ||
+      quoteNeedsRefresh ||
+      catalog.isFetching ||
       inflight.current ||
       !catalog.data?.enabled ||
       (kind === "membership" && !checkoutOpen)
@@ -221,6 +252,9 @@ export default function Billing() {
           : { pack_id: product.id }),
         provider_id: provider.id,
         idempotency_key: attempt.current.key,
+        ...(paymentQuote.converted
+          ? { expected_amount_minor: paymentQuote.amount_minor }
+          : {}),
       });
       qc.setQueryData([...scope, "order", created.id], created);
       attempt.current = null;
@@ -229,6 +263,19 @@ export default function Billing() {
       selectOrder(created.id);
       await refresh();
     } catch (e) {
+      if (
+        paymentQuote.converted &&
+        e instanceof ApiError &&
+        e.code === "PAYMENT_QUOTE_CHANGED"
+      ) {
+        // Keep the rejected channel selected so a disappearing quote cannot
+        // silently switch the next payment to a different currency.
+        setProvider(provider.id);
+        setQuoteNeedsRefresh(true);
+        attempt.current = null;
+        await refreshPaymentQuote();
+        return;
+      }
       setError(
         e instanceof Error
           ? e.message
@@ -337,20 +384,32 @@ export default function Billing() {
         role="group"
         aria-label={zh ? "选择支付方式" : "Choose a payment method"}
       >
-        {providers.map((item) => (
-          <button
-            key={item.id}
-            disabled={busy}
-            aria-pressed={provider?.id === item.id}
-            className={provider?.id === item.id ? "is-selected" : ""}
-            onClick={() => {
-              setProvider(item.id);
-              setError("");
-            }}
-          >
-            {item.name}
-          </button>
-        ))}
+        {providers.map((item) => {
+          const quote = billingPaymentQuote(product, item, kind === "membership");
+          const priceId = `billing-method-price-${item.id}`;
+          return (
+            <button
+              key={item.id}
+              disabled={busy || catalog.isFetching}
+              aria-label={item.name}
+              aria-describedby={quote && kind === "membership" ? priceId : undefined}
+              aria-pressed={provider?.id === item.id}
+              className={provider?.id === item.id ? "is-selected" : ""}
+              onClick={() => {
+                setProvider(item.id);
+                setError("");
+              }}
+            >
+              {item.name}
+              {quote && kind === "membership" && (
+                <span id={priceId} className="billing-method-price">
+                  {quote.currency.toUpperCase()}{" "}
+                  {money(quote.amount_minor, quote.currency, zh)}
+                </span>
+              )}
+            </button>
+          );
+        })}
         {!providers.length && (
           <p className="billing-muted">
             {zh
@@ -363,12 +422,28 @@ export default function Billing() {
         <div>
           <span>{zh ? "需支付" : "Total"}</span>
           <strong>
-            {product && money(product.amount_minor, product.currency, zh)}
+            {paymentQuote
+              ? money(paymentQuote.amount_minor, paymentQuote.currency, zh)
+              : "—"}
           </strong>
+          {paymentQuote?.converted && product && (
+            <small className="billing-muted">
+              {zh ? "套餐标价 " : "Plan list price "}
+              {money(product.amount_minor, product.currency, zh)}
+              {zh ? "，以人民币支付" : "; paid in CNY"}
+            </small>
+          )}
         </div>
         <Button
           disabled={
-            busy || !provider || !product || !catalog.data?.enabled || preview
+            busy ||
+            catalog.isFetching ||
+            quoteNeedsRefresh ||
+            !paymentQuote ||
+            !provider ||
+            !product ||
+            !catalog.data?.enabled ||
+            preview
           }
           onClick={() => void createOrder()}
         >
@@ -382,6 +457,15 @@ export default function Billing() {
           <ArrowRight size={16} />
         </Button>
       </div>
+      {quoteNeedsRefresh && (
+        <Button
+          variant="outline"
+          disabled={busy || catalog.isFetching}
+          onClick={() => void refreshPaymentQuote()}
+        >
+          {zh ? "刷新付款金额" : "Refresh payment amount"}
+        </Button>
+      )}
     </div>
   );
 

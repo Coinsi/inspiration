@@ -453,9 +453,16 @@ function BillingManager() {
             />
           )}
           {settings.data && !settings.data.public_origin && (
-            <p className="billing-notice">
-              请先在“收款设置”保存网站公开地址，再添加支付渠道。
-            </p>
+            <div className="billing-notice flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p>请先保存网站公开地址。「开放套餐购买」关闭时也可以添加渠道。</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void changeTab("settings")}
+              >
+                去收款设置
+              </Button>
+            </div>
           )}
           {providers.data.length ? (
             <div className="admin-table-scroll">
@@ -499,7 +506,7 @@ function BillingManager() {
               </table>
             </div>
           ) : (
-            <Empty>添加至少一个支付渠道后，再开放购买。</Empty>
+            <Empty>还没有支付渠道。</Empty>
           )}
         </section>
       )}
@@ -780,8 +787,12 @@ function SettingsForm({
     setError(null);
     setSaved(false);
     try {
-      await api.patch("/admin/billing/settings", form);
+      const updated = await api.patch<BillingSettings>(
+        "/admin/billing/settings",
+        form,
+      );
       await onSaved();
+      setForm((draft) => (draft === form ? updated : draft));
       setSaved(true);
     } catch (e) {
       setError(e);
@@ -798,6 +809,39 @@ function SettingsForm({
       }}
     >
       <h2>收款设置</h2>
+      <label>
+        网站公开地址
+        <Input
+          type="url"
+          required={form.enabled}
+          value={form.public_origin}
+          placeholder="https://example.com"
+          onChange={(e) => {
+            setForm({ ...form, public_origin: e.target.value });
+            setSaved(false);
+          }}
+        />
+        <small>
+          用于付款返回和接收通知。首次配置时，填写 HTTPS 地址，保持「开放套餐购买」关闭，点击「保存设置」。
+        </small>
+      </label>
+      <label>
+        订阅美元兑人民币汇率
+        <Input
+          type="text"
+          inputMode="decimal"
+          pattern="[0-9]{1,6}([.][0-9]{1,6})?"
+          value={form.subscription_usd_to_cny_rate ?? ""}
+          placeholder="例如 7.20"
+          onChange={(e) => {
+            setForm({ ...form, subscription_usd_to_cny_rate: e.target.value || null });
+            setSaved(false);
+          }}
+        />
+        <small>
+          填写 1 美元折合多少元人民币。美元会员套餐使用人民币渠道付款时按此换算，留空或填 0 关闭换算。
+        </small>
+      </label>
       <label className="billing-toggle">
         <input
           type="checkbox"
@@ -809,7 +853,9 @@ function SettingsForm({
         />
         <span>
           <strong>开放套餐购买</strong>
-          <small>关闭后不接受新订单，会员、积分与历史订单仍可查看。</small>
+          <small>
+            启用支付渠道并上架可用该渠道付款的会员套餐或积分包后，再开启购买。关闭后不接受新订单。
+          </small>
         </span>
       </label>
       <label className="billing-toggle">
@@ -829,17 +875,6 @@ function SettingsForm({
         </span>
       </label>
       <label>
-        网站公开地址
-        <Input
-          type="url"
-          required={form.enabled}
-          value={form.public_origin}
-          placeholder="https://example.com"
-          onChange={(e) => setForm({ ...form, public_origin: e.target.value })}
-        />
-        <small>用于付款返回与通知地址，请使用正式可访问的 HTTPS 地址。</small>
-      </label>
-      <label>
         付款有效期（分钟）
         <Input
           type="number"
@@ -853,7 +888,7 @@ function SettingsForm({
         />
       </label>
       {error != null && <ErrorNotice error={error} />}
-      {saved && (
+      {saved && !dirty && (
         <p role="status" className="billing-notice">
           收款设置已保存
         </p>

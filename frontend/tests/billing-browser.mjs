@@ -230,16 +230,27 @@ async function fixture({
         product,
         "checkout must reference the selected catalog product",
       );
+      const provider = state.providers.find(({ id }) => id === body().provider_id);
+      const conversion = provider && provider.currency !== product.currency;
+      const amount = conversion
+        ? product.payment_amounts?.[provider.currency]
+        : product.amount_minor;
+      if (conversion && (amount == null || body().expected_amount_minor !== amount))
+        return send({ error: { code: "PAYMENT_QUOTE_CHANGED" } }, 409);
       Object.assign(order, {
         pack_name: product.name,
-        currency: product.currency,
-        amount_minor: product.amount_minor,
+        currency: provider?.currency ?? product.currency,
+        amount_minor: amount,
         credits: product.credits,
-        provider_name: state.providers.find(
-          (provider) => provider.id === body().provider_id,
-        )?.name,
+        provider_name: provider?.name,
         type: body().plan_id ? "membership" : "credits",
       });
+      if (conversion)
+        order.conversion = {
+          original_amount_minor: product.amount_minor,
+          original_currency: product.currency,
+          rate: state.settings.subscription_usd_to_cny_rate,
+        };
       if (body().plan_id) {
         order.plan_id = product.id;
         order.membership_days =
@@ -798,6 +809,46 @@ try {
     "admin pack decimal conversions, provider secrets clear after save, settings save, refund retry idempotency",
   );
   await admin.context.close();
+
+  const initialSetup = await fixture({ enabled: false });
+  initialSetup.state.settings.public_origin = "";
+  initialSetup.state.providers = [];
+  await initialSetup.page.goto(`${base}/admin/billing`);
+  const freshPage = initialSetup.page;
+  const channelsTab = freshPage.getByRole("button", { name: "支付渠道", exact: true });
+  const addChannel = freshPage.getByRole("button", { name: "添加支付渠道" });
+  await channelsTab.click();
+  const setupShortcut = freshPage.getByRole("button", { name: "去收款设置" });
+  await setupShortcut.waitFor();
+  assert.equal(await addChannel.isEnabled(), false);
+  await setupShortcut.click();
+  const salesSwitch = freshPage.getByRole("checkbox", { name: /^开放套餐购买/ });
+  assert.equal(await salesSwitch.isChecked(), false);
+  const exchangeRate = freshPage.getByLabel("订阅美元兑人民币汇率");
+  assert.equal(await exchangeRate.inputValue(), "");
+  await exchangeRate.fill("7.20");
+  await freshPage.getByLabel("网站公开地址").fill("https://example.test");
+  await freshPage.getByRole("button", { name: "保存设置" }).click();
+  await freshPage.getByText("收款设置已保存").waitFor();
+  assert.equal(initialSetup.state.settings.public_origin, "https://example.test");
+  assert.equal(initialSetup.state.settings.enabled, false);
+  assert.equal(initialSetup.state.settings.subscription_usd_to_cny_rate, "7.20");
+  await screenshot(freshPage, "admin-exchange-rate");
+  await channelsTab.click();
+  await addChannel.click();
+  assert.match(
+    await freshPage.getByLabel("支付通知地址").inputValue(),
+    /^https:\/\/example\.test\/api\/v1\/billing\/webhook\/[\da-f-]{36}$/,
+  );
+  await freshPage.getByRole("button", { name: "关闭", exact: true }).click();
+  await freshPage.getByRole("button", { name: "收款设置", exact: true }).click();
+  assert.equal(await exchangeRate.inputValue(), "7.20");
+  await exchangeRate.fill("");
+  await freshPage.getByRole("button", { name: "保存设置" }).click();
+  await freshPage.getByText("收款设置已保存").waitFor();
+  assert.equal(initialSetup.state.settings.subscription_usd_to_cny_rate, null);
+  await initialSetup.context.close();
+  checks.push("fresh payment setup saves the website address with purchases closed, unlocks channel creation and saves or clears the manual exchange rate");
 
   const smallAdmin = await fixture({ width: 390, height: 844, theme: "light" });
   await smallAdmin.page.goto(`${base}/admin/billing`);
@@ -1377,6 +1428,54 @@ try {
   checks.push(
     "membership catalog sorting and hidden plans, exact plan_id order binding, failed checkout idempotency, reload, paid/active distinction and full-refund request",
   );
+
+  const converted = await fixture({ width: 390, theme: "light" });
+  const usdPlan = {
+    ...planBase,
+    id: "usd-fx-monthly",
+    name: "创作会员",
+    currency: "usd",
+    amount_minor: 2000,
+    original_amount_minor: null,
+    payment_amounts: { cny: 14400 },
+  };
+  converted.state.plans = [usdPlan];
+  converted.state.providers[0] = {
+    ...converted.state.providers[0],
+    kind: "easypay",
+    name: "易支付",
+  };
+  converted.state.settings.subscription_usd_to_cny_rate = "7.2";
+  await converted.page.goto(`${base}/billing`);
+  await converted.page
+    .getByRole("button", { name: "选择套餐 创作会员", exact: true })
+    .click();
+  const conversionDialog = converted.page.getByRole("dialog", { name: "确认付款", exact: true });
+  const total = conversionDialog.locator(".billing-purchase-total");
+  const createPayment = conversionDialog.getByRole("button", { name: "创建付款订单", exact: true });
+  await conversionDialog.getByRole("button", { name: "银行卡", exact: true }).click();
+  assert.match(await total.innerText(), /\$20/);
+  await conversionDialog.getByRole("button", { name: "易支付", exact: true }).click();
+  assert.match(await total.innerText(), /144.*\$20/s);
+  await screenshot(converted.page, "membership-cny-checkout");
+
+  usdPlan.payment_amounts.cny = 14500;
+  converted.state.settings.subscription_usd_to_cny_rate = "7.25";
+  await createPayment.click();
+  await conversionDialog.getByText(/请重新核对后再创建订单/).waitFor();
+  assert.match(await total.innerText(), /145.*\$20/s);
+  assert.equal(converted.createBodies.length, 1);
+  assert.equal(converted.createBodies[0].expected_amount_minor, 14400);
+  assert.equal(converted.state.orders.some(({ id }) => id === "order-created"), false);
+  await createPayment.click();
+  const convertedDetail = converted.page.getByRole("dialog", { name: "订单详情", exact: true });
+  await convertedDetail.getByText("1 USD = 7.25 CNY", { exact: true }).waitFor();
+  assert.equal(converted.createBodies[1].expected_amount_minor, 14500);
+  assert.equal(converted.createBodies[1].plan_id, usdPlan.id);
+  assert.notEqual(converted.createBodies[0].idempotency_key, converted.createBodies[1].idempotency_key);
+  assert.match(await convertedDetail.locator(".billing-details").innerText(), /145.*\$20/s);
+  await converted.context.close();
+  checks.push("USD membership uses quoted CNY at EasyPay checkout, stale quote waits for reconfirmation, and the order shows its charged amount and original dollar price");
 
   const memberMobile = await fixture({
     width: 390,
