@@ -28,10 +28,12 @@ from app.models.billing import (
     CreditAccount,
     CreditEntry,
     CreditReservation,
+    MembershipPlan,
+    MembershipTerm,
 )
 from app.models.generation import GenerationJob
 from app.models.identity import User
-from app.modules.billing import orders, refunds
+from app.modules.billing import memberships, orders, refunds
 from app.modules.billing import wallet as credit_wallet
 from app.modules.billing.providers import provider_catalog, validate_provider_config
 
@@ -66,6 +68,16 @@ class PackIn(Input):
     active: bool = True
 
 
+class PlanIn(PackIn):
+    features: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(
+        default_factory=list, max_length=12
+    )
+    original_amount_minor: Money | None = None
+    duration: int = Field(strict=True, ge=1, le=3650)
+    duration_unit: Literal["day", "week", "month"] = "month"
+    sort_order: int = Field(default=0, strict=True, ge=-10_000, le=10_000)
+
+
 class ProviderIn(Input):
     id: uuid.UUID | None = None
     name: Name
@@ -83,7 +95,8 @@ class ProviderEdit(Input):
 
 
 class CheckoutIn(Input):
-    pack_id: uuid.UUID
+    pack_id: uuid.UUID | None = None
+    plan_id: uuid.UUID | None = None
     provider_id: uuid.UUID
     idempotency_key: uuid.UUID
 
@@ -107,7 +120,7 @@ class ResolveReservationIn(Input):
     units: int | None = Field(default=None, strict=True, gt=0, le=10**12)
 
 
-def _pack_view(pack: BillingPack) -> dict:
+def _pack_view(pack: BillingPack | MembershipPlan) -> dict:
     return {
         "id": pack.id,
         "name": pack.name,
@@ -117,6 +130,24 @@ def _pack_view(pack: BillingPack) -> dict:
         "credits": pack.credits,
         "active": pack.active,
     }
+
+
+def _plan_view(plan: MembershipPlan) -> dict:
+    return {
+        **_pack_view(plan),
+        "features": plan.features,
+        "original_amount_minor": plan.original_amount_minor,
+        "duration": plan.duration,
+        "duration_unit": plan.duration_unit,
+        "sort_order": plan.sort_order,
+    }
+
+
+def _plan_values(data: PlanIn) -> dict:
+    memberships.duration_days(data.duration, data.duration_unit)
+    if data.original_amount_minor is not None and data.original_amount_minor < data.amount_minor:
+        raise CapabilityUnsupported("参考价格不能低于售价")
+    return data.model_dump()
 
 
 def _provider_view(provider: BillingProvider) -> dict:
@@ -147,7 +178,7 @@ def _audit(db, user, action, ident=None):
 def catalog(db: DB, _: Current):
     enabled = orders.config(db).enabled
     if not enabled:
-        return {"enabled": False, "packs": [], "providers": []}
+        return {"enabled": False, "packs": [], "plans": [], "providers": []}
     providers = list(
         db.scalars(
             select(BillingProvider).where(BillingProvider.active).order_by(BillingProvider.name)
@@ -159,9 +190,15 @@ def catalog(db: DB, _: Current):
         .where(BillingPack.active, BillingPack.currency.in_(currencies))
         .order_by(BillingPack.currency, BillingPack.amount_minor)
     )
+    plans = db.scalars(
+        select(MembershipPlan)
+        .where(MembershipPlan.active, MembershipPlan.currency.in_(currencies))
+        .order_by(MembershipPlan.sort_order, MembershipPlan.created_at, MembershipPlan.id)
+    )
     return {
         "enabled": True,
         "packs": [_pack_view(pack) for pack in packs],
+        "plans": [_plan_view(plan) for plan in plans],
         "providers": [_provider_view(provider) for provider in providers],
     }
 
@@ -189,6 +226,16 @@ def wallet(db: DB, user: Current):
             for entry in entries
         ],
     }
+
+
+@router.get("/billing/memberships")
+def list_memberships(
+    db: DB,
+    user: Current,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    return memberships.for_user(db, user.id, orders.now(), limit=limit, offset=offset)
 
 
 @router.get("/billing/orders")
@@ -221,6 +268,7 @@ def create_order(data: CheckoutIn, request: Request, db: DB, user: Current):
         data.pack_id,
         data.provider_id,
         data.idempotency_key,
+        plan_id=data.plan_id,
         client_ip=address,
         is_mobile=any(item in user_agent for item in ("mobile", "android", "iphone", "ipad")),
     )
@@ -308,17 +356,18 @@ def change_settings(data: SettingsIn, db: DB, user: Super):
     if data.enabled or data.public_origin:
         values["public_origin"] = orders.public_checkout_origin(data.public_origin)
     if data.enabled:
+        offered_currencies = (
+            select(BillingPack.currency)
+            .where(BillingPack.active)
+            .union_all(select(MembershipPlan.currency).where(MembershipPlan.active))
+        )
         compatible = db.scalar(
-            select(func.count())
-            .select_from(BillingPack)
-            .join(
-                BillingProvider,
-                BillingPack.currency == BillingProvider.currency,
-            )
-            .where(BillingPack.active, BillingProvider.active)
+            select(BillingProvider.id)
+            .where(BillingProvider.active, BillingProvider.currency.in_(offered_currencies))
+            .limit(1)
         )
         if not compatible:
-            raise CapabilityUnsupported("启用收款前请至少配置一个积分包和同币种渠道")
+            raise CapabilityUnsupported("启用收款前请至少配置一个在售商品和同币种支付渠道")
     db.execute(
         insert(BillingSettings)
         .values(id=1, **values)
@@ -356,6 +405,65 @@ def update_pack(pack_id: uuid.UUID, data: PackIn, db: DB, user: Super):
         setattr(row, key, value)
     _audit(db, user, "billing.pack_updated", row.id)
     return _pack_view(row)
+
+
+@router.get("/admin/billing/plans")
+def list_plans(db: DB, _: Super):
+    return [
+        _plan_view(row)
+        for row in db.scalars(
+            select(MembershipPlan).order_by(
+                MembershipPlan.sort_order, MembershipPlan.created_at, MembershipPlan.id
+            )
+        )
+    ]
+
+
+@router.post("/admin/billing/plans")
+def create_plan(data: PlanIn, db: DB, user: Super):
+    row = MembershipPlan(**_plan_values(data))
+    db.add(row)
+    db.flush()
+    _audit(db, user, "billing.plan_created", row.id)
+    return _plan_view(row)
+
+
+@router.patch("/admin/billing/plans/{plan_id}")
+def update_plan(plan_id: uuid.UUID, data: PlanIn, db: DB, user: Super):
+    row = db.get(MembershipPlan, plan_id)
+    if row is None:
+        raise NotFound("会员套餐不存在")
+    for key, value in _plan_values(data).items():
+        setattr(row, key, value)
+    _audit(db, user, "billing.plan_updated", row.id)
+    return _plan_view(row)
+
+
+@router.get("/admin/billing/memberships")
+def admin_memberships(
+    db: DB,
+    _: Super,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    rows = db.execute(
+        select(MembershipTerm, BillingOrder, User)
+        .join(BillingOrder, MembershipTerm.order_id == BillingOrder.id)
+        .join(User, MembershipTerm.user_id == User.id)
+        .order_by(BillingOrder.created_at.desc(), BillingOrder.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    moment = orders.now()
+    return [
+        {
+            **memberships.term_view(term, order, moment),
+            "user_id": owner.id,
+            "user_name": owner.display_name,
+            "user_email": owner.email,
+        }
+        for term, order, owner in rows
+    ]
 
 
 @router.get("/admin/billing/provider-types")

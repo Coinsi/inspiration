@@ -11,6 +11,7 @@ import {
   decimalAmount,
   money,
   orderLabel,
+  paymentOrderLabel,
   parseMinor,
   points,
   providerConfigDefaults,
@@ -31,11 +32,19 @@ import { useConfirm } from "@/components/ui/confirm";
 import { Empty, ErrorNotice, Heading, Loading } from "./shared";
 import { useAdminUnsaved } from "./navigation";
 import { Reservations } from "./BillingReservations";
+import { BillingPlans } from "./BillingPlans";
 import "../billing.css";
 
-type Tab = "orders" | "packs" | "providers" | "settings" | "reservations";
+type Tab =
+  | "orders"
+  | "plans"
+  | "packs"
+  | "providers"
+  | "settings"
+  | "reservations";
 const tabs: [Tab, string][] = [
   ["orders", "订单与退款"],
+  ["plans", "会员套餐"],
   ["packs", "积分包"],
   ["providers", "支付渠道"],
   ["settings", "收款设置"],
@@ -145,7 +154,9 @@ function BillingManager() {
           message ??
           (confirmation.startsWith("拒绝")
             ? "拒绝后不会向支付渠道发起退款，申请人可在订单中查看结果。"
-            : "批准后将向支付渠道提交退款并扣回对应积分。"),
+            : order?.type === "membership"
+              ? "批准后将向支付渠道提交全额退款，并收回该订单的会员权益。"
+              : "批准后将向支付渠道提交退款并扣回对应积分。"),
         confirmText: "确认执行",
         danger: true,
       }))
@@ -201,7 +212,7 @@ function BillingManager() {
     <div className="billing-admin">
       <Heading
         title="支付与积分"
-        description="管理积分包、收款渠道，以及付款和退款记录。"
+        description="管理会员套餐、积分包、收款渠道，以及付款和退款记录。"
       >
         <Button variant="outline" onClick={() => void refresh()}>
           <RefreshCw size={15} />
@@ -220,14 +231,17 @@ function BillingManager() {
         ))}
       </nav>
       {error != null && !selected && <ErrorNotice error={error} />}
-      {tab !== "reservations" && currentQuery.error && (
+      {tab !== "reservations" && tab !== "plans" && currentQuery.error && (
         <ErrorNotice
           error={currentQuery.error}
           retry={() => void currentQuery.refetch()}
         />
       )}
-      {tab !== "reservations" && currentQuery.isLoading && <Loading />}
+      {tab !== "reservations" && tab !== "plans" && currentQuery.isLoading && (
+        <Loading />
+      )}
       {tab === "reservations" && <Reservations />}
+      {tab === "plans" && <BillingPlans />}
       {tab === "orders" && orders.data && (
         <section className="admin-panel">
           <div className="billing-toolbar">
@@ -258,7 +272,11 @@ function BillingManager() {
                 ] as const
               ).map((status) => (
                 <option key={status} value={status}>
-                  {orderLabel(status)}
+                  {status === "completed"
+                    ? "已完成"
+                    : status === "paid"
+                      ? "已付款 · 处理中"
+                      : orderLabel(status)}
                 </option>
               ))}
             </StudioSelect>
@@ -269,7 +287,7 @@ function BillingManager() {
                 <thead>
                   <tr>
                     <th>订单 / 用户</th>
-                    <th>积分包</th>
+                    <th>套餐</th>
                     <th>付款金额</th>
                     <th>状态</th>
                     <th>创建时间</th>
@@ -292,6 +310,9 @@ function BillingManager() {
                       <td>
                         {item.pack_name}
                         <small className="billing-table-note">
+                          {item.type === "membership"
+                            ? "会员 · 期内 "
+                            : "永久 "}
                           {points(item.credits)} 积分
                         </small>
                       </td>
@@ -303,7 +324,7 @@ function BillingManager() {
                       </td>
                       <td>
                         <span className={`billing-status is-${item.status}`}>
-                          {orderLabel(item.status)}
+                          {paymentOrderLabel(item)}
                         </span>
                         {item.refunds.length > 0 && (
                           <small className="billing-table-note">
@@ -596,6 +617,7 @@ function BillingManager() {
                       <ManualRefundResolution
                         refund={refund}
                         currency={order.currency}
+                        membership={order.type === "membership"}
                         busy={busy}
                         error={error}
                         onResolve={(outcome, reason) =>
@@ -606,8 +628,12 @@ function BillingManager() {
                               : "确认商户未发生退款？",
                             { outcome, reason },
                             outcome === "succeeded"
-                              ? "将结算这笔已实际退款的积分，并记录退款成功，不会再次向渠道发起退款。请确认已有商户后台或退款凭证支持。"
-                              : "将标记退款失败并释放退款预留积分。只有商户已明确确认未发生退款时才能操作；无法确认时请保留处理中。",
+                              ? order.type === "membership"
+                                ? "将收回这笔订单的会员权益，并记录退款成功，不会再次向渠道发起退款。请确认已有商户后台或退款凭证支持。"
+                                : "将结算这笔已实际退款的积分，并记录退款成功，不会再次向渠道发起退款。请确认已有商户后台或退款凭证支持。"
+                              : order.type === "membership"
+                                ? "将标记退款失败并解除该会员权益的退款冻结。只有商户已明确确认未发生退款时才能操作。无法确认时请保留处理中。"
+                                : "将标记退款失败并释放退款预留积分。只有商户已明确确认未发生退款时才能操作。无法确认时请保留处理中。",
                           )
                         }
                       />
@@ -630,12 +656,14 @@ function BillingManager() {
 function ManualRefundResolution({
   refund,
   currency,
+  membership,
   busy,
   error,
   onResolve,
 }: {
   refund: PaymentRefund;
   currency: string;
+  membership: boolean;
   busy: boolean;
   error: unknown;
   onResolve: (
@@ -668,8 +696,10 @@ function ManualRefundResolution({
     >
       <h3>记录已核实的退款结果</h3>
       <p>
-        核对商户退款 {money(refund.amount_minor, currency)}{" "}
-        的实际结果。此操作只更新退款记录和预留积分，不会重新发起退款。
+        核对商户退款 {money(refund.amount_minor, currency)} 的实际结果。
+        {membership
+          ? "此操作只更新退款记录和会员权益状态，不会重新发起退款。"
+          : "此操作只更新退款记录和预留积分，不会重新发起退款。"}
       </p>
       <label>
         商户实际退款结果
@@ -774,8 +804,8 @@ function SettingsForm({
           }}
         />
         <span>
-          <strong>开放积分购买</strong>
-          <small>关闭后不接受新订单，积分与历史订单仍可查看。</small>
+          <strong>开放套餐购买</strong>
+          <small>关闭后不接受新订单，会员、积分与历史订单仍可查看。</small>
         </span>
       </label>
       <label className="billing-toggle">
@@ -1254,8 +1284,11 @@ function AdminRefundForm({
   const attempt = useRef<{ content: string; key: string } | null>(null);
   const confirm = useConfirm();
   const remaining = order.amount_minor - order.refunded_minor;
+  const membership = order.type === "membership";
   async function refund() {
-    const minor = parseMinor(amount, currencyDecimals(order.currency));
+    const minor = membership
+      ? order.amount_minor
+      : parseMinor(amount, currencyDecimals(order.currency));
     if (!minor || minor > remaining) {
       setError(new Error("退款金额必须大于零，且不能超过未退款金额。"));
       return;
@@ -1264,7 +1297,9 @@ function AdminRefundForm({
     if (
       !(await confirm({
         title: "确认发起退款？",
-        message: `将退款 ${money(minor, order.currency)}，并扣回对应积分。请核对金额与原因。`,
+        message: membership
+          ? `将全额退款 ${money(minor, order.currency)}，并收回该订单的会员权益。请核对原因。`
+          : `将退款 ${money(minor, order.currency)}，并扣回对应积分。请核对金额与原因。`,
         confirmText: "确认退款",
         danger: true,
       }))
@@ -1317,17 +1352,23 @@ function AdminRefundForm({
       }}
     >
       <h3>发起退款</h3>
-      <p>最多可退 {money(remaining, order.currency)}；退款将扣回对应积分。</p>
-      <label>
-        退款金额（{order.currency.toUpperCase()}）
-        <Input
-          inputMode="decimal"
-          required
-          disabled={busy}
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-      </label>
+      <p>
+        {membership
+          ? `会员仅支持未使用时全额退款 ${money(order.amount_minor, order.currency)}，退款将收回该笔订单的会员权益。`
+          : `最多可退 ${money(remaining, order.currency)}。退款将扣回对应积分。`}
+      </p>
+      {!membership && (
+        <label>
+          退款金额（{order.currency.toUpperCase()}）
+          <Input
+            inputMode="decimal"
+            required
+            disabled={busy}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </label>
+      )}
       <label>
         退款原因
         <textarea

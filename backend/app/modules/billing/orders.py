@@ -1,4 +1,4 @@
-"""Checkout, payment confirmation, and activation of purchased points."""
+"""Checkout, payment confirmation, and fulfillment of purchases."""
 
 import base64
 import io
@@ -22,9 +22,11 @@ from app.models.billing import (
     BillingProvider,
     BillingRefund,
     BillingSettings,
+    MembershipPlan,
+    MembershipTerm,
 )
 from app.models.identity import User
-from app.modules.billing import wallet
+from app.modules.billing import memberships, wallet
 from app.modules.billing.providers import CheckoutRequest, PaymentEvidence, get_provider
 
 logger = logging.getLogger(__name__)
@@ -125,13 +127,16 @@ def checkout_request(order: BillingOrder) -> CheckoutRequest:
 def create_order(
     db: Session,
     user_id: uuid.UUID,
-    pack_id: uuid.UUID,
+    pack_id: uuid.UUID | None,
     provider_id: uuid.UUID,
     idempotency_key: uuid.UUID,
     *,
+    plan_id: uuid.UUID | None = None,
     client_ip: str | None = None,
     is_mobile: bool = False,
 ) -> BillingOrder:
+    if (pack_id is None) == (plan_id is None):
+        raise CapabilityUnsupported("请选择一个积分包或会员套餐")
     # Serialize order creation and the pending-order limit per account.
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
     existing = db.scalar(
@@ -140,20 +145,26 @@ def create_order(
         )
     )
     if existing is not None:
-        if (existing.pack_id, existing.provider_id) != (pack_id, provider_id):
+        if (existing.pack_id, existing.plan_id, existing.provider_id) != (
+            pack_id,
+            plan_id,
+            provider_id,
+        ):
             raise Conflict("重复请求与原订单内容不一致")
         db.commit()
         return ensure_checkout(db, existing.id)
 
     preferences = config(db)
-    pack = db.get(BillingPack, pack_id)
+    product = (
+        db.get(MembershipPlan, plan_id) if plan_id is not None else db.get(BillingPack, pack_id)
+    )
     provider = db.get(BillingProvider, provider_id)
     if not preferences.enabled:
-        raise CapabilityUnsupported("当前未开放积分购买")
-    if not pack or not pack.active or not provider or not provider.active:
-        raise CapabilityUnsupported("此积分包或支付渠道已下架")
-    if pack.currency != provider.currency:
-        raise CapabilityUnsupported("此支付渠道不支持积分包的币种")
+        raise CapabilityUnsupported("当前未开放购买")
+    if not product or not product.active or not provider or not provider.active:
+        raise CapabilityUnsupported("此商品或支付渠道已下架")
+    if product.currency != provider.currency:
+        raise CapabilityUnsupported("此支付渠道不支持该商品的币种")
     provider_for(provider)
     timestamp = now()
     pending = db.scalar(
@@ -169,14 +180,20 @@ def create_order(
         raise Conflict("待支付订单过多，请先完成已有订单")
     order = BillingOrder(
         user_id=user_id,
-        pack_id=pack.id,
+        pack_id=pack_id,
+        plan_id=plan_id,
+        membership_days=(
+            memberships.duration_days(product.duration, product.duration_unit)
+            if isinstance(product, MembershipPlan)
+            else None
+        ),
         provider_id=provider.id,
         idempotency_key=idempotency_key,
-        pack_name=pack.name,
+        pack_name=product.name,
         provider_name=provider.name,
-        currency=pack.currency,
-        amount_minor=pack.amount_minor,
-        credits=pack.credits,
+        currency=product.currency,
+        amount_minor=product.amount_minor,
+        credits=product.credits,
         public_origin=public_checkout_origin(preferences.public_origin),
         expires_at=timestamp + timedelta(minutes=preferences.checkout_minutes),
         next_check_at=timestamp + timedelta(minutes=1),
@@ -265,12 +282,19 @@ def fulfill_order(db: Session, order_id: uuid.UUID) -> BillingOrder:
     order = find_order(db, order_id, lock=True)
     if order.status != "paid":
         return order
-    wallet.change(db, order.user_id, "purchase", order.id, available=order.credits)
+    moment = now()
+    if order.plan_id is None:
+        wallet.change(db, order.user_id, "purchase", order.id, available=order.credits)
+        action = "billing.points_credited"
+    else:
+        wallet.lock_account(db, order.user_id)
+        memberships.fulfill(db, order, moment)
+        action = "billing.membership_granted"
     order.status = "completed"
-    order.completed_at = now()
+    order.completed_at = moment
     audit.record(
         db,
-        action="billing.points_credited",
+        action=action,
         user_id=order.user_id,
         target_type="billing_order",
         target_id=order.id,
@@ -387,12 +411,18 @@ def order_view(
             .order_by(BillingRefund.created_at.desc())
         )
     )
+    moment = now()
     can_checkout = (
-        not admin and include_checkout and (order.status == "pending" and order.expires_at > now())
+        not admin and include_checkout and order.status == "pending" and order.expires_at > moment
     )
+    term = db.get(MembershipTerm, order.id) if order.plan_id is not None else None
     result = {
         "id": order.id,
         "status": order.status,
+        "type": "membership" if order.plan_id is not None else "credits",
+        "plan_id": order.plan_id,
+        "membership_days": order.membership_days,
+        "membership": memberships.term_view(term, order, moment) if term else None,
         "pack_name": order.pack_name,
         "provider_name": order.provider_name,
         "currency": order.currency,
@@ -424,6 +454,7 @@ def order_view(
             and order.status == "completed"
             and order.refunded_minor < order.amount_minor
             and not any(item.status in {"requested", "pending"} for item in refunds)
+            and (order.plan_id is None or memberships.can_refund(db, order))
         ),
     }
     if admin:

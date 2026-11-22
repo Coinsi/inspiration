@@ -1,6 +1,7 @@
 """Points are stored in hundredths. Ledger writes share the caller's transaction."""
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
@@ -8,7 +9,14 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.errors import CapabilityUnsupported, Conflict, QuotaExceeded
-from app.models.billing import BillingSettings, CreditAccount, CreditEntry, CreditReservation
+from app.models.billing import (
+    BillingSettings,
+    CreditAccount,
+    CreditEntry,
+    CreditReservation,
+    MembershipAllocation,
+)
+from app.modules.billing import memberships
 
 UNITS_PER_POINT = 100
 
@@ -31,7 +39,8 @@ def payment_required(db: Session) -> bool:
     return bool(config and config.payment_required)
 
 
-def _account(db: Session, user_id: uuid.UUID) -> CreditAccount:
+def lock_account(db: Session, user_id: uuid.UUID) -> CreditAccount:
+    """Serialize every permanent and membership balance change for this user."""
     db.execute(
         insert(CreditAccount)
         .values(user_id=user_id, available=0, reserved=0)
@@ -54,7 +63,7 @@ def change(
     available: int = 0,
     reserved: int = 0,
 ) -> None:
-    account = _account(db, user_id)
+    account = lock_account(db, user_id)
     existing = db.scalar(
         select(CreditEntry).where(
             CreditEntry.kind == kind, CreditEntry.reference_id == reference_id
@@ -87,6 +96,12 @@ def change(
 
 
 def _reservation(db: Session, job_id: uuid.UUID) -> CreditReservation | None:
+    # The owner never changes. Read it before taking any row lock so every
+    # wallet operation locks account -> reservation -> membership terms.
+    user_id = db.scalar(select(CreditReservation.user_id).where(CreditReservation.job_id == job_id))
+    if user_id is None:
+        return None
+    lock_account(db, user_id)
     return db.scalar(
         select(CreditReservation)
         .where(CreditReservation.job_id == job_id)
@@ -100,17 +115,38 @@ def reserve_generation(db: Session, user_id: uuid.UUID, job_id: uuid.UUID, units
         return
     # The caller owns the new job row. Lock the account before looking up the
     # reservation so repeated calls cannot race an initially missing row.
-    _account(db, user_id)
-    existing = db.get(CreditReservation, job_id)
+    lock_account(db, user_id)
+    existing = db.get(CreditReservation, job_id, populate_existing=True)
     if existing:
         if (existing.user_id, existing.units) != (user_id, units):
             raise Conflict("任务积分预留与原记录不一致")
         if existing.status == "released":
             raise Conflict("这笔任务预留已退回，请新建任务")
         return
-    change(db, user_id, "generation_reserve", job_id, available=-units, reserved=units)
-    db.add(CreditReservation(job_id=job_id, user_id=user_id, units=units))
-    db.flush()
+    # A caller may catch an insufficient-funds error while recording a failed
+    # job. Roll back both sources together even when its outer transaction lives.
+    with db.begin_nested():
+        reserved_terms = memberships.reserve(db, user_id, units, datetime.now(UTC))
+        permanent = units - sum(taken for _, taken in reserved_terms)
+        if permanent:
+            change(
+                db, user_id, "generation_reserve", job_id, available=-permanent, reserved=permanent
+            )
+        db.add(CreditReservation(job_id=job_id, user_id=user_id, units=units))
+        db.flush()
+        for term, taken in reserved_terms:
+            db.add(MembershipAllocation(job_id=job_id, order_id=term.order_id, units=taken))
+        db.flush()
+
+
+def _membership_units(db: Session, reservation: CreditReservation) -> int:
+    allocated = memberships.allocations(db, reservation.job_id)
+    if any(term.user_id != reservation.user_id for term, _ in allocated):
+        raise Conflict("任务会员额度与原记录不一致")
+    units = sum(allocation.units for _, allocation in allocated)
+    if not 0 <= units <= reservation.units:
+        raise Conflict("任务会员额度与原记录不一致")
+    return units
 
 
 def settle_generation(db: Session, job_id: uuid.UUID, units: int) -> None:
@@ -125,33 +161,44 @@ def settle_generation(db: Session, job_id: uuid.UUID, units: int) -> None:
         return
     if reservation.status != "reserved":
         raise Conflict("任务积分预留已退回，无法结算")
-    change(
-        db,
-        reservation.user_id,
-        "generation_settle",
-        job_id,
-        available=reservation.units - units,
-        reserved=-reservation.units,
-    )
-    reservation.settled_units = units
-    reservation.status = "settled"
-    db.flush()
+    with db.begin_nested():
+        membership_reserved = _membership_units(db, reservation)
+        membership_used = min(units, membership_reserved)
+        permanent_reserved = reservation.units - membership_reserved
+        permanent_used = units - membership_used
+        if permanent_reserved or permanent_used:
+            change(
+                db,
+                reservation.user_id,
+                "generation_settle",
+                job_id,
+                available=permanent_reserved - permanent_used,
+                reserved=-permanent_reserved,
+            )
+        memberships.settle(db, job_id, membership_used)
+        reservation.settled_units = units
+        reservation.status = "settled"
+        db.flush()
 
 
 def release_generation(db: Session, job_id: uuid.UUID) -> None:
     reservation = _reservation(db, job_id)
     if reservation is None or reservation.status != "reserved":
         return
-    change(
-        db,
-        reservation.user_id,
-        "generation_release",
-        job_id,
-        available=reservation.units,
-        reserved=-reservation.units,
-    )
-    reservation.status = "released"
-    db.flush()
+    with db.begin_nested():
+        permanent_reserved = reservation.units - _membership_units(db, reservation)
+        if permanent_reserved:
+            change(
+                db,
+                reservation.user_id,
+                "generation_release",
+                job_id,
+                available=permanent_reserved,
+                reserved=-permanent_reserved,
+            )
+        memberships.release(db, job_id)
+        reservation.status = "released"
+        db.flush()
 
 
 def has_generation_reservation(db: Session, job_id: uuid.UUID) -> bool:

@@ -4,6 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Check, Coins, RefreshCw } from "lucide-react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { BillingOrderDetail } from "@/components/BillingOrderDetail";
+import { BillingMemberships } from "@/components/BillingMemberships";
+import { BillingPlanCards } from "@/components/BillingPlanCards";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
@@ -13,12 +15,13 @@ import { useI18n } from "@/lib/i18n";
 import {
   billingDate,
   money,
-  orderLabel,
+  paymentOrderLabel,
   points,
   refundLabel,
   type BillingCatalog,
   type CreditWallet,
   type PaymentOrder,
+  type MembershipTerm,
 } from "@/lib/billing";
 import "./billing.css";
 
@@ -47,8 +50,13 @@ export default function Billing() {
   const [params, setParams] = useSearchParams();
   const orderId = params.get("order");
   const [packId, setPack] = useState("");
+  const [planId, setPlan] = useState("");
+  const [purchaseKind, setPurchaseKind] = useState<
+    "credits" | "membership" | null
+  >(null);
   const [providerId, setProvider] = useState("");
   const [offset, setOffset] = useState(0);
+  const [membershipOffset, setMembershipOffset] = useState(0);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
@@ -95,14 +103,38 @@ export default function Billing() {
     queryFn: ({ signal }) =>
       api.get<CreditWallet>("/billing/wallet", { signal }),
   });
+  const memberships = useQuery({
+    queryKey: [...scope, "memberships", membershipOffset],
+    queryFn: ({ signal }) =>
+      api.get<MembershipTerm[]>(
+        `/billing/memberships?limit=100&offset=${membershipOffset}`,
+        { signal },
+      ),
+    placeholderData: (previous) => previous,
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (term) => term.status === "active" || term.status === "scheduled",
+      )
+        ? 60000
+        : false,
+  });
   useEffect(() => {
     void qc.invalidateQueries({ queryKey: ["billing", me?.user.id, "wallet"] });
+    void qc.invalidateQueries({
+      queryKey: ["billing", me?.user.id, "memberships"],
+    });
   }, [qc, me?.user.id, orders.dataUpdatedAt, order.data?.status]);
   const packs = catalog.data?.packs.filter((p) => p.active) ?? [];
+  const plans = (catalog.data?.plans ?? [])
+    .filter((p) => p.active)
+    .sort((a, b) => a.sort_order - b.sort_order);
+  const kind = purchaseKind ?? (plans.length ? "membership" : "credits");
   const pack = packs.find((p) => p.id === packId) ?? packs[0];
+  const plan = plans.find((p) => p.id === planId) ?? plans[0];
+  const product = kind === "membership" ? plan : pack;
   const providers =
     catalog.data?.providers.filter(
-      (p) => p.active && p.currency === pack?.currency,
+      (p) => p.active && p.currency === product?.currency,
     ) ?? [];
   const provider = providers.find((p) => p.id === providerId) ?? providers[0];
   const selectedOrder = order.data;
@@ -128,18 +160,20 @@ export default function Billing() {
   }
 
   async function createOrder() {
-    if (!pack || !provider || inflight.current || !catalog.data?.enabled)
+    if (!product || !provider || inflight.current || !catalog.data?.enabled)
       return;
     inflight.current = true;
     setBusy(true);
     setError("");
-    const selection = `${pack.id}:${provider.id}`;
+    const selection = `${kind}:${product.id}:${provider.id}`;
     if (attempt.current?.selection !== selection) {
       attempt.current = { selection, key: crypto.randomUUID() };
     }
     try {
       const created = await api.post<PaymentOrder>("/billing/orders", {
-        pack_id: pack.id,
+        ...(kind === "membership"
+          ? { plan_id: product.id }
+          : { pack_id: product.id }),
         provider_id: provider.id,
         idempotency_key: attempt.current.key,
       });
@@ -260,8 +294,8 @@ export default function Billing() {
             <h1>{zh ? "积分与账单" : "Points & billing"}</h1>
             <p>
               {zh
-                ? "查看个人积分，购买积分包并跟进付款记录。"
-                : "Manage your points, buy a points pack, and track payments."}
+                ? "查看会员与个人积分，选择套餐并跟进付款记录。"
+                : "Manage memberships and points, choose a plan, and track payments."}
             </p>
           </div>
           <Button variant="outline" onClick={() => void refresh()}>
@@ -281,6 +315,11 @@ export default function Billing() {
             <strong>
               {wallet.data ? points(wallet.data.available, zh) : "—"}
             </strong>
+            <small>
+              {zh
+                ? "永久积分 · 与会员额度分开"
+                : "Permanent points · separate from membership"}
+            </small>
           </div>
           <div>
             <span>{zh ? "预留积分" : "Reserved points"}</span>
@@ -308,9 +347,70 @@ export default function Billing() {
             zh={zh}
           />
         )}
+        <section
+          className="billing-section"
+          aria-label={zh ? "我的会员" : "My memberships"}
+        >
+          <div className="billing-section-heading">
+            <h2>{zh ? "我的会员" : "My memberships"}</h2>
+          </div>
+          <p className="billing-muted billing-membership-note">
+            {zh
+              ? "会员额度在有效期内使用。续购同一套餐时，下一期从当前到期日开始。每期单独付款。"
+              : "Membership points apply only during their term and remain separate from permanent points. Renewing the same plan extends its term; different plans are independent. No automatic billing."}
+          </p>
+          {memberships.isLoading && (
+            <p className="billing-empty" role="status">
+              {zh ? "正在加载会员…" : "Loading memberships…"}
+            </p>
+          )}
+          {memberships.error && (
+            <BillingError
+              error={memberships.error}
+              retry={() => void memberships.refetch()}
+              zh={zh}
+            />
+          )}
+          {memberships.data?.length === 0 && (
+            <p className="billing-empty">
+              {zh ? "还没有会员套餐" : "No memberships yet"}
+            </p>
+          )}
+          {memberships.data && (
+            <BillingMemberships terms={memberships.data} zh={zh} />
+          )}
+          {memberships.data &&
+            (membershipOffset > 0 || memberships.data.length >= 100) && (
+              <div className="billing-pagination">
+                <Button
+                  variant="outline"
+                  disabled={membershipOffset === 0 || memberships.isFetching}
+                  onClick={() =>
+                    setMembershipOffset(Math.max(0, membershipOffset - 100))
+                  }
+                >
+                  {zh ? "上一页" : "Previous"}
+                </Button>
+                <span>
+                  {zh
+                    ? `第 ${Math.floor(membershipOffset / 100) + 1} 页`
+                    : `Page ${Math.floor(membershipOffset / 100) + 1}`}
+                </span>
+                <Button
+                  variant="outline"
+                  disabled={
+                    memberships.data.length < 100 || memberships.isFetching
+                  }
+                  onClick={() => setMembershipOffset(membershipOffset + 100)}
+                >
+                  {zh ? "下一页" : "Next"}
+                </Button>
+              </div>
+            )}
+        </section>
         {catalog.isLoading && (
           <p className="billing-empty" role="status">
-            {zh ? "正在加载积分包…" : "Loading points packs…"}
+            {zh ? "正在加载套餐…" : "Loading plans…"}
           </p>
         )}
         {catalog.data && !catalog.data.enabled && (
@@ -323,42 +423,88 @@ export default function Billing() {
         {catalog.data?.enabled && (
           <section className="billing-section">
             <div className="billing-section-heading">
-              <h2>{zh ? "购买积分" : "Buy points"}</h2>
+              <h2>{zh ? "选择套餐" : "Choose a plan"}</h2>
             </div>
-            {packs.length ? (
-              <>
-                <div
-                  className="billing-packs"
-                  role="group"
-                  aria-label={zh ? "选择积分包" : "Choose a points pack"}
+            <nav
+              className="billing-tabs"
+              aria-label={zh ? "购买类型" : "Purchase type"}
+            >
+              {(["membership", "credits"] as const).map((value) => (
+                <button
+                  key={value}
+                  disabled={busy}
+                  aria-current={kind === value ? "page" : undefined}
+                  onClick={() => {
+                    setPurchaseKind(value);
+                    setProvider("");
+                    setError("");
+                  }}
                 >
-                  {packs.map((item) => (
-                    <button
-                      key={item.id}
-                      className={`billing-pack ${pack?.id === item.id ? "is-selected" : ""}`}
-                      aria-pressed={pack?.id === item.id}
-                      disabled={busy}
-                      onClick={() => {
-                        setPack(item.id);
-                        setProvider("");
-                        setError("");
-                      }}
-                    >
-                      <div className="billing-row">
-                        <span>{item.name}</span>
-                        {pack?.id === item.id && <Check size={17} />}
-                      </div>
-                      <strong>
-                        {points(item.credits, zh)}{" "}
-                        <small>{zh ? "积分" : "points"}</small>
-                      </strong>
-                      {item.description && <p>{item.description}</p>}
-                      <span className="billing-pack-price">
-                        {money(item.amount_minor, item.currency, zh)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                  {value === "membership"
+                    ? zh
+                      ? "会员套餐"
+                      : "Memberships"
+                    : zh
+                      ? "积分包"
+                      : "Points packs"}
+                </button>
+              ))}
+            </nav>
+            {kind === "membership" && (
+              <p className="billing-muted billing-membership-note">
+                {zh
+                  ? "按次购买，1 个月按 30 天计算。到期后未用完的会员额度不再可用。"
+                  : "One-time purchase. One month equals 30 days. Unused membership points expire with the term."}
+              </p>
+            )}
+            {(kind === "membership" ? plans.length : packs.length) ? (
+              <>
+                {kind === "membership" ? (
+                  <BillingPlanCards
+                    plans={plans}
+                    selected={plan?.id}
+                    busy={busy}
+                    zh={zh}
+                    onSelect={(id) => {
+                      setPlan(id);
+                      setProvider("");
+                      setError("");
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="billing-packs"
+                    role="group"
+                    aria-label={zh ? "选择积分包" : "Choose a points pack"}
+                  >
+                    {packs.map((item) => (
+                      <button
+                        key={item.id}
+                        className={`billing-pack ${pack?.id === item.id ? "is-selected" : ""}`}
+                        aria-pressed={pack?.id === item.id}
+                        disabled={busy}
+                        onClick={() => {
+                          setPack(item.id);
+                          setProvider("");
+                          setError("");
+                        }}
+                      >
+                        <div className="billing-row">
+                          <span>{item.name}</span>
+                          {pack?.id === item.id && <Check size={17} />}
+                        </div>
+                        <strong>
+                          {points(item.credits, zh)}{" "}
+                          <small>{zh ? "积分" : "points"}</small>
+                        </strong>
+                        {item.description && <p>{item.description}</p>}
+                        <span className="billing-pack-price">
+                          {money(item.amount_minor, item.currency, zh)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="billing-purchase-bar">
                   <div
                     className="billing-methods"
@@ -384,8 +530,8 @@ export default function Billing() {
                     {!providers.length && (
                       <p className="billing-muted">
                         {zh
-                          ? "该币种暂无可用支付方式，请选择其他积分包。"
-                          : "No payment method is available for this currency. Choose another pack."}
+                          ? "该币种暂无可用支付方式，请选择其他套餐。"
+                          : "No payment method is available for this currency. Choose another plan."}
                       </p>
                     )}
                   </div>
@@ -393,11 +539,12 @@ export default function Billing() {
                     <div>
                       <span>{zh ? "需支付" : "Total"}</span>
                       <strong>
-                        {pack && money(pack.amount_minor, pack.currency, zh)}
+                        {product &&
+                          money(product.amount_minor, product.currency, zh)}
                       </strong>
                     </div>
                     <Button
-                      disabled={busy || !provider || !pack}
+                      disabled={busy || !provider || !product}
                       onClick={() => void createOrder()}
                     >
                       {busy
@@ -414,9 +561,13 @@ export default function Billing() {
               </>
             ) : (
               <p className="billing-empty">
-                {zh
-                  ? "暂时没有在售积分包"
-                  : "No points packs are available yet"}
+                {kind === "membership"
+                  ? zh
+                    ? "暂时没有在售会员套餐"
+                    : "No membership plans are available yet"
+                  : zh
+                    ? "暂时没有在售积分包"
+                    : "No points packs are available yet"}
               </p>
             )}
           </section>
@@ -454,13 +605,20 @@ export default function Billing() {
                 <div>
                   <strong>{item.pack_name}</strong>
                   <small>
-                    {billingDate(item.created_at, zh)} · {item.provider_name}
+                    {item.type === "membership"
+                      ? zh
+                        ? "会员"
+                        : "Membership"
+                      : zh
+                        ? "积分"
+                        : "Points"}{" "}
+                    · {billingDate(item.created_at, zh)} · {item.provider_name}
                   </small>
                 </div>
                 <div>
                   <strong>{money(item.amount_minor, item.currency, zh)}</strong>
                   <span className={`billing-status is-${item.status}`}>
-                    {orderLabel(item.status, zh)}
+                    {paymentOrderLabel(item, zh)}
                   </span>
                   {item.refunds.length > 0 && (
                     <small>{refundLabel(item.refunds[0].status, zh)}</small>
@@ -590,9 +748,13 @@ export default function Billing() {
           >
             <h3>{zh ? "申请退款" : "Request refund"}</h3>
             <p>
-              {zh
-                ? "提交后由管理员审核，退款将扣回对应积分。"
-                : "An administrator will review your request. The corresponding points will be deducted."}
+              {selectedOrder.type === "membership"
+                ? zh
+                  ? "仅未使用的会员套餐可申请全额退款。审核通过后将收回该笔订单的会员权益。"
+                  : "Only an unused membership is eligible for a full refund. Its membership benefits will be revoked after approval."
+                : zh
+                  ? "提交后由管理员审核，退款将扣回对应积分。"
+                  : "An administrator will review your request. The corresponding points will be deducted."}
             </p>
             <label>
               {zh ? "退款原因" : "Reason"}

@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import pytest
@@ -201,6 +201,7 @@ def test_payment_defaults_permissions_and_encrypted_credentials(commerce):
     assert endpoint(client, "GET", "/billing/catalog") == {
         "enabled": False,
         "packs": [],
+        "plans": [],
         "providers": [],
     }
     assert read_wallet(client)["available"] == 0
@@ -230,6 +231,170 @@ def test_payment_defaults_permissions_and_encrypted_credentials(commerce):
             ]
             == "sk_test_fixture"
         )
+
+
+def plan_payload(**overrides):
+    return {
+        "name": "创作月度会员",
+        "description": "一个付费周期的创作额度",
+        "features": ["平台图片和视频生成"],
+        "currency": "cny",
+        "amount_minor": 3990,
+        "original_amount_minor": 4990,
+        "credits": 30000,
+        "duration": 1,
+        "duration_unit": "month",
+        "sort_order": 20,
+        "active": True,
+        **overrides,
+    }
+
+
+def membership_checkout(client, plan, provider, key=None):
+    return endpoint(
+        client,
+        "POST",
+        "/billing/orders",
+        {
+            "plan_id": plan["id"],
+            "provider_id": provider["id"],
+            "idempotency_key": str(key or uuid.uuid4()),
+        },
+    )
+
+
+def test_membership_catalog_super_admin_and_checkout_validation(commerce):
+    client, _, _, _, other = commerce
+    pack, provider = setup_sales(client)
+    admin_path = API + "/admin/billing/plans"
+    assert client.get(admin_path, headers=other).status_code == 403
+    assert client.post(admin_path, json=plan_payload(), headers=other).status_code == 403
+    assert client.get(API + "/admin/billing/memberships", headers=other).status_code == 403
+    assert client.post(admin_path, json=plan_payload(duration=122)).status_code == 422
+    assert client.post(admin_path, json=plan_payload(original_amount_minor=100)).status_code == 422
+    base = endpoint(client, "POST", "/admin/billing/plans", plan_payload())
+    featured = endpoint(
+        client, "POST", "/admin/billing/plans", plan_payload(name="进阶会员", sort_order=10)
+    )
+    endpoint(client, "POST", "/admin/billing/plans", plan_payload(active=False))
+    incompatible = endpoint(client, "POST", "/admin/billing/plans", plan_payload(currency="usd"))
+    assert len(endpoint(client, "GET", "/admin/billing/plans")) == 4
+    assert [item["id"] for item in endpoint(client, "GET", "/billing/catalog")["plans"]] == [
+        featured["id"],
+        base["id"],
+    ]
+    payload = {"provider_id": provider["id"], "idempotency_key": str(uuid.uuid4())}
+    path = API + "/billing/orders"
+    assert client.post(path, json=payload).status_code == 422
+    assert (
+        client.post(
+            path, json={**payload, "plan_id": base["id"], "pack_id": pack["id"]}
+        ).status_code
+        == 422
+    )
+    assert client.post(path, json={**payload, "plan_id": incompatible["id"]}).status_code == 422
+    assert client.post(path, json={**payload, "plan_id": base["id"]}).status_code == 200
+    assert client.post(path, json={**payload, "pack_id": pack["id"]}).status_code == 409
+    endpoint(
+        client,
+        "PATCH",
+        f"/admin/billing/packs/{pack['id']}",
+        {key: val for key, val in {**pack, "active": False}.items() if key != "id"},
+    )
+    endpoint(
+        client,
+        "PATCH",
+        "/admin/billing/settings",
+        {
+            "enabled": True,
+            "payment_required": False,
+            "public_origin": "https://example.com",
+            "checkout_minutes": 60,
+        },
+    )
+    assert endpoint(client, "GET", "/billing/catalog")["packs"] == []
+
+
+def test_memberships_snapshot_and_renew_serially_on_paid_orders(commerce, monkeypatch):
+    client, _, _, _, other = commerce
+    _, provider = setup_sales(client)
+    plan = endpoint(client, "POST", "/admin/billing/plans", plan_payload())
+    clock = [datetime.now(UTC).replace(microsecond=0)]
+    monkeypatch.setattr(orders, "now", lambda: clock[0])
+    first = membership_checkout(client, plan, provider)
+    assert first["type"] == "membership" and first["membership"] is None
+    assert first["membership_days"] == 30 and first["credits"] == 30000
+    assert notify(client, provider, first, amount_minor=1).status_code == 409
+    assert endpoint(client, "GET", "/billing/memberships") == []
+
+    plan_path = f"/admin/billing/plans/{plan['id']}"
+    changed = plan_payload(name="新版会员", duration=2, duration_unit="week", credits=9000)
+    endpoint(client, "PATCH", plan_path, {**changed, "active": False})
+    assert endpoint(client, "GET", "/billing/catalog")["plans"] == []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert list(
+            executor.map(lambda _: notify(client, provider, first).status_code, range(2))
+        ) == [204, 204]
+    [opened] = endpoint(client, "GET", "/billing/memberships")
+    assert opened["order_id"] == first["id"] and opened["plan_name"] == plan["name"]
+    assert opened["status"] == "active" and opened["available"] == 30000
+    assert datetime.fromisoformat(opened["expires_at"]) == clock[0] + timedelta(days=30)
+    assert read_wallet(client)["available"] == 0
+    assert client.get(API + "/billing/memberships", headers=other).json() == []
+
+    endpoint(client, "PATCH", plan_path, changed)
+    renewals = [membership_checkout(client, plan, provider) for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert list(
+            executor.map(lambda row: notify(client, provider, row).status_code, renewals)
+        ) == [204, 204]
+    terms = sorted(
+        endpoint(client, "GET", "/billing/memberships"), key=lambda row: row["starts_at"]
+    )
+    assert [row["status"] for row in terms] == ["active", "scheduled", "scheduled"]
+    assert [row["available"] for row in terms] == [30000, 0, 0]
+    assert [row["credits"] for row in terms] == [30000, 9000, 9000]
+    assert terms[1]["starts_at"] == terms[0]["expires_at"]
+    assert terms[2]["starts_at"] == terms[1]["expires_at"]
+    assert datetime.fromisoformat(terms[2]["expires_at"]) == clock[0] + timedelta(days=58)
+    clock[0] += timedelta(days=60)
+    assert {row["status"] for row in endpoint(client, "GET", "/billing/memberships")} == {"expired"}
+    new = membership_checkout(client, plan, provider)
+    assert notify(client, provider, new).status_code == 204
+    [latest] = endpoint(client, "GET", "/admin/billing/memberships?limit=1")
+    assert latest["order_id"] == new["id"] and latest["user_email"] == "media@example.com"
+    assert datetime.fromisoformat(latest["starts_at"]) == clock[0]
+
+
+def test_membership_refund_only_freezes_and_removes_the_purchased_term(commerce):
+    client, _, _, fake, _ = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    point_order = checkout(client, pack, provider)
+    assert notify(client, provider, point_order).text == "success"
+    plan = endpoint(client, "POST", "/admin/billing/plans", plan_payload())
+    first, renewal = [membership_checkout(client, plan, provider) for _ in range(2)]
+    for order in (first, renewal):
+        assert notify(client, provider, order).text == "success"
+    start = {row["order_id"]: row for row in endpoint(client, "GET", "/billing/memberships")}
+    path = f"/admin/billing/orders/{first['id']}/refunds"
+    refund = {"reason": "会员订单未使用", "idempotency_key": str(uuid.uuid4())}
+    assert client.post(API + path, json={**refund, "amount_minor": 100}).status_code == 422
+    fake.refund_timeout_once = True
+    result = endpoint(client, "POST", path, {**refund, "amount_minor": first["amount_minor"]})
+    assert result["membership"]["status"] == "refund_pending"
+    assert result["membership"]["available"] == 0
+    assert read_wallet(client)["available"] == pack["credits"]
+    pending = result["refunds"][0]
+    resolution = f"/admin/billing/refunds/{pending['id']}/resolve"
+    settled = endpoint(
+        client, "POST", resolution, {"outcome": "succeeded", "reason": "商户确认已退款"}
+    )
+    assert settled["membership"]["status"] == "refunded"
+    assert settled["refunded_minor"] == first["amount_minor"]
+    remaining = endpoint(client, "GET", f"/billing/orders/{renewal['id']}")["membership"]
+    assert remaining == start[renewal["id"]]
+    assert read_wallet(client)["available"] == pack["credits"]
 
 
 def test_order_price_snapshot_duplicate_callbacks_and_owner_boundaries(commerce):

@@ -320,7 +320,9 @@
 .billing-callback > button {
   justify-self: start;
 }
-.billing-secret { -webkit-text-security: disc; }
+.billing-secret {
+  -webkit-text-security: disc;
+}
 .billing-order-state {
   display: flex;
   align-items: flex-start;
@@ -583,6 +585,83 @@
   margin-bottom: 16px;
   overflow-wrap: anywhere;
 }
+.billing-membership-note {
+  margin-bottom: 18px;
+}
+.billing-memberships {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+}
+.billing-membership {
+  padding: 20px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--card));
+  min-width: 0;
+}
+.billing-membership h3 {
+  font-size: 15px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.billing-membership .billing-status {
+  flex-shrink: 0;
+}
+.billing-status.is-active {
+  color: hsl(var(--success, 154 39% 43%));
+}
+.billing-membership-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 14px 0;
+  color: hsl(var(--muted));
+  font-size: 12px;
+  line-height: 1.7;
+}
+.billing-membership-balances {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 10px;
+}
+.billing-membership-balances dt {
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.billing-membership-balances dd {
+  margin-top: 6px;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.billing-plans .billing-pack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.billing-plan-duration {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: hsl(var(--muted));
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.billing-plan-allowance {
+  font-size: 14px;
+  margin-top: 18px;
+}
+.billing-plan-features {
+  list-style: disc;
+  padding-left: 18px;
+  margin-top: 12px;
+  color: hsl(var(--muted));
+  font-size: 13px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 700px) {
   .billing-admin .billing-orders-table thead {
     display: none;
@@ -641,6 +720,9 @@
   }
   .billing-packs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .billing-plans {
+    grid-template-columns: 1fr;
   }
   .billing-pack {
     padding: 16px;

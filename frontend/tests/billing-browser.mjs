@@ -126,6 +126,10 @@ async function fixture({
       },
     ],
     resolves: [],
+    plans: [],
+    memberships: [],
+    planBodies: [],
+    failPlan: false,
   };
   await context.addInitScript(
     ({ theme, lang }) => {
@@ -162,8 +166,17 @@ async function fixture({
       return send({
         enabled: state.settings.enabled,
         packs: state.packs,
+        plans: state.plans,
         providers: state.providers,
       });
+    if (
+      path === "/billing/memberships" ||
+      path === "/admin/billing/memberships"
+    ) {
+      const offset = Number(url.searchParams.get("offset") || 0);
+      const limit = Number(url.searchParams.get("limit") || 100);
+      return send(state.memberships.slice(offset, offset + limit));
+    }
     if (path === "/billing/wallet")
       return send({
         available: state.available,
@@ -209,6 +222,29 @@ async function fixture({
         cancel_allowed: true,
         checkout_url: "https://checkout.example.test/pay",
       };
+      const product = body().plan_id
+        ? state.plans.find((plan) => plan.id === body().plan_id)
+        : state.packs.find((pack) => pack.id === body().pack_id);
+      assert.ok(
+        product,
+        "checkout must reference the selected catalog product",
+      );
+      Object.assign(order, {
+        pack_name: product.name,
+        currency: product.currency,
+        amount_minor: product.amount_minor,
+        credits: product.credits,
+        provider_name: state.providers.find(
+          (provider) => provider.id === body().provider_id,
+        )?.name,
+        type: body().plan_id ? "membership" : "credits",
+      });
+      if (body().plan_id) {
+        order.plan_id = product.id;
+        order.membership_days =
+          product.duration *
+          { day: 1, week: 7, month: 30 }[product.duration_unit];
+      }
       state.orders.unshift(order);
       return send(order);
     }
@@ -369,6 +405,25 @@ async function fixture({
       return send(state.settings);
     }
     if (path === "/admin/billing/orders") return send(state.orders);
+    if (
+      path === "/admin/billing/plans" ||
+      path.startsWith("/admin/billing/plans/")
+    ) {
+      if (method === "GET") return send(state.plans);
+      state.planBodies.push(body());
+      if (state.failPlan) {
+        state.failPlan = false;
+        return send({ error: { message: "套餐暂未保存，请重试" } }, 502);
+      }
+      if (method === "POST")
+        state.plans.push({ id: `plan-${state.planBodies.length}`, ...body() });
+      else
+        Object.assign(
+          state.plans.find((plan) => plan.id === path.split("/").at(-1)),
+          body(),
+        );
+      return send(state.plans.at(-1));
+    }
     if (path === "/admin/billing/reservations") return send(state.reservations);
     if (path.match(/^\/admin\/billing\/reservations\/[^/]+\/resolve$/)) {
       state.resolves.push(body());
@@ -1027,6 +1082,353 @@ try {
   checks.push(
     "EasyPay user checkout uses provider name and hosted checkout; unsupported cancellation stays hidden; manual failed result requires confirmation and does not count as refunded",
   );
+  const planBase = {
+    id: "monthly-starter",
+    name: "创作月卡",
+    description: "适合每月持续创作",
+    features: ["独立期内积分额度", "到期后可手动续购"],
+    currency: "cny",
+    amount_minor: 2900,
+    original_amount_minor: 3900,
+    credits: 30000,
+    duration: 1,
+    duration_unit: "month",
+    sort_order: 0,
+    active: true,
+  };
+  const termBase = {
+    order_id: "membership-active",
+    plan_id: planBase.id,
+    plan_name: planBase.name,
+    starts_at: now,
+    expires_at: new Date(Date.now() + 30 * 86400000).toISOString(),
+    status: "active",
+    credits: 30000,
+    available: 20000,
+    reserved: 1000,
+    user_id: "billing-test",
+    user_name: "创作者",
+    user_email: "creator@example.test",
+  };
+  const member = await fixture();
+  member.state.plans = [
+    {
+      ...planBase,
+      id: "monthly-pro",
+      name: "进阶月卡",
+      amount_minor: 5900,
+      credits: 70000,
+      sort_order: 1,
+    },
+    structuredClone(planBase),
+    { ...planBase, id: "inactive", name: "已下架会员", active: false },
+  ];
+  member.state.memberships = [structuredClone(termBase)];
+  await member.page.goto(`${base}/billing`);
+  await member.page.getByRole("group", { name: "选择会员套餐" }).waitFor();
+  assert.match(
+    await member.page.locator(".billing-plans button").first().innerText(),
+    /创作月卡/,
+  );
+  assert.equal(
+    await member.page.getByText("已下架会员", { exact: true }).count(),
+    0,
+  );
+  assert.match(
+    await member.page.locator(".billing-memberships").innerText(),
+    /200/,
+  );
+  assert.match(await member.page.locator(".billing-wallet").innerText(), /120/);
+  await screenshot(member.page, "memberships-desktop-dark");
+  await member.page.getByRole("button", { name: /进阶月卡/ }).click();
+  member.state.failCreate = true;
+  await member.page
+    .getByRole("button", { name: "创建付款订单", exact: true })
+    .click();
+  await member.page
+    .getByRole("alert")
+    .filter({ hasText: "支付服务暂不可用" })
+    .waitFor();
+  await member.page
+    .getByRole("button", { name: "创建付款订单", exact: true })
+    .click();
+  await member.page
+    .getByRole("dialog")
+    .getByText("进阶月卡", { exact: true })
+    .waitFor();
+  assert.equal(member.createBodies[0].plan_id, "monthly-pro");
+  assert.equal("pack_id" in member.createBodies[0], false);
+  assert.equal(
+    member.createBodies[0].idempotency_key,
+    member.createBodies[1].idempotency_key,
+  );
+  await member.page.reload();
+  await member.page
+    .getByRole("dialog")
+    .getByText("30 天", { exact: true })
+    .waitFor();
+  assert.equal(
+    member.createBodies.length,
+    2,
+    "reloading must not create another membership order",
+  );
+  await member.page
+    .getByRole("button", { name: "查询付款结果", exact: true })
+    .click();
+  await member.page
+    .getByText("付款已确认，会员权益开通后会自动更新。请勿重复付款。")
+    .waitFor();
+  assert.equal(
+    await member.page
+      .getByRole("dialog")
+      .getByText("积分已到账", { exact: true })
+      .count(),
+    0,
+  );
+  member.state.orders[0].status = "completed";
+  member.state.orders[0].membership = {
+    ...termBase,
+    order_id: "order-created",
+    plan_id: "monthly-pro",
+    plan_name: "进阶月卡",
+    credits: 70000,
+    available: 70000,
+  };
+  member.state.memberships.unshift(member.state.orders[0].membership);
+  await member.page
+    .getByRole("dialog")
+    .getByText("会员已生效", { exact: true })
+    .waitFor({ timeout: 10000 });
+  await screenshot(member.page, "membership-order-active-desktop-dark");
+  await member.page
+    .getByRole("button", { name: "申请退款", exact: true })
+    .click();
+  await member.page
+    .getByText(
+      "仅未使用的会员套餐可申请全额退款。审核通过后将收回该笔订单的会员权益。",
+    )
+    .waitFor();
+  await member.page.getByLabel("退款原因").fill("未使用会员额度");
+  await member.page
+    .getByRole("button", { name: "提交退款申请", exact: true })
+    .click();
+  await member.page
+    .getByRole("dialog")
+    .getByText("退款待审核", { exact: true })
+    .waitFor();
+  assert.equal(member.refundBodies.length, 1);
+  await member.context.close();
+  checks.push(
+    "membership catalog sorting and hidden plans, exact plan_id order binding, failed checkout idempotency, reload, paid/active distinction and full-refund request",
+  );
+
+  const memberMobile = await fixture({
+    width: 390,
+    height: 844,
+    theme: "light",
+  });
+  memberMobile.state.plans = [
+    structuredClone(planBase),
+    {
+      ...planBase,
+      id: "pro",
+      name: "进阶月卡",
+      amount_minor: 5900,
+      credits: 70000,
+      sort_order: 1,
+    },
+  ];
+  memberMobile.state.memberships = [
+    structuredClone(termBase),
+    {
+      ...termBase,
+      order_id: "next-term",
+      status: "scheduled",
+      available: 0,
+      reserved: 0,
+      starts_at: termBase.expires_at,
+      expires_at: new Date(Date.now() + 60 * 86400000).toISOString(),
+    },
+    {
+      ...termBase,
+      order_id: "expired-term",
+      status: "expired",
+      available: 0,
+      reserved: 0,
+    },
+  ];
+  await memberMobile.page.goto(`${base}/billing`);
+  await memberMobile.page.getByText("待生效", { exact: true }).waitFor();
+  await memberMobile.page.getByText("已到期", { exact: true }).waitFor();
+  await screenshot(memberMobile.page, "memberships-phone-light");
+  await memberMobile.page
+    .getByRole("group", { name: "选择会员套餐" })
+    .scrollIntoViewIfNeeded();
+  await screenshot(memberMobile.page, "membership-plans-phone-light");
+  await memberMobile.page
+    .getByRole("button", { name: "积分包", exact: true })
+    .click();
+  await memberMobile.page
+    .getByRole("button", { name: "创建付款订单", exact: true })
+    .click();
+  await memberMobile.page.getByRole("dialog").waitFor();
+  assert.equal(memberMobile.createBodies[0].pack_id, "pack-1");
+  assert.equal("plan_id" in memberMobile.createBodies[0], false);
+  await memberMobile.context.close();
+
+  const memberOff = await fixture({
+    enabled: false,
+    role: "user",
+    width: 360,
+    height: 800,
+    lang: "en",
+  });
+  memberOff.state.memberships = [structuredClone(termBase)];
+  await memberOff.page.goto(`${base}/billing`);
+  await memberOff.page.getByText("Active", { exact: true }).waitFor();
+  assert.equal(
+    await memberOff.page
+      .getByRole("button", { name: "Create payment order", exact: true })
+      .count(),
+    0,
+  );
+  await screenshot(memberOff.page, "memberships-disabled-english-360");
+  await memberOff.context.close();
+  checks.push(
+    "membership active/scheduled/expired allowances stay separate from wallet, legacy points purchase remains functional, disabled billing preserves memberships, 390px light and 360px English",
+  );
+
+  const planAdmin = await fixture({ width: 390, height: 844, theme: "light" });
+  planAdmin.state.plans = [structuredClone(planBase)];
+  planAdmin.state.memberships = [structuredClone(termBase)];
+  planAdmin.state.orders = [
+    {
+      ...orderBase,
+      type: "membership",
+      membership_days: 30,
+      membership: termBase,
+      pack_name: planBase.name,
+      amount_minor: 2900,
+      credits: 30000,
+    },
+  ];
+  await planAdmin.page.goto(`${base}/admin/billing`);
+  await planAdmin.page
+    .getByRole("button", { name: "会员套餐", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("button", { name: "新建会员套餐", exact: true })
+    .click();
+  await planAdmin.page
+    .getByLabel("套餐名称", { exact: true })
+    .fill("进阶创作月卡");
+  await planAdmin.page
+    .getByLabel("说明", { exact: true })
+    .fill("适合连续项目创作");
+  await planAdmin.page
+    .getByLabel("权益列表", { exact: false })
+    .fill("独立积分额度\n手动续购");
+  await planAdmin.page.getByLabel("售价", { exact: true }).fill("59.90");
+  await planAdmin.page
+    .getByLabel("原价（可选）", { exact: false })
+    .fill("49.90");
+  await planAdmin.page
+    .getByLabel("期内积分额度", { exact: false })
+    .fill("700.25");
+  await planAdmin.page.getByLabel("排序", { exact: false }).fill("-2");
+  await planAdmin.page.getByLabel("上架出售", { exact: false }).check();
+  await planAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("alert")
+    .filter({ hasText: "原价应不低于售价" })
+    .waitFor();
+  assert.equal(planAdmin.state.planBodies.length, 0);
+  await planAdmin.page
+    .getByLabel("原价（可选）", { exact: false })
+    .fill("79.90");
+  planAdmin.state.failPlan = true;
+  await planAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("alert")
+    .filter({ hasText: "套餐暂未保存" })
+    .waitFor();
+  assert.equal(
+    await planAdmin.page.getByLabel("套餐名称", { exact: true }).inputValue(),
+    "进阶创作月卡",
+  );
+  await screenshot(planAdmin.page, "membership-plan-form-phone-light");
+  await planAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("cell", { name: "进阶创作月卡 适合连续项目创作", exact: true })
+    .waitFor();
+  const submittedPlan = planAdmin.state.planBodies[1];
+  assert.equal(submittedPlan.amount_minor, 5990);
+  assert.equal(submittedPlan.original_amount_minor, 7990);
+  assert.equal(submittedPlan.credits, 70025);
+  assert.equal(submittedPlan.duration, 1);
+  assert.equal(submittedPlan.duration_unit, "month");
+  assert.equal(submittedPlan.sort_order, -2);
+  assert.equal(submittedPlan.active, true);
+  assert.deepEqual(submittedPlan.features, ["独立积分额度", "手动续购"]);
+  await planAdmin.page.reload();
+  await planAdmin.page
+    .getByRole("button", { name: "会员套餐", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("button", { name: "编辑会员套餐 进阶创作月卡", exact: true })
+    .click();
+  assert.equal(
+    await planAdmin.page.getByLabel("售价", { exact: true }).inputValue(),
+    "59.90",
+  );
+  await planAdmin.page.getByLabel("原价（可选）", { exact: false }).fill("");
+  await planAdmin.page.getByLabel("上架出售", { exact: false }).uncheck();
+  await planAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await planAdmin.page.getByRole("cell", { name: /已下架/ }).waitFor();
+  assert.equal(planAdmin.state.planBodies.at(-1).original_amount_minor, null);
+  await screenshot(planAdmin.page, "admin-memberships-phone-light");
+  await planAdmin.page
+    .getByRole("button", { name: "订单与退款", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("button", { name: "查看订单", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("button", { name: "发起退款", exact: true })
+    .click();
+  assert.equal(
+    await planAdmin.page.getByLabel(/退款金额/).count(),
+    0,
+    "membership refund amount must not be editable",
+  );
+  await planAdmin.page
+    .getByLabel("退款原因", { exact: true })
+    .fill("确认会员未使用");
+  await planAdmin.page
+    .getByRole("button", { name: "核对并退款", exact: true })
+    .click();
+  await planAdmin.page
+    .getByRole("button", { name: "确认退款", exact: true })
+    .click();
+  await planAdmin.page
+    .getByText("退款处理中", { exact: true })
+    .first()
+    .waitFor();
+  assert.equal(planAdmin.refundBodies[0].amount_minor, 2900);
+  assert.match(planAdmin.refundBodies[0].idempotency_key, /^[\da-f-]{36}$/);
+  await planAdmin.context.close();
+  checks.push(
+    "admin membership plan validation, save failure retains all fields, decimal units, create/edit/reload/unpublish, membership inspection and full-only refund",
+  );
+
   const denied = await fixture({ role: "admin" });
   await denied.page.goto(`${base}/admin/billing`);
   await denied.page

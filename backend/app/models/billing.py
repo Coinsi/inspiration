@@ -16,7 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid_pk
@@ -65,12 +65,47 @@ class BillingProvider(Base, TimestampMixin):
     allow_refunds: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class MembershipPlan(Base, TimestampMixin):
+    __tablename__ = "membership_plan"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(String(500), default="")
+    features: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    currency: Mapped[str] = mapped_column(String(3))
+    amount_minor: Mapped[int] = mapped_column(BigInteger)
+    original_amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    credits: Mapped[int] = mapped_column(BigInteger)
+    duration: Mapped[int] = mapped_column(Integer)
+    duration_unit: Mapped[str] = mapped_column(String(8))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "amount_minor > 0 and credits > 0 "
+            "and (original_amount_minor is null or original_amount_minor >= amount_minor)",
+            name="ck_membership_plan_amounts",
+        ),
+        CheckConstraint(
+            "duration > 0 and duration_unit in ('day','week','month') and "
+            "duration * case duration_unit when 'week' then 7 when 'month' then 30 "
+            "else 1 end <= 3650",
+            name="ck_membership_plan_duration",
+        ),
+        CheckConstraint("jsonb_typeof(features) = 'array'", name="ck_membership_plan_features"),
+        Index("ix_membership_plan_catalog", "active", "sort_order"),
+    )
+
+
 class BillingOrder(Base, TimestampMixin):
     __tablename__ = "billing_order"
 
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), index=True)
-    pack_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing_pack.id"))
+    pack_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("billing_pack.id"))
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("membership_plan.id"))
+    membership_days: Mapped[int | None] = mapped_column(Integer)
     provider_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing_provider.id"))
     idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     pack_name: Mapped[str] = mapped_column(String(100))
@@ -106,7 +141,14 @@ class BillingOrder(Base, TimestampMixin):
             "status in ('pending','paid','completed','failed','expired','cancelled')",
             name="ck_billing_order_status",
         ),
+        CheckConstraint(
+            "(pack_id is not null and plan_id is null and membership_days is null) or "
+            "(pack_id is null and plan_id is not null and membership_days is not null "
+            "and membership_days between 1 and 3650)",
+            name="ck_billing_order_product",
+        ),
         Index("ix_billing_order_reconcile", "status", "next_check_at"),
+        Index("ix_billing_order_plan_id", "plan_id"),
     )
 
 
@@ -178,4 +220,50 @@ class CreditReservation(Base, TimestampMixin):
         CheckConstraint(
             "status in ('reserved','settled','released')", name="ck_credit_reservation_status"
         ),
+    )
+
+
+class MembershipTerm(Base, TimestampMixin):
+    __tablename__ = "membership_term"
+
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("billing_order.id"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"))
+    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("membership_plan.id"))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    credits: Mapped[int] = mapped_column(BigInteger)
+    available: Mapped[int] = mapped_column(BigInteger)
+    reserved: Mapped[int] = mapped_column(BigInteger, default=0)
+    status: Mapped[str] = mapped_column(String(24), default="granted")
+
+    __table_args__ = (
+        CheckConstraint("expires_at > starts_at", name="ck_membership_term_period"),
+        CheckConstraint(
+            "credits > 0 and available >= 0 and reserved >= 0 and available + reserved <= credits",
+            name="ck_membership_term_balances",
+        ),
+        CheckConstraint(
+            "status in ('granted','refund_pending','refunded')", name="ck_membership_term_status"
+        ),
+        Index("ix_membership_term_user_plan", "user_id", "plan_id", "expires_at"),
+        Index("ix_membership_term_user_expiry", "user_id", "expires_at"),
+    )
+
+
+class MembershipAllocation(Base, TimestampMixin):
+    __tablename__ = "membership_allocation"
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generation_job.id"), primary_key=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("membership_term.order_id"), primary_key=True
+    )
+    units: Mapped[int] = mapped_column(BigInteger)
+    settled_units: Mapped[int | None] = mapped_column(BigInteger)
+
+    __table_args__ = (
+        CheckConstraint(
+            "units > 0 and (settled_units is null or settled_units between 0 and units)",
+            name="ck_membership_allocation_units",
+        ),
+        Index("ix_membership_allocation_order", "order_id"),
     )

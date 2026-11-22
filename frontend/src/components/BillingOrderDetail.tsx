@@ -5,7 +5,7 @@ import {
   billingDate,
   checkoutLink,
   money,
-  orderLabel,
+  paymentOrderLabel,
   points,
   qrImage,
   refundLabel,
@@ -30,6 +30,7 @@ export function BillingOrderDetail({
   const link = checkoutLink(order.checkout_url);
   const qr = qrImage(order.qr_image_url);
   const pending = order.status === "pending";
+  const membership = order.type === "membership";
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!pending || !checkout) return;
@@ -45,7 +46,7 @@ export function BillingOrderDetail({
       ? zh
         ? "已全额退款"
         : "Fully refunded"
-      : orderLabel(order.status, zh);
+      : paymentOrderLabel(order, zh);
   return (
     <div className="billing-order-detail">
       <div className={`billing-order-state is-${order.status}`} role="status">
@@ -58,9 +59,13 @@ export function BillingOrderDetail({
           <strong>{label}</strong>
           {order.status === "paid" && (
             <p>
-              {zh
-                ? "付款已确认，积分到账后会自动更新。请勿重复付款。"
-                : "Payment confirmed. Points will update automatically. Do not pay again."}
+              {membership
+                ? zh
+                  ? "付款已确认，会员权益开通后会自动更新。请勿重复付款。"
+                  : "Payment confirmed. Membership activation will update automatically. Do not pay again."
+                : zh
+                  ? "付款已确认，积分到账后会自动更新。请勿重复付款。"
+                  : "Payment confirmed. Points will update automatically. Do not pay again."}
             </p>
           )}
           {pending && (
@@ -88,7 +93,15 @@ export function BillingOrderDetail({
       </div>
       <dl className="billing-details">
         <div>
-          <dt>{zh ? "积分包" : "Points pack"}</dt>
+          <dt>
+            {membership
+              ? zh
+                ? "会员套餐"
+                : "Membership plan"
+              : zh
+                ? "积分包"
+                : "Points pack"}
+          </dt>
           <dd>{order.pack_name}</dd>
         </div>
         <div>
@@ -96,9 +109,37 @@ export function BillingOrderDetail({
           <dd>{money(order.amount_minor, order.currency, zh)}</dd>
         </div>
         <div>
-          <dt>{zh ? "购买积分" : "Points purchased"}</dt>
+          <dt>
+            {membership
+              ? zh
+                ? "期内积分额度"
+                : "Term allowance"
+              : zh
+                ? "购买积分"
+                : "Points purchased"}
+          </dt>
           <dd>{points(order.credits, zh)}</dd>
         </div>
+        {membership && order.membership_days != null && (
+          <div>
+            <dt>{zh ? "购买期限" : "Purchased term"}</dt>
+            <dd>
+              {order.membership_days} {zh ? "天" : "days"}
+            </dd>
+          </div>
+        )}
+        {membership && order.membership && (
+          <>
+            <div>
+              <dt>{zh ? "生效时间" : "Starts"}</dt>
+              <dd>{billingDate(order.membership.starts_at, zh)}</dd>
+            </div>
+            <div>
+              <dt>{zh ? "到期时间" : "Expires"}</dt>
+              <dd>{billingDate(order.membership.expires_at, zh)}</dd>
+            </div>
+          </>
+        )}
         <div>
           <dt>{zh ? "支付方式" : "Payment method"}</dt>
           <dd>{order.provider_name}</dd>

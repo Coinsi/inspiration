@@ -22,6 +22,9 @@ const {
   qrImage,
   orderLabel,
   providerConfigDefaults,
+  paymentOrderLabel,
+  membershipDuration,
+  membershipLabel,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
 );
@@ -110,4 +113,37 @@ test("paid status never claims points have arrived", () => {
   assert.match(orderLabel("paid"), /处理中/);
   assert.equal(orderLabel("completed"), "积分已到账");
   assert.notEqual(orderLabel("paid", false), orderLabel("completed", false));
+});
+
+test("membership activation, scheduling and expiration never claim permanent points were credited", () => {
+  assert.equal(
+    membershipDuration({ duration: 1, duration_unit: "month" }),
+    "1 个月",
+  );
+  assert.equal(
+    membershipDuration({ duration: 2, duration_unit: "week" }, false),
+    "2 weeks",
+  );
+  assert.equal(paymentOrderLabel({ status: "completed" }), "积分已到账");
+  assert.match(
+    paymentOrderLabel({ type: "membership", status: "paid" }),
+    /权益开通中/,
+  );
+  for (const status of [
+    "active",
+    "scheduled",
+    "expired",
+    "refund_pending",
+    "refunded",
+  ]) {
+    const order = {
+      type: "membership",
+      status: "completed",
+      membership: { status },
+    };
+    assert.doesNotMatch(paymentOrderLabel(order), /积分已到账/);
+    assert.doesNotMatch(paymentOrderLabel(order, false), /Points credited/);
+    if (status !== "active")
+      assert.equal(paymentOrderLabel(order), membershipLabel(status));
+  }
 });

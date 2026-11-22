@@ -8,6 +8,29 @@ export interface CreditPack {
   active: boolean;
 }
 
+export interface MembershipPlan extends CreditPack {
+  features: string[];
+  original_amount_minor: number | null;
+  duration: number;
+  duration_unit: "day" | "week" | "month";
+  sort_order: number;
+}
+
+export interface MembershipTerm {
+  order_id: string;
+  plan_id: string;
+  plan_name: string;
+  starts_at: string;
+  expires_at: string;
+  status: "active" | "scheduled" | "expired" | "refund_pending" | "refunded";
+  credits: number;
+  available: number;
+  reserved: number;
+  user_id?: string;
+  user_name?: string;
+  user_email?: string;
+}
+
 export interface PaymentProvider {
   id: string;
   name: string;
@@ -20,6 +43,7 @@ export interface PaymentProvider {
 export interface BillingCatalog {
   enabled: boolean;
   packs: CreditPack[];
+  plans?: MembershipPlan[];
   providers: PaymentProvider[];
 }
 
@@ -47,6 +71,10 @@ export interface PaymentRefund {
 
 export interface PaymentOrder {
   id: string;
+  type?: "credits" | "membership";
+  plan_id?: string | null;
+  membership_days?: number | null;
+  membership?: MembershipTerm | null;
   status: "pending" | "paid" | "completed" | "expired" | "cancelled" | "failed";
   pack_name: string;
   provider_name: string;
@@ -184,3 +212,38 @@ export const refundLabel = (status: PaymentRefund["status"], zh = true) =>
     failed: zh ? "退款失败" : "Refund failed",
     rejected: zh ? "退款申请已拒绝" : "Refund request declined",
   })[status] || status;
+
+export const membershipLabel = (status: MembershipTerm["status"], zh = true) =>
+  ({
+    active: zh ? "生效中" : "Active",
+    scheduled: zh ? "待生效" : "Scheduled",
+    expired: zh ? "已到期" : "Expired",
+    refund_pending: zh ? "退款处理中" : "Refund processing",
+    refunded: zh ? "已退款" : "Refunded",
+  })[status] || status;
+
+export function membershipDuration(
+  plan: Pick<MembershipPlan, "duration" | "duration_unit">,
+  zh = true,
+) {
+  const { duration, duration_unit: unit } = plan;
+  if (zh)
+    return `${duration} ${{ day: "天", week: "周", month: "个月" }[unit]}`;
+  return `${duration} ${unit}${duration === 1 ? "" : "s"}`;
+}
+
+export function paymentOrderLabel(order: PaymentOrder, zh = true) {
+  if (order.type !== "membership") return orderLabel(order.status, zh);
+  if (order.status === "paid")
+    return zh ? "已付款 · 权益开通中" : "Paid · activating membership";
+  if (order.status === "completed") {
+    if (order.membership?.status === "active")
+      return zh ? "会员已生效" : "Membership active";
+    return order.membership
+      ? membershipLabel(order.membership.status, zh)
+      : zh
+        ? "会员已开通"
+        : "Membership purchased";
+  }
+  return orderLabel(order.status, zh);
+}

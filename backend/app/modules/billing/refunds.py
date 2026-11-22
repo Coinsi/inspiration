@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core import audit
 from app.core.errors import CapabilityUnsupported, Conflict, NotFound, ProviderError
 from app.models.billing import BillingOrder, BillingProvider, BillingRefund
-from app.modules.billing import orders, wallet
+from app.modules.billing import memberships, orders, wallet
 from app.modules.billing.providers import RefundEvidence
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,11 @@ def make_request(
     requested_amount = remaining if amount_minor is None else amount_minor
     if requested_amount <= 0 or requested_amount > remaining:
         raise CapabilityUnsupported("退款金额超出订单可退金额")
+    if order.plan_id is not None:
+        if requested_amount != order.amount_minor:
+            raise CapabilityUnsupported("会员订单仅支持原价全额退款")
+        if not memberships.can_refund(db, order):
+            raise Conflict("会员额度已使用或有任务占用，当前无法退款")
     # Calculate from the cumulative refund to avoid losing or creating
     # credits across multiple partial refunds.
     credits_after = order.credits * (order.refunded_minor + requested_amount) // order.amount_minor
@@ -123,14 +128,18 @@ def approve(db: Session, refund_id: uuid.UUID, actor: uuid.UUID) -> BillingRefun
     if not provider.allow_refunds or not order.payment_id:
         raise CapabilityUnsupported("该支付渠道当前不可退款")
     orders.provider_for(provider)
-    wallet.change(
-        db,
-        order.user_id,
-        "refund_reserve",
-        refund.id,
-        available=-refund.credits,
-        reserved=refund.credits,
-    )
+    if order.plan_id is not None:
+        wallet.lock_account(db, order.user_id)
+        memberships.hold_refund(db, order)
+    else:
+        wallet.change(
+            db,
+            order.user_id,
+            "refund_reserve",
+            refund.id,
+            available=-refund.credits,
+            reserved=refund.credits,
+        )
     refund.status = "pending"
     refund.submitted_at = orders.now()
     refund.next_check_at = refund.submitted_at
@@ -144,10 +153,11 @@ def approve(db: Session, refund_id: uuid.UUID, actor: uuid.UUID) -> BillingRefun
 def _finalize(
     db: Session, order: BillingOrder, refund: BillingRefund, outcome: Literal["succeeded", "failed"]
 ) -> BillingRefund:
-    if outcome == "succeeded":
+    if order.plan_id is not None:
+        wallet.lock_account(db, order.user_id)
+        memberships.finalize_refund(db, order, outcome)
+    elif outcome == "succeeded":
         wallet.change(db, order.user_id, "refund_settle", refund.id, reserved=-refund.credits)
-        order.refunded_minor += refund.amount_minor
-        order.refunded_credits += refund.credits
     else:
         wallet.change(
             db,
@@ -157,6 +167,9 @@ def _finalize(
             available=refund.credits,
             reserved=-refund.credits,
         )
+    if outcome == "succeeded":
+        order.refunded_minor += refund.amount_minor
+        order.refunded_credits += refund.credits
     refund.status = outcome
     db.flush()
     return refund
