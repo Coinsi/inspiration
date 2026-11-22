@@ -24,10 +24,20 @@ const {
   providerConfigDefaults,
   paymentOrderLabel,
   membershipDuration,
+  membershipPeriod,
   membershipLabel,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
 );
+
+test("membership period groups the configured term and preserves other durations", () => {
+  assert.equal(membershipPeriod({ duration: 1, duration_unit: "month" }), "monthly");
+  assert.equal(membershipPeriod({ duration: 30, duration_unit: "day" }), "monthly");
+  assert.equal(membershipPeriod({ duration: 12, duration_unit: "month" }), "yearly");
+  assert.equal(membershipPeriod({ duration: 365, duration_unit: "day" }), "yearly");
+  assert.equal(membershipPeriod({ duration: 2, duration_unit: "week" }), "other");
+  assert.equal(membershipPeriod({ duration: 3, duration_unit: "month" }), "other");
+});
 
 test("provider defaults retain numeric zero and only apply to the selected provider", () => {
   const provider = {

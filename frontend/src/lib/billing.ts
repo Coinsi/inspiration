@@ -232,6 +232,21 @@ export function membershipDuration(
   return `${duration} ${unit}${duration === 1 ? "" : "s"}`;
 }
 
+export function membershipPeriod(plan: Pick<MembershipPlan, "duration" | "duration_unit">) {
+  const days = plan.duration * { day: 1, week: 7, month: 30 }[plan.duration_unit];
+  if (days === 30) return "monthly";
+  if (days === 360 || days === 365 || days === 366) return "yearly";
+  return "other";
+}
+
+export function membershipPurchaseDuration(
+  plan: Pick<MembershipPlan, "duration" | "duration_unit">,
+  zh = true,
+) {
+  if (membershipPeriod(plan) === "monthly") return zh ? "30 天" : "30 days";
+  return membershipDuration(plan, zh);
+}
+
 export function paymentOrderLabel(order: PaymentOrder, zh = true) {
   if (order.type !== "membership") return orderLabel(order.status, zh);
   if (order.status === "paid")

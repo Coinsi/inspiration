@@ -130,6 +130,7 @@ async function fixture({
     memberships: [],
     planBodies: [],
     failPlan: false,
+    previewStatus: 200,
   };
   await context.addInitScript(
     ({ theme, lang }) => {
@@ -409,7 +410,14 @@ async function fixture({
       path === "/admin/billing/plans" ||
       path.startsWith("/admin/billing/plans/")
     ) {
-      if (method === "GET") return send(state.plans);
+      if (method === "GET") {
+        if (state.previewStatus !== 200)
+          return send(
+            { error: { message: "无权预览会员套餐" } },
+            state.previewStatus,
+          );
+        return send(state.plans);
+      }
       state.planBodies.push(body());
       if (state.failPlan) {
         state.failPlan = false;
@@ -554,12 +562,13 @@ try {
   const user = await fixture();
   await user.page.goto(`${base}/billing`);
   await user.page
-    .getByRole("heading", { name: "积分与账单", exact: true })
+    .getByRole("heading", { name: "选择你的创作套餐", exact: true })
     .waitFor();
+  assert.equal(await user.page.locator(".billing-wallet").count(), 0);
+  await user.page.getByRole("button", { name: "积分包", exact: true }).click();
   await user.page
     .getByRole("button", { name: "创建付款订单", exact: true })
     .waitFor();
-  assert.match(await user.page.locator(".billing-wallet").innerText(), /120/);
   await screenshot(user.page, "user-desktop-dark");
   user.state.failCreate = true;
   await user.page
@@ -621,6 +630,24 @@ try {
     .getByRole("dialog")
     .getByText("退款待审核", { exact: true })
     .waitFor();
+  await user.page.getByRole("button", { name: "关闭", exact: true }).click();
+  await user.page.getByRole("link", { name: "我的会员", exact: true }).click();
+  assert.match(await user.page.locator(".billing-wallet").innerText(), /240/);
+  assert.match(user.page.url(), /section=memberships/);
+  await user.page.getByRole("link", { name: "订单记录", exact: true }).click();
+  await user.page.locator(".billing-order-row").first().click();
+  assert.match(user.page.url(), /section=orders/);
+  assert.match(user.page.url(), /order=order-created/);
+  await user.page.reload();
+  await user.page
+    .getByRole("dialog")
+    .getByText("退款待审核", { exact: true })
+    .waitFor();
+  await user.page.getByRole("button", { name: "关闭", exact: true }).click();
+  assert.match(user.page.url(), /section=orders/);
+  await user.page
+    .getByRole("heading", { name: "付款订单", exact: true })
+    .waitFor();
   checks.push(
     "user purchase retry preserves idempotency, reload restores order, GET polling, paid/completed distinction, refund failure preserves reason",
   );
@@ -628,6 +655,9 @@ try {
 
   const mobile = await fixture({ width: 390, height: 844, theme: "light" });
   await mobile.page.goto(`${base}/billing`);
+  await mobile.page
+    .getByRole("button", { name: "积分包", exact: true })
+    .click();
   await mobile.page
     .getByRole("button", { name: "创建付款订单", exact: true })
     .waitFor();
@@ -665,6 +695,9 @@ try {
       .count(),
     0,
   );
+  await off.page.getByRole("link", { name: "我的会员", exact: true }).click();
+  await off.page.locator(".billing-wallet").waitFor();
+  await off.page.getByRole("link", { name: "订单记录", exact: true }).click();
   await off.page.getByRole("heading", { name: "付款订单" }).waitFor();
   await off.context.close();
   checks.push("disabled billing retains wallet/history and hides new purchase");
@@ -803,6 +836,9 @@ try {
     lang: "en",
   });
   await english.page.goto(`${base}/billing`);
+  await english.page
+    .getByRole("button", { name: "Points packs", exact: true })
+    .click();
   await english.page
     .getByRole("button", { name: "Create payment order", exact: true })
     .waitFor();
@@ -1133,26 +1169,96 @@ try {
       sort_order: 1,
     },
     structuredClone(planBase),
+    {
+      ...planBase,
+      id: "annual-starter",
+      name: "年度创作",
+      currency: "usd",
+      duration: 12,
+      amount_minor: 23880,
+      original_amount_minor: null,
+      credits: 360000,
+    },
     { ...planBase, id: "inactive", name: "已下架会员", active: false },
   ];
   member.state.memberships = [structuredClone(termBase)];
   await member.page.goto(`${base}/billing`);
   await member.page.getByRole("group", { name: "选择会员套餐" }).waitFor();
-  assert.match(
-    await member.page.locator(".billing-plans button").first().innerText(),
-    /创作月卡/,
+  assert.equal(
+    await member.page
+      .getByRole("button", { name: "选择套餐 创作月卡", exact: true })
+      .count(),
+    1,
   );
   assert.equal(
     await member.page.getByText("已下架会员", { exact: true }).count(),
     0,
   );
-  assert.match(
-    await member.page.locator(".billing-memberships").innerText(),
-    /200/,
-  );
-  assert.match(await member.page.locator(".billing-wallet").innerText(), /120/);
+  assert.equal(await member.page.locator(".billing-wallet").count(), 0);
+  assert.equal(await member.page.locator(".billing-memberships").count(), 0);
   await screenshot(member.page, "memberships-desktop-dark");
-  await member.page.getByRole("button", { name: /进阶月卡/ }).click();
+  await member.page
+    .getByRole("button", { name: "选择套餐 创作月卡", exact: true })
+    .click();
+  await member.page
+    .getByRole("dialog", { name: "确认付款", exact: true })
+    .waitFor();
+  assert.match(
+    await member.page.getByRole("dialog").locator(".billing-details").innerText(),
+    /30 天/,
+  );
+  assert.equal(
+    member.createBodies.length,
+    0,
+    "selecting a plan must not create an order",
+  );
+  await member.page.getByRole("button", { name: "关闭", exact: true }).click();
+  await member.page.getByRole("button", { name: "年付", exact: true }).click();
+  await member.page
+    .getByRole("button", { name: "选择套餐 年度创作", exact: true })
+    .click();
+  await member.page
+    .getByRole("group", { name: "选择支付方式", exact: true })
+    .getByRole("button", { name: "银行卡", exact: true })
+    .waitFor();
+  assert.match(
+    await member.page
+      .getByRole("dialog")
+      .locator(".billing-purchase-total")
+      .innerText(),
+    /238\.80/,
+  );
+  assert.match(
+    await member.page
+      .getByRole("dialog")
+      .locator(".billing-details")
+      .innerText(),
+    /12 个月/,
+  );
+  assert.equal(
+    await member.page
+      .getByRole("dialog")
+      .getByRole("button", { name: "微信支付", exact: true })
+      .count(),
+    0,
+  );
+  await member.page.getByRole("button", { name: "关闭", exact: true }).click();
+  await member.page.getByRole("button", { name: "月付", exact: true }).click();
+  await member.page
+    .getByRole("button", { name: "积分包", exact: true })
+    .click();
+  await member.page
+    .getByRole("button", { name: "会员套餐", exact: true })
+    .click();
+  assert.equal(member.createBodies.length, 0);
+  await member.page
+    .getByRole("button", { name: "选择套餐 进阶月卡", exact: true })
+    .click();
+  await member.page
+    .getByRole("dialog")
+    .getByRole("button", { name: "微信支付", exact: true })
+    .waitFor();
+  await screenshot(member.page, "membership-confirmation-desktop-dark");
   member.state.failCreate = true;
   await member.page
     .getByRole("button", { name: "创建付款订单", exact: true })
@@ -1229,6 +1335,19 @@ try {
     .getByText("退款待审核", { exact: true })
     .waitFor();
   assert.equal(member.refundBodies.length, 1);
+  await member.page.getByRole("button", { name: "关闭", exact: true }).click();
+  await member.page
+    .getByRole("link", { name: "我的会员", exact: true })
+    .click();
+  assert.match(
+    await member.page.locator(".billing-memberships").innerText(),
+    /200/,
+  );
+  assert.match(await member.page.locator(".billing-wallet").innerText(), /120/);
+  await member.page.reload();
+  await member.page
+    .getByRole("heading", { name: "我的会员", exact: true })
+    .waitFor();
   await member.context.close();
   checks.push(
     "membership catalog sorting and hidden plans, exact plan_id order binding, failed checkout idempotency, reload, paid/active distinction and full-refund request",
@@ -1269,14 +1388,25 @@ try {
       reserved: 0,
     },
   ];
-  await memberMobile.page.goto(`${base}/billing`);
+  await memberMobile.page.goto(`${base}/billing?section=memberships`);
   await memberMobile.page.getByText("待生效", { exact: true }).waitFor();
   await memberMobile.page.getByText("已到期", { exact: true }).waitFor();
   await screenshot(memberMobile.page, "memberships-phone-light");
   await memberMobile.page
+    .getByRole("link", { name: "购买套餐", exact: true })
+    .click();
+  await memberMobile.page
     .getByRole("group", { name: "选择会员套餐" })
     .scrollIntoViewIfNeeded();
   await screenshot(memberMobile.page, "membership-plans-phone-light");
+  await memberMobile.page
+    .getByRole("button", { name: "选择套餐 创作月卡", exact: true })
+    .click();
+  await screenshot(memberMobile.page, "membership-confirmation-phone-light");
+  assert.equal(memberMobile.createBodies.length, 0);
+  await memberMobile.page
+    .getByRole("button", { name: "关闭", exact: true })
+    .click();
   await memberMobile.page
     .getByRole("button", { name: "积分包", exact: true })
     .click();
@@ -1296,7 +1426,7 @@ try {
     lang: "en",
   });
   memberOff.state.memberships = [structuredClone(termBase)];
-  await memberOff.page.goto(`${base}/billing`);
+  await memberOff.page.goto(`${base}/billing?section=memberships`);
   await memberOff.page.getByText("Active", { exact: true }).waitFor();
   assert.equal(
     await memberOff.page
@@ -1308,6 +1438,99 @@ try {
   await memberOff.context.close();
   checks.push(
     "membership active/scheduled/expired allowances stay separate from wallet, legacy points purchase remains functional, disabled billing preserves memberships, 390px light and 360px English",
+  );
+
+  const preview = await fixture({ width: 390, height: 844, theme: "light" });
+  await preview.page.goto(
+    `${base}/billing?preview=1&section=memberships&order=order-existing`,
+  );
+  await preview.page
+    .getByText("当前展示示例套餐，仅供预览，不可购买。", { exact: true })
+    .waitFor();
+  await preview.page
+    .getByRole("button", { name: "查看套餐 基础会员", exact: true })
+    .click();
+  await preview.page
+    .getByRole("dialog", { name: "套餐预览", exact: true })
+    .waitFor();
+  assert.equal(
+    await preview.page
+      .getByRole("button", { name: "创建付款订单", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await preview.page
+      .getByRole("group", { name: "选择支付方式", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    preview.requests.some((request) => /^GET \/billing\//.test(request)),
+    false,
+  );
+  assert.equal(
+    preview.requests.some((request) => /^(POST|PATCH|DELETE) /.test(request)),
+    false,
+  );
+  await screenshot(preview.page, "admin-preview-confirmation-phone-light");
+  await preview.page
+    .getByRole("dialog")
+    .getByRole("button", { name: "关闭", exact: true })
+    .last()
+    .click();
+  await screenshot(preview.page, "admin-preview-samples-phone-light");
+  preview.state.plans = [
+    { ...planBase, id: "real-draft", name: "后台草稿会员", active: false },
+  ];
+  await preview.page.reload();
+  await preview.page
+    .getByRole("button", { name: "查看套餐 后台草稿会员", exact: true })
+    .waitFor();
+  assert.equal(
+    await preview.page
+      .getByText("当前展示示例套餐，仅供预览，不可购买。", { exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    preview.requests.some((request) => /^GET \/billing\//.test(request)),
+    false,
+  );
+  await preview.context.close();
+
+  const failedPreview = await fixture();
+  failedPreview.state.previewStatus = 403;
+  await failedPreview.page.goto(`${base}/billing?preview=1`);
+  await failedPreview.page
+    .getByRole("alert")
+    .filter({ hasText: "无权预览会员套餐" })
+    .waitFor();
+  assert.equal(
+    await failedPreview.page.getByRole("button", { name: /^查看套餐/ }).count(),
+    0,
+  );
+  assert.equal(
+    failedPreview.requests.some((request) => /^GET \/billing\//.test(request)),
+    false,
+  );
+  await failedPreview.context.close();
+
+  const deniedPreview = await fixture({ role: "user" });
+  await deniedPreview.page.goto(`${base}/billing?preview=1`);
+  await deniedPreview.page
+    .getByRole("alert")
+    .filter({ hasText: "套餐预览仅供超级管理员使用" })
+    .waitFor();
+  assert.equal(
+    deniedPreview.requests.some((request) =>
+      /\/(admin\/)?billing\//.test(request),
+    ),
+    false,
+  );
+  await deniedPreview.context.close();
+  checks.push(
+    "admin preview is read-only: samples only after successful empty list, real drafts preserved, no billing read/write requests even with return order query, denied access has no sample fallback",
   );
 
   const planAdmin = await fixture({ width: 390, height: 844, theme: "light" });

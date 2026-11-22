@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import {
@@ -52,10 +53,18 @@ export function BillingPlans() {
             按次购买，不自动续费。1 个月按 30
             天计算。同套餐续购顺延，不同套餐独立生效。
           </p>
-          <Button onClick={() => setEdit("new")}>
-            <Plus size={16} />
-            新建会员套餐
-          </Button>
+          <div className="billing-actions">
+            <Link
+              to="/billing?preview=1"
+              className="studio-button inline-flex h-9 items-center justify-center rounded-md border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-elevated"
+            >
+              预览购买页
+            </Link>
+            <Button onClick={() => setEdit("new")}>
+              <Plus size={16} />
+              新建会员套餐
+            </Button>
+          </div>
         </div>
         {plans.isLoading && <Loading />}
         {plans.error && (
@@ -181,7 +190,7 @@ function PlanForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [features, setFeatures] = useState(initial?.features.join("\n") ?? "");
-  const [currency, setCurrency] = useState(initial?.currency ?? "cny");
+  const [currency, setCurrency] = useState(initial?.currency ?? "usd");
   const [amount, setAmount] = useState(
     initial
       ? decimalAmount(initial.amount_minor, currencyDecimals(initial.currency))
