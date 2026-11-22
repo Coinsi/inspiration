@@ -126,7 +126,7 @@ def provider_catalog() -> list[dict]:
         },
         {
             "kind": "easypay",
-            "name": "易支付（V1）",
+            "name": "易支付",
             "fields": [
                 field("api_base", "网关 HTTPS 地址"),
                 field("pid", "商户 ID（PID）"),

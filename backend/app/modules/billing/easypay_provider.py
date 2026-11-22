@@ -199,7 +199,7 @@ class EasyPayProvider:
         reference = _uuid_hex(order.order_id)
         _minor_units(order.amount_minor)
         if order.currency != "cny":
-            raise ProviderError("易支付 V1 仅支持人民币 CNY")
+            raise ProviderError("易支付仅支持人民币")
         return reference
 
     def _public_ref(self, value: object, *, qr: bool) -> str | None:
@@ -496,4 +496,4 @@ class EasyPayProvider:
         self._validate_order(order)
         _trade_id(payment_id)
         _uuid_hex(refund_id)
-        raise ProviderError("此易支付 V1 渠道不支持可靠的单次退款查询，请管理员核对渠道流水")
+        raise ProviderError("请在易支付商户后台核对退款结果")

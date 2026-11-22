@@ -124,6 +124,10 @@ function BillingManager() {
       api.get<PaymentProviderType[]>("/admin/billing/provider-types", {
         signal,
       }),
+    select: (catalog) =>
+      catalog.map((type) =>
+        type.kind === "easypay" ? { ...type, name: "易支付" } : type,
+      ),
     enabled: tab === "providers",
   });
   const settings = useQuery({

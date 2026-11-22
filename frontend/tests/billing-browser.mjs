@@ -287,7 +287,7 @@ async function fixture({
       return send([
         {
           kind: "easypay",
-          name: "易支付",
+          name: "易支付（V1）",
           fields: [
             {
               key: "api_base",
@@ -816,6 +816,14 @@ try {
   await easy.page
     .getByRole("button", { name: "添加支付渠道", exact: true })
     .click();
+  assert.equal(
+    (
+      await easy.page
+        .getByRole("button", { name: "支付服务商", exact: true })
+        .innerText()
+    ).trim(),
+    "易支付",
+  );
   assert.match(
     await easy.page
       .getByRole("button", { name: "支付方式", exact: true })
@@ -879,6 +887,10 @@ try {
     .click();
   await easy.page
     .getByRole("cell", { name: "易支付 · 微信", exact: true })
+    .waitFor();
+  await easy.page
+    .getByRole("row", { name: /易支付 · 微信/ })
+    .getByRole("cell", { name: "易支付", exact: true })
     .waitFor();
   assert.deepEqual(easy.providerBodies[0], easy.providerBodies[1]);
   assert.equal(easy.providerBodies[1].currency, "cny");
