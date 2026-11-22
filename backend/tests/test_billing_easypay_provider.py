@@ -194,6 +194,54 @@ def test_mapi_mobile_deep_link_is_only_qr_data(monkeypatch, config, order):
     assert result.qr_payload.startswith("alipays://")
 
 
+def test_mapi_accepts_nested_payment_entries_and_skips_an_invalid_mobile_link(
+    monkeypatch, config, order
+):
+    def gateway(endpoint, query, form):
+        assert endpoint == "mapi.php"
+        return {
+            "code": 1,
+            "data": {
+                "out_trade_no": form["out_trade_no"],
+                "payurl2": "http://gateway.example.com/insecure",
+                "payurl": "/pay/secure",
+                "qrcode": "wxp://pay/confirmed-opaque-token",
+            },
+        }
+
+    mock_gateway(monkeypatch, gateway)
+    result = ep.EasyPayProvider(config).create_checkout(replace(order, is_mobile=True))
+    assert result.checkout_url == "https://gateway.example.com/pay/secure"
+    assert result.qr_payload == "wxp://pay/confirmed-opaque-token"
+
+
+def test_mapi_keeps_a_renderable_qr_when_the_link_is_invalid(monkeypatch, config, order):
+    payload = "weixin://wxpay/bizpayurl?pr=" + "x" * 1600
+    mock_gateway(
+        monkeypatch,
+        lambda *args: {"code": 1, "qrcode": payload, "payurl": "http://gateway.example.com/pay"},
+    )
+    result = ep.EasyPayProvider(config).create_checkout(order)
+    assert result.checkout_url is None
+    assert result.qr_payload == payload
+
+
+def test_mapi_drops_qr_over_encoder_budget_without_hiding_usable_checkout(
+    monkeypatch, config, order
+):
+    mock_gateway(
+        monkeypatch,
+        lambda *args: {
+            "code": 1,
+            "qrcode": "weixin://wxpay/bizpayurl?pr=" + "x" * 2048,
+            "payurl": "https://gateway.example.com/pay",
+        },
+    )
+    result = ep.EasyPayProvider(config).create_checkout(order)
+    assert result.qr_payload is None
+    assert result.checkout_url == "https://gateway.example.com/pay"
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -233,6 +281,7 @@ def test_invalid_checkout_never_dispatches(monkeypatch, config, order, change):
         {"code": 1, "payurl": "https://user:pass@gateway.example.com"},
         {"code": 1, "payurl": "https://gateway.example.com/pay?key=test_secret_key"},
         {"code": 1, "out_trade_no": UUID(REFUND_ID).hex, "qrcode": "opaque-token"},
+        {"code": 1, "payurl": "/first", "data": {"payurl": "/mismatch"}},
         {"code": 1},
     ],
 )

@@ -3,7 +3,7 @@
 import logging
 from threading import Event, Thread
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from app.core.database import SessionLocal
 from app.models.billing import BillingOrder, BillingProvider, BillingRefund
@@ -19,8 +19,17 @@ def reconcile_once(stop: Event | None = None) -> None:
         order_ids = list(
             db.scalars(
                 select(BillingOrder.id)
+                .join(BillingProvider, BillingProvider.id == BillingOrder.provider_id)
                 .where(
-                    BillingOrder.status.in_(("pending", "paid")),
+                    or_(
+                        BillingOrder.status.in_(("pending", "paid")),
+                        and_(
+                            BillingOrder.status == "cancelled",
+                            BillingProvider.kind == "easypay",
+                            BillingOrder.next_check_at
+                            <= BillingOrder.expires_at + orders.EASYPAY_CANCEL_GRACE,
+                        ),
+                    ),
                     BillingOrder.next_check_at <= timestamp,
                 )
                 .order_by(BillingOrder.next_check_at, BillingOrder.id)

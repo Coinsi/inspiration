@@ -830,6 +830,14 @@ try {
       user_id: "different-user",
       checkout_url: "https://checkout.example.test/another-user",
     },
+    {
+      ...ownPending,
+      id: "easypay-missing-entry",
+      pack_name: "易支付待付款积分包",
+      provider_name: "易支付 · 支付宝",
+      cancel_allowed: true,
+      cancel_mode: "local",
+    },
   ];
   pendingOrders.state.recoverCheckout = true;
   await pendingOrders.page.goto(`${base}/admin/billing`);
@@ -852,10 +860,25 @@ try {
   const cashierBounds = await cashier.boundingBox();
   const orderInfoBounds = await ownerDetail.locator(".billing-details").boundingBox();
   assert.ok(cashierBounds.y < orderInfoBounds.y, "cashier link must precede order metadata");
-  assert.equal(pendingOrders.createBodies.length, 0);
   await screenshot(pendingOrders.page, "buyer-recovered-checkout");
+
+  await pendingOrders.page.goto(`${base}/billing?section=orders&order=easypay-missing-entry`);
+  const cancelPending = ownerDetail.getByRole("button", { name: "取消订单", exact: true });
+  await cancelPending.waitFor();
+  const retryArea = ownerDetail.locator(".billing-checkout");
+  assert.equal(await retryArea.getByRole("button", { name: "取消订单", exact: true }).count(), 1);
+  await screenshot(pendingOrders.page, "buyer-cancel-without-payment-entry");
+  await cancelPending.click();
+  const cancellation = pendingOrders.page.getByRole("alertdialog", { name: "取消这笔付款订单？" });
+  await cancellation.getByText(/已有支付链接可能仍有效/).waitFor();
+  await cancellation.getByRole("button", { name: "确认取消订单" }).click();
+  await ownerDetail.getByText(/已停止在本站继续付款/).waitFor();
+  assert.equal(await cancelPending.count(), 0);
+  assert.equal(await cashier.count(), 0);
+  assert.equal(await ownerDetail.getByRole("button", { name: "查询付款结果" }).count(), 1);
+  assert.equal(pendingOrders.createBodies.length, 0);
   await pendingOrders.context.close();
-  checks.push("admin offers a payment link only on the admin's own pending order; buyer can retry the existing order and see the cashier before metadata");
+  checks.push("admin links to payment for own orders only; buyer can recover an existing checkout or locally cancel an EasyPay order with no QR or link");
 
   const initialSetup = await fixture({ enabled: false });
   initialSetup.state.settings.public_origin = "";

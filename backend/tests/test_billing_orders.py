@@ -33,6 +33,8 @@ class FakeProvider:
         self.refund_status = "pending"
         self.refund_timeout_once = False
         self.checkout_fails = False
+        self.queried = []
+        self.closed = []
 
     def create_checkout(self, order):
         self.created.append(order.order_id)
@@ -44,11 +46,13 @@ class FakeProvider:
         )
 
     def query_order(self, order, provider_order_id):
+        self.queried.append((order.order_id, provider_order_id))
         return self.visible.get(
             order.order_id, PaymentEvidence(order.order_id, "pending", provider_order_id)
         )
 
     def close_order(self, order, provider_order_id):
+        self.closed.append((order.order_id, provider_order_id))
         return self.visible.get(
             order.order_id, PaymentEvidence(order.order_id, "expired", provider_order_id)
         )
@@ -614,6 +618,202 @@ def test_superadmin_can_only_release_terminal_holds_without_an_active_resume(com
     assert read_wallet(client)["reserved"] == 0
 
 
+@pytest.mark.parametrize("checkout_fails", [False, True])
+def test_easypay_owner_can_cancel_locally_without_closing_or_reopening_gateway(
+    commerce, checkout_fails
+):
+    client, sessions, _, fake, other = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    fake.checkout_fails = checkout_fails
+    key = uuid.uuid4()
+    order = checkout(client, pack, provider, key)
+    assert order["cancel_allowed"] and order["cancel_mode"] == "local"
+    path = f"/billing/orders/{order['id']}/cancel"
+    assert client.post(API + path, headers=other).status_code == 404
+    for _ in range(2):
+        cancelled = endpoint(client, "POST", path)
+        assert cancelled["status"] == "cancelled"
+        assert cancelled["cancel_mode"] == "local" and not cancelled["cancel_allowed"]
+        assert cancelled["checkout_url"] is None and cancelled["qr_image_url"] is None
+    assert fake.closed == fake.queried == []  # Local cancellation makes no upstream promise.
+    fake.checkout_fails = False
+    retry = checkout(client, pack, provider, key)
+    assert retry["id"] == order["id"] and retry["status"] == "cancelled"
+    assert retry["checkout_url"] is None and fake.created == [order["id"]]
+    with sessions() as db:
+        row = db.get(BillingOrder, uuid.UUID(order["id"]))
+        assert row.paid_at is None and row.payment_id is None
+        assert row.provider_order_id == (None if checkout_fails else "session-" + order["id"])
+        row.next_check_at = orders.now() - timedelta(seconds=1)
+        db.commit()
+    checked = endpoint(client, "POST", f"/billing/orders/{order['id']}/check")
+    assert checked["status"] == "cancelled" and checked["cancel_mode"] == "local"
+    assert fake.created == [order["id"]] and fake.closed == []
+    assert read_wallet(client)["available"] == 0
+
+
+@pytest.mark.parametrize("via", ["manual", "worker"])
+@pytest.mark.parametrize("checkout_fails", [False, True])
+def test_cancelled_easypay_late_payment_reconciles_once_without_reopening_checkout(
+    commerce, via, checkout_fails
+):
+    client, sessions, _, fake, _ = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    fake.checkout_fails = checkout_fails
+    order = checkout(client, pack, provider)
+    oid = order["id"]
+    endpoint(client, "POST", f"/billing/orders/{oid}/cancel")
+    fake.checkout_fails = False
+    fake.visible[oid] = PaymentEvidence(oid, "paid", "session-" + oid, "intent-" + oid, 103, "cny")
+    with sessions() as db:
+        db.get(BillingOrder, uuid.UUID(oid)).next_check_at = orders.now() - timedelta(seconds=1)
+        db.commit()
+    for _ in range(2):
+        if via == "worker":
+            worker.reconcile_once()
+        else:
+            endpoint(client, "POST", f"/billing/orders/{oid}/check")
+    final = endpoint(client, "GET", f"/billing/orders/{oid}")
+    assert final["status"] == "completed" and final["paid_at"]
+    assert final["checkout_url"] is None and final["qr_image_url"] is None
+    assert fake.created == [oid] and fake.closed == []
+    assert read_wallet(client)["available"] == 10001
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(CreditEntry)) == 1
+
+
+def test_easypay_check_retries_missing_entry_on_the_original_order(commerce):
+    client, sessions, _, fake, _ = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    key = uuid.uuid4()
+    fake.checkout_fails = True
+    order = checkout(client, pack, provider, key)
+    assert order["checkout_url"] is None and order["status"] == "pending"
+    fake.checkout_fails = False
+    # The first explicit retry must work immediately after entry creation fails.
+    recovered = endpoint(client, "POST", f"/billing/orders/{order['id']}/check")
+    assert recovered["id"] == order["id"] and recovered["status"] == "pending"
+    assert recovered["checkout_url"] and recovered["amount_minor"] == 103
+    assert checkout(client, pack, provider, key)["id"] == order["id"]
+    assert fake.created == [order["id"]] * 2
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(BillingOrder)) == 1
+
+
+def test_easypay_failed_entry_retry_still_queries_for_already_paid_order(commerce):
+    client, sessions, _, fake, _ = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    fake.checkout_fails = True
+    order = checkout(client, pack, provider)
+    oid = order["id"]
+    # An accepted checkout response can be lost; another failed retry must not hide its payment.
+    fake.visible[oid] = PaymentEvidence(oid, "paid", "session-" + oid, "intent-" + oid, 103, "cny")
+    with sessions() as db:
+        db.get(BillingOrder, uuid.UUID(oid)).next_check_at = orders.now() - timedelta(seconds=1)
+        db.commit()
+    settled = endpoint(client, "POST", f"/billing/orders/{oid}/check")
+    assert settled["id"] == oid and settled["status"] == "completed"
+    assert fake.queried == [(oid, None)]
+    assert read_wallet(client)["available"] == 10001
+    assert endpoint(client, "POST", f"/billing/orders/{oid}/check")["status"] == "completed"
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(CreditEntry)) == 1
+
+
+def test_non_easypay_missing_reference_still_requires_gateway_confirmation_to_cancel(commerce):
+    client, _, _, fake, _ = commerce
+    pack, provider = setup_sales(client)
+    fake.checkout_fails = True
+    order = checkout(client, pack, provider)
+    assert not order["cancel_allowed"]
+    response = client.post(f"{API}/billing/orders/{order['id']}/cancel")
+    assert response.status_code == 409
+    assert endpoint(client, "GET", f"/billing/orders/{order['id']}")["status"] == "pending"
+    assert fake.closed == []
+
+
+@pytest.mark.parametrize("payload", ["x" * 2048, "界" * 682 + "ab"])
+def test_checkout_qr_supports_2048_utf8_bytes_and_rejects_larger_payloads(payload):
+    assert len(payload.encode("utf-8")) == 2048
+    assert orders.qr_image(payload).startswith("data:image/png;base64,iVBOR")
+    assert orders.qr_image(payload + "a") is None
+
+
+@pytest.mark.parametrize("query_fails", [False, True])
+@pytest.mark.parametrize("cancel_after_hours", [0, 2])
+def test_cancelled_easypay_worker_performs_one_final_check_after_grace(
+    commerce, monkeypatch, query_fails, cancel_after_hours
+):
+    client, _, _, fake, _ = commerce
+    clock = [datetime.now(UTC)]
+    monkeypatch.setattr(orders, "now", lambda: clock[0])
+    pack, stripe = setup_sales(client)
+    provider = add_easypay(client)
+    easy_order = checkout(client, pack, provider)
+    stripe_order = checkout(client, pack, stripe)
+    clock[0] += timedelta(hours=cancel_after_hours)
+    for order in (easy_order, stripe_order):
+        assert (
+            endpoint(client, "POST", f"/billing/orders/{order['id']}/cancel")["status"]
+            == "cancelled"
+        )
+    calls = []
+    original = fake.query_order
+
+    def query(request, reference):
+        calls.append(request.order_id)
+        if query_fails:
+            raise ProviderError("Fixture gateway temporarily unavailable")
+        return original(request, reference)
+
+    monkeypatch.setattr(fake, "query_order", query)
+    # Resume after a pause that spans the complete payment window and cancellation grace.
+    clock[0] += timedelta(hours=2)
+    worker.reconcile_once()
+    worker.reconcile_once()
+    clock[0] += timedelta(days=1)
+    worker.reconcile_once()
+    assert calls == [easy_order["id"]]
+    assert fake.created == [easy_order["id"], stripe_order["id"]]
+    assert endpoint(client, "GET", f"/billing/orders/{easy_order['id']}")["status"] == "cancelled"
+    assert read_wallet(client)["available"] == 0
+
+
+def test_cancelled_easypay_final_window_manual_checks_wait_until_deadline(commerce, monkeypatch):
+    client, sessions, _, fake, _ = commerce
+    clock = [datetime.now(UTC)]
+    monkeypatch.setattr(orders, "now", lambda: clock[0])
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    order = checkout(client, pack, provider)
+    oid = order["id"]
+    endpoint(client, "POST", f"/billing/orders/{oid}/cancel")
+    deadline = datetime.fromisoformat(order["expires_at"]) + timedelta(minutes=30)
+    clock[0] = deadline - timedelta(seconds=30)
+    worker.reconcile_once()
+    assert fake.queried == [(oid, "session-" + oid)]
+    with sessions() as db:
+        assert db.get(BillingOrder, uuid.UUID(oid)).next_check_at == deadline
+    for _ in range(3):
+        checked = endpoint(client, "POST", f"/billing/orders/{oid}/check")
+        assert checked["status"] == "cancelled"
+    assert len(fake.queried) == 1
+    clock[0] = deadline
+    worker.reconcile_once()
+    assert fake.queried == [(oid, "session-" + oid)] * 2
+    with sessions() as db:
+        assert db.get(BillingOrder, uuid.UUID(oid)).next_check_at > deadline
+    worker.reconcile_once()
+    clock[0] += timedelta(days=1)
+    worker.reconcile_once()
+    assert len(fake.queried) == 2 and fake.created == [oid]
+    assert fake.closed == [] and read_wallet(client)["available"] == 0
+
+
 def test_easypay_get_and_post_callback_require_live_query_before_credit(commerce, monkeypatch):
     from app.modules.billing import easypay_provider
     from app.modules.billing.providers import get_provider
@@ -645,7 +845,10 @@ def test_easypay_get_and_post_callback_require_live_query_before_credit(commerce
     order = checkout(client, pack, provider)
     assert order["checkout_url"].startswith("https://merchant.example.com/submit.php?")
     assert EASYPAY_KEY not in order["checkout_url"]
-    assert not order["cancel_allowed"]
+    assert order["cancel_allowed"] and order["cancel_mode"] == "local"
+    cancelled = endpoint(client, "POST", f"/billing/orders/{order['id']}/cancel")
+    assert cancelled["status"] == "cancelled" and cancelled["cancel_mode"] == "local"
+    assert cancelled["checkout_url"] is None and cancelled["qr_image_url"] is None
     form = {
         "pid": "100001",
         "type": "alipay",

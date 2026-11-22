@@ -342,15 +342,21 @@ export default function Billing() {
       preview ||
       !selectedOrder ||
       checking ||
+      !selectedOrder.cancel_allowed ||
       selectedOrder.status !== "pending"
     )
       return;
+    const cancellationMessage = selectedOrder.cancel_mode === "local"
+      ? zh
+        ? "停止在本站继续付款，已有支付链接可能仍有效，请勿继续支付；已扣款请查询付款状态。"
+        : "Stop paying for this order on this site. Existing payment links may still work; do not use them. If you have been charged, check the payment status."
+      : zh
+        ? "将向支付渠道确认关闭订单。如已付款，会先核对付款状态。"
+        : "The payment provider will confirm cancellation. If paid, its payment status will be checked first.";
     if (
       !(await confirm({
         title: zh ? "取消这笔付款订单？" : "Cancel this payment order?",
-        message: zh
-          ? "将向支付渠道确认关闭订单。如已付款，会先核对付款状态。"
-          : "The payment provider will confirm cancellation. If paid, its payment status will be checked first.",
+        message: cancellationMessage,
         confirmText: zh ? "确认取消订单" : "Confirm cancellation",
       }))
     )

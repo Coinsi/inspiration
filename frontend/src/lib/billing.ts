@@ -97,6 +97,7 @@ export interface PaymentOrder {
   refunded_minor: number;
   refund_allowed?: boolean;
   cancel_allowed?: boolean;
+  cancel_mode?: "local" | "provider";
   refunds: PaymentRefund[];
   user_id?: string;
   user_email?: string;

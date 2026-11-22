@@ -19,7 +19,14 @@ from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit
 from uuid import UUID
 
 from .easypay_http import normalize_api_base, request_json
-from .providers import Checkout, CheckoutRequest, PaymentEvidence, ProviderError, RefundEvidence
+from .providers import (
+    MAX_CHECKOUT_QR_BYTES,
+    Checkout,
+    CheckoutRequest,
+    PaymentEvidence,
+    ProviderError,
+    RefundEvidence,
+)
 
 _REQUIRED_CONFIG = {"api_base", "pid", "pkey", "payment_type", "payment_mode"}
 _OPTIONAL_CONFIG = {"channel_id", "refund_success_code"}
@@ -218,6 +225,12 @@ class EasyPayProvider:
             raise _error()
         if value.startswith("/"):
             value = urljoin(self._base + "/", value)
+        try:
+            size = len(value.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise _error() from None
+        if qr and size > MAX_CHECKOUT_QR_BYTES:
+            raise _error()
         if self._config["pkey"] in unquote(unquote(value)):
             raise ProviderError("易支付返回地址包含敏感配置，已拒绝展示")
         try:
@@ -238,6 +251,13 @@ class EasyPayProvider:
         ):
             return value
         raise ProviderError("易支付返回了不受支持的支付地址")
+
+    def _usable_entry(self, value: object, *, qr: bool) -> str | None:
+        # A malformed optional field must not hide another valid entry.
+        try:
+            return self._public_ref(value, qr=qr)
+        except ProviderError:
+            return None
 
     def create_checkout(self, order: CheckoutRequest) -> Checkout:
         reference = self._validate_order(order)
@@ -279,22 +299,24 @@ class EasyPayProvider:
         if _code(result.get("code")) != 1:
             raise _error()
         self._echoes(result, reference)
-        selected = (
-            result.get("payurl2")
-            if order.is_mobile and result.get("payurl2")
-            else result.get("payurl")
-        )
-        qr_payload = self._public_ref(result.get("qrcode"), qr=True)
+        qr_payload = self._usable_entry(_field(result, "qrcode"), qr=True)
         checkout_url = None
-        if selected:
+        link_fields = ("payurl2", "payurl") if order.is_mobile else ("payurl",)
+        for key in link_fields:
+            selected = _field(result, key)
             # Native app deep links can be scanned, but are never returned as
             # arbitrary browser navigation/external execution targets.
             if isinstance(selected, str) and selected.startswith(
                 ("weixin:", "wxp:", "alipays:", "alipay:")
             ):
-                qr_payload = self._public_ref(selected, qr=True)
+                native_entry = self._usable_entry(selected, qr=True)
+                if native_entry:
+                    qr_payload = native_entry
+                    break
             else:
-                checkout_url = self._public_ref(selected, qr=False)
+                checkout_url = self._usable_entry(selected, qr=False)
+                if checkout_url:
+                    break
         if not checkout_url and not qr_payload:
             raise _error()
         return Checkout(

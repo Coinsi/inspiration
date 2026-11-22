@@ -103,6 +103,13 @@ export function BillingOrderDetail({
                 : "Do not pay this expired order. If charged, check its payment status."}
             </p>
           )}
+          {order.status === "cancelled" && order.cancel_mode === "local" && (
+            <p>
+              {zh
+                ? "已停止在本站继续付款。已有支付链接可能仍有效，请勿继续支付；已扣款请查询付款结果。"
+                : "Payment on this site has stopped for this order. Existing payment links may still work; do not use them. If charged, check the payment status."}
+            </p>
+          )}
         </div>
       </div>
       {checkout && pending && remaining > 0 && (
@@ -134,10 +141,13 @@ export function BillingOrderDetail({
             <>
               <p>
                 {zh
-                  ? "付款入口暂不可用，可以重试获取原订单的付款入口。"
-                  : "Checkout is temporarily unavailable. Retry this order to get the payment link or QR code."}
+                  ? "暂未获取到付款入口，可重试获取原订单的付款入口。已扣款请先查询付款结果。"
+                  : "The payment link or QR code is not available yet. Retry this order; if you have been charged, check its payment status first."}
               </p>
-              {checkAction}
+              <div className="billing-actions">
+                {checkAction}
+                {children}
+              </div>
             </>
           )}
           {qr && (
@@ -263,10 +273,12 @@ export function BillingOrderDetail({
           ))}
         </section>
       )}
-      <div className="billing-actions">
-        {!retryEntry && checkAction}
-        {children}
-      </div>
+      {!retryEntry && (
+        <div className="billing-actions">
+          {checkAction}
+          {children}
+        </div>
+      )}
     </div>
   );
 }

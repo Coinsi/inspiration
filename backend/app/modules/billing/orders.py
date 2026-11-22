@@ -29,12 +29,20 @@ from app.models.billing import (
 )
 from app.models.identity import User
 from app.modules.billing import memberships, wallet
-from app.modules.billing.providers import CheckoutRequest, PaymentEvidence, get_provider
+from app.modules.billing.providers import (
+    MAX_CHECKOUT_QR_BYTES,
+    CheckoutRequest,
+    PaymentEvidence,
+    get_provider,
+)
 
 logger = logging.getLogger(__name__)
 MAX_ACTIVE_ORDERS = 5
 MAX_AMOUNT_MINOR = 10**9
 MAX_CONVERSION_RATE = Decimal("999999.999999")
+# Local cancellation cannot invalidate an EasyPay link. Keep a finite window
+# for late payment recovery, plus one final scan after downtime if necessary.
+EASYPAY_CANCEL_GRACE = timedelta(minutes=30)
 
 
 class PaymentQuoteChanged(Conflict):
@@ -269,7 +277,16 @@ def create_order(
     oid = order.id
     # Persist the server-priced order before making a request upstream.
     db.commit()
-    return ensure_checkout(db, oid)
+    order = ensure_checkout(db, oid)
+    if provider.kind == "easypay" and not order.provider_order_id:
+        order = find_order(db, oid, lock=True)
+        if order.status == "pending" and not order.provider_order_id:
+            # The first explicit recovery should not inherit the normal initial
+            # 15-second cooldown when the buyer has no way to pay. Subsequent
+            # checks still persist their regular throttle before any network I/O.
+            order.next_check_at = min(order.next_check_at, now() + timedelta(seconds=45))
+            db.flush()
+    return order
 
 
 def ensure_checkout(db: Session, order_id: uuid.UUID) -> BillingOrder:
@@ -385,23 +402,46 @@ def check_order(db: Session, order_id: uuid.UUID, *, worker: bool = False) -> Bi
         return fulfill_order(db, order_id)
     if order.status not in {"pending", "expired", "cancelled", "failed"}:
         return order
-    if worker and order.next_check_at > now():
+    moment = now()
+    provider = db.get(BillingProvider, order.provider_id)
+    local_cancelled = order.status == "cancelled" and provider.kind == "easypay"
+    cancel_deadline = order.expires_at + EASYPAY_CANCEL_GRACE
+    if worker and order.status == "cancelled":
+        if not local_cancelled or order.next_check_at > cancel_deadline:
+            return order
+    if worker and order.next_check_at > moment:
         return order
-    if not worker and order.next_check_at > now() + timedelta(seconds=45):
+    if local_cancelled and order.next_check_at == cancel_deadline and moment < cancel_deadline:
+        # A clamped final scan is due at the deadline, not repeatedly during
+        # the manual check's normal 45-second early window.
         return order
-    order.next_check_at = now() + timedelta(
-        minutes=60 if worker and order.expires_at < now() else 1
-    )
-    if order.status == "pending" and not order.provider_order_id and order.expires_at > now():
+    if not worker and order.next_check_at > moment + timedelta(seconds=45):
+        return order
+    if local_cancelled:
+        # next_check_at beyond the deadline is a durable final-scan marker.
+        # Persist it before querying, including when the provider is unavailable.
+        order.next_check_at = (
+            min(moment + timedelta(minutes=1), cancel_deadline)
+            if moment < cancel_deadline
+            else moment + timedelta(minutes=1)
+        )
+    else:
+        order.next_check_at = moment + timedelta(
+            minutes=60 if worker and order.expires_at < moment else 1
+        )
+    if order.status == "pending" and not order.provider_order_id and order.expires_at > moment:
         db.commit()
         order = ensure_checkout(db, order_id)
-        if not order.provider_order_id:
+        if not order.provider_order_id and provider.kind != "easypay":
             return order
+        # EasyPay may have accepted the original merchant UUID even when its
+        # checkout response was lost. Its authenticated query validates that
+        # merchant order, amount, currency, and trade number without a new order.
     provider_id = order.provider_id
-    adapter = provider_for(db.get(BillingProvider, provider_id))
     request = checkout_request(order)
     provider_reference = order.provider_order_id
     db.commit()
+    adapter = provider_for(provider)
     evidence = adapter.query_order(request, provider_reference)
     if evidence.order_id != str(order_id):
         raise Conflict("查询返回了不匹配的支付订单")
@@ -412,12 +452,26 @@ def cancel_order(db: Session, order_id: uuid.UUID, user_id: uuid.UUID) -> Billin
     order = find_order(db, order_id, user_id=user_id, lock=True)
     if order.status != "pending":
         return order
-    if not order.provider_order_id:
-        raise Conflict("正在确认支付渠道状态，请稍后查询订单")
     provider_id = order.provider_id
     provider = db.get(BillingProvider, provider_id)
     if provider.kind == "easypay":
-        raise CapabilityUnsupported("此易支付渠道请通过查询付款结果确认订单状态")
+        # EasyPay V1 has no authenticated close operation. Cancel only this
+        # site's checkout; callbacks and bounded queries can still confirm a
+        # payment made using an already issued link.
+        order.status = "cancelled"
+        order.next_check_at = min(now(), order.expires_at + EASYPAY_CANCEL_GRACE)
+        audit.record(
+            db,
+            action="billing.order_cancelled",
+            user_id=user_id,
+            target_type="billing_order",
+            target_id=order.id,
+            detail={"mode": "local"},
+        )
+        db.flush()
+        return order
+    if not order.provider_order_id:
+        raise Conflict("正在确认支付渠道状态，请稍后查询订单")
     adapter = provider_for(provider)
     request = checkout_request(order)
     reference = order.provider_order_id
@@ -443,7 +497,7 @@ def cancel_order(db: Session, order_id: uuid.UUID, user_id: uuid.UUID) -> Billin
 
 @lru_cache(maxsize=128)
 def qr_image(payload: str) -> str | None:
-    if not payload or len(payload.encode("utf-8")) > 1500:
+    if not payload or len(payload.encode("utf-8")) > MAX_CHECKOUT_QR_BYTES:
         return None
     import qrcode
 
@@ -499,10 +553,11 @@ def order_view(
         "paid_at": order.paid_at,
         "refunded_minor": order.refunded_minor,
         "cancel_allowed": (
-            order.status == "pending"
-            and bool(order.provider_order_id)
-            and provider.kind != "easypay"
+            not admin
+            and order.status == "pending"
+            and (provider.kind == "easypay" or bool(order.provider_order_id))
         ),
+        "cancel_mode": "local" if provider.kind == "easypay" else "provider",
         "refunds": [
             refund_view(
                 item,

@@ -12,7 +12,11 @@ from typing import Literal, Protocol
 
 from app.core.errors import ProviderError
 
+# QR paths are UTF-8 payloads; keep the limit below the encoder's byte capacity.
+MAX_CHECKOUT_QR_BYTES = 2048
+
 __all__ = [
+    "MAX_CHECKOUT_QR_BYTES",
     "Checkout",
     "CheckoutRequest",
     "PaymentEvidence",
