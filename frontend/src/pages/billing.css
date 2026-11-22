@@ -379,7 +379,7 @@
   font-size: 12px !important;
 }
 .billing-checkout {
-  margin-top: 22px;
+  margin-bottom: 24px;
   text-align: center;
   display: flex;
   flex-direction: column;

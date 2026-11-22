@@ -47,6 +47,16 @@ export function BillingOrderDetail({
         ? "已全额退款"
         : "Fully refunded"
       : paymentOrderLabel(order, zh);
+  const retryEntry = checkout && pending && remaining > 0 && !qr && !link;
+  let checkLabel = zh ? "查询付款结果" : "Check payment";
+  if (retryEntry) checkLabel = zh ? "重试获取付款入口" : "Retry payment entry";
+  if (busy) checkLabel = zh ? "查询中…" : "Checking…";
+  const checkAction = (
+    <Button variant="outline" disabled={busy} onClick={onCheck}>
+      <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
+      {checkLabel}
+    </Button>
+  );
   return (
     <div className="billing-order-detail">
       <div className={`billing-order-state is-${order.status}`} role="status">
@@ -70,9 +80,13 @@ export function BillingOrderDetail({
           )}
           {pending && (
             <p>
-              {zh
-                ? "付款完成后会自动更新，也可手动查询。"
-                : "The status updates after payment. You can also check manually."}
+              {checkout
+                ? zh
+                  ? "付款完成后会自动更新，也可手动查询。"
+                  : "The status updates after payment. You can also check manually."
+                : zh
+                  ? "付款人完成付款后，可查询最新状态。"
+                  : "Check the latest status after the buyer completes payment."}
             </p>
           )}
           {order.status === "failed" && (
@@ -91,6 +105,57 @@ export function BillingOrderDetail({
           )}
         </div>
       </div>
+      {checkout && pending && remaining > 0 && (
+        <div className="billing-checkout">
+          {qr && (
+            <img
+              className="billing-qr"
+              src={qr}
+              alt={zh ? "此订单的付款二维码" : "Payment QR code for this order"}
+            />
+          )}
+          <p>
+            {zh ? "剩余付款时间 " : "Time remaining "}
+            {Math.floor(remaining / 60)}:
+            {String(remaining % 60).padStart(2, "0")}
+          </p>
+          {link && (
+            <a
+              className="billing-checkout-link"
+              href={link}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {zh ? "打开收银台" : "Open checkout"}
+              <ExternalLink size={16} />
+            </a>
+          )}
+          {retryEntry && (
+            <>
+              <p>
+                {zh
+                  ? "付款入口暂不可用，可以重试获取原订单的付款入口。"
+                  : "Checkout is temporarily unavailable. Retry this order to get the payment link or QR code."}
+              </p>
+              {checkAction}
+            </>
+          )}
+          {qr && (
+            <p>
+              {zh
+                ? "使用对应支付应用扫描二维码"
+                : "Scan with the selected payment app"}
+            </p>
+          )}
+        </div>
+      )}
+      {checkout && pending && remaining === 0 && (
+        <p className="billing-notice">
+          {zh
+            ? "付款时间已结束，请勿继续支付。可查询订单确认最终结果。"
+            : "The payment window has ended. Do not pay this order; check its final status."}
+        </p>
+      )}
       <dl className="billing-details">
         <div>
           <dt>
@@ -177,54 +242,6 @@ export function BillingOrderDetail({
           <dd className="billing-id">{order.id}</dd>
         </div>
       </dl>
-      {checkout && pending && remaining > 0 && (
-        <div className="billing-checkout">
-          {qr && (
-            <img
-              className="billing-qr"
-              src={qr}
-              alt={zh ? "此订单的付款二维码" : "Payment QR code for this order"}
-            />
-          )}
-          <p>
-            {zh ? "剩余付款时间 " : "Time remaining "}
-            {Math.floor(remaining / 60)}:
-            {String(remaining % 60).padStart(2, "0")}
-          </p>
-          {link && (
-            <a
-              className="billing-checkout-link"
-              href={link}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {zh ? "打开收银台" : "Open checkout"}
-              <ExternalLink size={16} />
-            </a>
-          )}
-          {!qr && !link && (
-            <p>
-              {zh
-                ? "付款入口暂不可用，请查询订单状态或稍后重试。"
-                : "Checkout is temporarily unavailable. Check the order or try again later."}
-            </p>
-          )}
-          {qr && (
-            <p>
-              {zh
-                ? "使用对应支付应用扫描二维码"
-                : "Scan with the selected payment app"}
-            </p>
-          )}
-        </div>
-      )}
-      {checkout && pending && remaining === 0 && (
-        <p className="billing-notice">
-          {zh
-            ? "付款时间已结束，请勿继续支付。可查询订单确认最终结果。"
-            : "The payment window has ended. Do not pay this order; check its final status."}
-        </p>
-      )}
       {!!order.refunded_minor && (
         <p className="billing-muted">
           {zh ? "累计已退款：" : "Total refunded: "}
@@ -247,16 +264,7 @@ export function BillingOrderDetail({
         </section>
       )}
       <div className="billing-actions">
-        <Button variant="outline" disabled={busy} onClick={onCheck}>
-          <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
-          {busy
-            ? zh
-              ? "查询中…"
-              : "Checking…"
-            : zh
-              ? "查询付款结果"
-              : "Check payment"}
-        </Button>
+        {!retryEntry && checkAction}
         {children}
       </div>
     </div>

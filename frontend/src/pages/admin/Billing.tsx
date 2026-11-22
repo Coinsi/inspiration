@@ -64,10 +64,10 @@ export default function AdminBilling() {
         <Link to="/admin">返回管理概览</Link>
       </div>
     );
-  return <BillingManager />;
+  return <BillingManager viewerId={me.user.id} />;
 }
 
-function BillingManager() {
+function BillingManager({ viewerId }: { viewerId: string }) {
   const [tab, setTab] = useState<Tab>("orders");
   const [editPack, setEditPack] = useState<CreditPack | "new" | null>(null);
   const [editProvider, setEditProvider] = useState<
@@ -563,6 +563,24 @@ function BillingManager() {
             <p className="billing-muted billing-order-user">
               用户：{order.user_email || order.user_id}
             </p>
+            {order.status === "pending" &&
+              Date.parse(order.expires_at) > Date.now() && (
+                <div className="billing-notice mb-4 flex flex-wrap items-center justify-between gap-3">
+                  {order.user_id === viewerId ? (
+                    <>
+                      <p>请在个人订单页完成付款。</p>
+                      <Link
+                        className="billing-checkout-link"
+                        to={`/billing?section=orders&order=${encodeURIComponent(order.id)}`}
+                      >
+                        前往付款
+                      </Link>
+                    </>
+                  ) : (
+                    <p>请让下单用户在「我的积分 → 订单记录」打开此订单并付款。</p>
+                  )}
+                </div>
+              )}
             <BillingOrderDetail
               order={order}
               busy={busy}

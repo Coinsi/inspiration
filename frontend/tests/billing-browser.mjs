@@ -109,6 +109,7 @@ async function fixture({
       },
     ],
     orders: [structuredClone(orderBase)],
+    recoverCheckout: false,
     available: 12000,
     failCreate: false,
     failRefund: false,
@@ -271,7 +272,9 @@ async function fixture({
           404,
         );
       if (userOrder[2] === "check") {
-        order.status = "paid";
+        if (state.recoverCheckout)
+          order.checkout_url = "https://checkout.example.test/recovered";
+        else order.status = "paid";
         return send(order);
       }
       if (userOrder[2] === "cancel") {
@@ -809,6 +812,50 @@ try {
     "admin pack decimal conversions, provider secrets clear after save, settings save, refund retry idempotency",
   );
   await admin.context.close();
+
+  const pendingOrders = await fixture({ width: 390, theme: "light" });
+  const ownPending = {
+    ...orderBase,
+    id: "owner-pending-order",
+    pack_name: "本人待付款积分包",
+    status: "pending",
+    paid_at: null,
+  };
+  pendingOrders.state.orders = [
+    ownPending,
+    {
+      ...ownPending,
+      id: "other-pending-order",
+      pack_name: "其他用户的积分包",
+      user_id: "different-user",
+      checkout_url: "https://checkout.example.test/another-user",
+    },
+  ];
+  pendingOrders.state.recoverCheckout = true;
+  await pendingOrders.page.goto(`${base}/admin/billing`);
+  const openPending = (name) => pendingOrders.page
+    .getByRole("row").filter({ hasText: name })
+    .getByRole("button", { name: "查看订单" }).click();
+  await openPending("其他用户的积分包");
+  const adminDetail = pendingOrders.page.getByRole("dialog", { name: "付款订单" });
+  await adminDetail.getByText(/请让下单用户/).waitFor();
+  assert.equal(await adminDetail.getByRole("link", { name: /前往付款|打开收银台/ }).count(), 0);
+  await adminDetail.getByRole("button", { name: "关闭", exact: true }).click();
+  await openPending(ownPending.pack_name);
+  await screenshot(pendingOrders.page, "admin-open-own-payment");
+  await adminDetail.getByRole("link", { name: "前往付款", exact: true }).click();
+  assert.match(pendingOrders.page.url(), /\/billing\?section=orders&order=owner-pending-order$/);
+  const ownerDetail = pendingOrders.page.getByRole("dialog", { name: "订单详情" });
+  await ownerDetail.getByRole("button", { name: "重试获取付款入口", exact: true }).click();
+  const cashier = ownerDetail.getByRole("link", { name: "打开收银台" });
+  assert.equal(await cashier.getAttribute("href"), "https://checkout.example.test/recovered");
+  const cashierBounds = await cashier.boundingBox();
+  const orderInfoBounds = await ownerDetail.locator(".billing-details").boundingBox();
+  assert.ok(cashierBounds.y < orderInfoBounds.y, "cashier link must precede order metadata");
+  assert.equal(pendingOrders.createBodies.length, 0);
+  await screenshot(pendingOrders.page, "buyer-recovered-checkout");
+  await pendingOrders.context.close();
+  checks.push("admin offers a payment link only on the admin's own pending order; buyer can retry the existing order and see the cashier before metadata");
 
   const initialSetup = await fixture({ enabled: false });
   initialSetup.state.settings.public_origin = "";
