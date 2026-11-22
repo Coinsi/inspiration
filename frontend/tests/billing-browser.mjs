@@ -1171,11 +1171,20 @@ try {
     structuredClone(planBase),
     {
       ...planBase,
+      id: "usd-monthly",
+      name: "月度创作",
+      currency: "usd",
+      amount_minor: 2490,
+      original_amount_minor: null,
+    },
+    {
+      ...planBase,
       id: "annual-starter",
       name: "年度创作",
+      monthly_plan_id: "usd-monthly",
       currency: "usd",
       duration: 12,
-      amount_minor: 23880,
+      amount_minor: 23904,
       original_amount_minor: null,
       credits: 360000,
     },
@@ -1204,7 +1213,10 @@ try {
     .getByRole("dialog", { name: "确认付款", exact: true })
     .waitFor();
   assert.match(
-    await member.page.getByRole("dialog").locator(".billing-details").innerText(),
+    await member.page
+      .getByRole("dialog")
+      .locator(".billing-details")
+      .innerText(),
     /30 天/,
   );
   assert.equal(
@@ -1214,6 +1226,19 @@ try {
   );
   await member.page.getByRole("button", { name: "关闭", exact: true }).click();
   await member.page.getByRole("button", { name: "年付", exact: true }).click();
+  await member.page.getByText("比月付省 20%", { exact: true }).waitFor();
+  assert.match(
+    await member.page.locator(".billing-plan-price").innerText(),
+    /239\.04/,
+  );
+  assert.match(
+    await member.page.locator(".billing-plan-pricing-note").innerText(),
+    /19\.92/,
+  );
+  assert.match(
+    await member.page.locator(".billing-plan-pricing-note").innerText(),
+    /一次支付/,
+  );
   await member.page
     .getByRole("button", { name: "选择套餐 年度创作", exact: true })
     .click();
@@ -1226,7 +1251,7 @@ try {
       .getByRole("dialog")
       .locator(".billing-purchase-total")
       .innerText(),
-    /238\.80/,
+    /239\.04/,
   );
   assert.match(
     await member.page
@@ -1448,7 +1473,7 @@ try {
     .getByText("当前展示示例套餐，仅供预览，不可购买。", { exact: true })
     .waitFor();
   await preview.page
-    .getByRole("button", { name: "查看套餐 基础会员", exact: true })
+    .getByRole("button", { name: "查看套餐 创作会员", exact: true })
     .click();
   await preview.page
     .getByRole("dialog", { name: "套餐预览", exact: true })
@@ -1480,6 +1505,51 @@ try {
     .last()
     .click();
   await screenshot(preview.page, "admin-preview-samples-phone-light");
+  await preview.page.setViewportSize({ width: 1440, height: 900 });
+  await preview.page.evaluate(() => window.scrollTo(0, 0));
+  await screenshot(preview.page, "monthly-preview-desktop-light");
+  assert.equal(await preview.page.locator(".billing-plan-saving").count(), 0);
+  await preview.page.getByRole("button", { name: "年付", exact: true }).click();
+  const annualCards = preview.page.locator(".billing-plan-card");
+  assert.equal(await annualCards.count(), 2);
+  assert.match(
+    await annualCards.first().locator(".billing-plan-price").innerText(),
+    /192\.00/,
+  );
+  assert.match(
+    await annualCards.first().locator(".billing-plan-pricing-note").innerText(),
+    /16\.00/,
+  );
+  assert.equal(
+    await preview.page.getByText("比月付省 20%", { exact: true }).count(),
+    2,
+  );
+  await preview.page
+    .getByRole("group", { name: "付款周期", exact: true })
+    .scrollIntoViewIfNeeded();
+  await screenshot(preview.page, "annual-preview-desktop-light");
+  await preview.page.setViewportSize({ width: 390, height: 844 });
+  await preview.page
+    .getByRole("group", { name: "付款周期", exact: true })
+    .scrollIntoViewIfNeeded();
+  await screenshot(preview.page, "annual-preview-phone-light");
+  await preview.page
+    .getByRole("button", { name: "查看套餐 创作会员", exact: true })
+    .click();
+  await preview.page
+    .getByRole("dialog", { name: "套餐预览", exact: true })
+    .waitFor();
+  assert.match(await preview.page.getByRole("dialog").innerText(), /192\.00/);
+  assert.match(
+    await preview.page.getByRole("dialog").innerText(),
+    /积分整期一次发放/,
+  );
+  await screenshot(preview.page, "annual-confirmation-phone-light");
+  await preview.page
+    .getByRole("dialog")
+    .getByRole("button", { name: "关闭", exact: true })
+    .last()
+    .click();
   preview.state.plans = [
     { ...planBase, id: "real-draft", name: "后台草稿会员", active: false },
   ];
@@ -1498,6 +1568,66 @@ try {
     false,
   );
   await preview.context.close();
+
+  const annualNoSaving = await fixture({ width: 360, height: 800, lang: "en" });
+  annualNoSaving.state.plans = [
+    {
+      ...planBase,
+      id: "jpy-month",
+      name: "Creator monthly",
+      currency: "jpy",
+      amount_minor: 1200,
+      original_amount_minor: null,
+    },
+    {
+      ...planBase,
+      id: "jpy-year",
+      name: "Creator annual",
+      currency: "jpy",
+      duration: 12,
+      amount_minor: 15000,
+      original_amount_minor: 18000,
+      credits: 360000,
+      monthly_plan_id: "jpy-month",
+    },
+  ];
+  await annualNoSaving.page.goto(`${base}/billing`);
+  await annualNoSaving.page
+    .getByRole("button", { name: "Yearly", exact: true })
+    .click();
+  assert.equal(
+    await annualNoSaving.page.locator(".billing-plan-saving").count(),
+    0,
+    "a higher annual price must not advertise savings",
+  );
+  assert.match(
+    await annualNoSaving.page.locator(".billing-plan-pricing-note").innerText(),
+    /1,250/,
+  );
+  await annualNoSaving.page
+    .getByRole("group", { name: "Payment term", exact: true })
+    .scrollIntoViewIfNeeded();
+  await screenshot(annualNoSaving.page, "annual-no-saving-360-english-dark");
+  annualNoSaving.state.plans[1].monthly_plan_id = null;
+  await annualNoSaving.page.reload();
+  await annualNoSaving.page
+    .getByRole("button", { name: "Yearly", exact: true })
+    .click();
+  assert.equal(
+    await annualNoSaving.page.locator(".billing-plan-saving").count(),
+    0,
+    "unlinked annual plans must not invent a monthly discount",
+  );
+  assert.equal(
+    await annualNoSaving.page.locator("del").count(),
+    1,
+    "independent reference pricing remains available",
+  );
+  assert.equal(annualNoSaving.createBodies.length, 0);
+  await annualNoSaving.context.close();
+  checks.push(
+    "annual total remains primary, valid monthly comparison shows accurate savings and monthly equivalent, no savings for higher or unlinked prices, reference price retained, one-time term grant explained; desktop/390px/360px-English captured",
+  );
 
   const failedPreview = await fixture();
   failedPreview.state.previewStatus = 403;
@@ -1662,6 +1792,178 @@ try {
   await planAdmin.context.close();
   checks.push(
     "admin membership plan validation, save failure retains all fields, decimal units, create/edit/reload/unpublish, membership inspection and full-only refund",
+  );
+
+  const annualAdmin = await fixture({
+    width: 390,
+    height: 844,
+    theme: "light",
+  });
+  const monthlyDraft = {
+    ...planBase,
+    id: "monthly-usd-draft",
+    name: "美元月付草稿",
+    currency: "usd",
+    amount_minor: 1990,
+    original_amount_minor: null,
+    active: false,
+  };
+  annualAdmin.state.plans = [
+    monthlyDraft,
+    { ...planBase, name: "人民币月付" },
+    { ...monthlyDraft, id: "too-large", name: "高额度月付", credits: 40000 },
+    { ...monthlyDraft, id: "three-months", name: "季度套餐", duration: 3 },
+  ];
+  await annualAdmin.page.goto(`${base}/admin/billing`);
+  await annualAdmin.page
+    .getByRole("button", { name: "会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("button", { name: "新建会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByLabel("套餐名称", { exact: true })
+    .fill("对照年付套餐");
+  await annualAdmin.page.getByLabel("售价", { exact: true }).fill("199.00");
+  await annualAdmin.page.getByLabel("期限", { exact: true }).fill("12");
+  await annualAdmin.page
+    .getByLabel("期内积分额度", { exact: false })
+    .fill("3600");
+  await annualAdmin.page
+    .getByRole("button", { name: "对照月付套餐", exact: true })
+    .click();
+  for (const excluded of ["人民币月付", "高额度月付", "季度套餐"]) {
+    assert.equal(
+      await annualAdmin.page
+        .getByRole("option", { name: new RegExp(excluded) })
+        .count(),
+      0,
+    );
+  }
+  await annualAdmin.page.getByRole("option", { name: /美元月付草稿/ }).click();
+  assert.match(
+    await annualAdmin.page.getByText(/月付 12 期合计/).innerText(),
+    /238\.80/,
+  );
+  assert.match(
+    await annualAdmin.page.getByText(/相比月付 12 期节省/).innerText(),
+    /39\.80/,
+  );
+  assert.equal(
+    await annualAdmin.page.getByLabel("售价", { exact: true }).inputValue(),
+    "199.00",
+  );
+  assert.equal(
+    await annualAdmin.page.getByLabel("原价（可选）", { exact: false }).count(),
+    0,
+  );
+  await annualAdmin.page
+    .getByText(/相比月付 12 期节省/)
+    .scrollIntoViewIfNeeded();
+  await screenshot(
+    annualAdmin.page,
+    "admin-annual-monthly-comparison-phone-light",
+  );
+  await annualAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("button", { name: "编辑会员套餐 对照年付套餐", exact: true })
+    .waitFor();
+  assert.equal(
+    annualAdmin.state.planBodies.at(-1).monthly_plan_id,
+    monthlyDraft.id,
+  );
+  assert.equal(annualAdmin.state.planBodies.at(-1).original_amount_minor, null);
+  assert.equal(annualAdmin.state.planBodies.at(-1).amount_minor, 19900);
+
+  await annualAdmin.page.reload();
+  await annualAdmin.page
+    .getByRole("button", { name: "会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("button", { name: "编辑会员套餐 对照年付套餐", exact: true })
+    .click();
+  assert.match(
+    await annualAdmin.page
+      .getByRole("button", { name: "对照月付套餐", exact: true })
+      .innerText(),
+    /美元月付草稿/,
+  );
+  await annualAdmin.page
+    .getByLabel("期内积分额度", { exact: false })
+    .fill("3599.99");
+  await annualAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("alert")
+    .filter({ hasText: "对照月付套餐不匹配" })
+    .waitFor();
+  assert.equal(annualAdmin.state.planBodies.length, 1);
+  await annualAdmin.page
+    .getByLabel("期内积分额度", { exact: false })
+    .fill("3600");
+  await annualAdmin.page
+    .getByRole("button", { name: "期限单位", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("option", { name: "天", exact: true })
+    .click();
+  await annualAdmin.page.getByLabel("期限", { exact: true }).fill("365");
+  await annualAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("alert")
+    .filter({ hasText: "对照月付套餐不匹配" })
+    .waitFor();
+  assert.equal(annualAdmin.state.planBodies.length, 1);
+  await annualAdmin.page.getByLabel("期限", { exact: true }).fill("360");
+  assert.match(
+    await annualAdmin.page.getByText(/月付 12 期合计/).innerText(),
+    /238\.80/,
+  );
+  await annualAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("button", { name: "编辑会员套餐 对照年付套餐", exact: true })
+    .waitFor();
+  assert.equal(annualAdmin.state.planBodies.at(-1).duration, 360);
+  assert.equal(annualAdmin.state.planBodies.at(-1).duration_unit, "day");
+  assert.equal(
+    annualAdmin.state.planBodies.at(-1).monthly_plan_id,
+    monthlyDraft.id,
+  );
+  await annualAdmin.page
+    .getByRole("button", { name: "编辑会员套餐 对照年付套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("button", { name: "对照月付套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("option", { name: "独立设置参考价", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByLabel("原价（可选）", { exact: false })
+    .fill("299.00");
+  await annualAdmin.page.getByLabel("期限", { exact: true }).fill("365");
+  await annualAdmin.page
+    .getByRole("button", { name: "保存会员套餐", exact: true })
+    .click();
+  await annualAdmin.page
+    .getByRole("button", { name: "编辑会员套餐 对照年付套餐", exact: true })
+    .waitFor();
+  assert.equal(annualAdmin.state.planBodies.at(-1).monthly_plan_id, null);
+  assert.equal(
+    annualAdmin.state.planBodies.at(-1).original_amount_minor,
+    29900,
+  );
+  assert.equal(annualAdmin.state.planBodies.at(-1).amount_minor, 19900);
+  await annualAdmin.context.close();
+  checks.push(
+    "annual admin comparison accepts same-currency eligible monthly drafts, preserves actual price, persists linking on reload, blocks mismatched allowance/term and supports independent reference prices",
   );
 
   const denied = await fixture({ role: "admin" });

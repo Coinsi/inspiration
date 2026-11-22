@@ -60,8 +60,13 @@ test("only an authorized empty list yields unpublished USD monthly and annual ex
   assert.equal(result.plans.length, 4);
   assert.deepEqual(
     result.plans.map((plan) => [plan.amount_minor, plan.duration]),
-    [[1990, 1], [3990, 1], [23880, 12], [47880, 12]],
+    [[2000, 1], [4000, 1], [19200, 12], [38400, 12]],
   );
+  const [creatorMonthly, plusMonthly, creatorAnnual, plusAnnual] = result.plans;
+  assert.equal(creatorAnnual.monthly_plan_id, creatorMonthly.id);
+  assert.equal(plusAnnual.monthly_plan_id, plusMonthly.id);
+  assert.equal(creatorAnnual.credits, creatorMonthly.credits * 12);
+  assert.equal(plusAnnual.credits, plusMonthly.credits * 12);
   assert.ok(result.plans.every((plan) => plan.currency === "usd" && !plan.active));
   assert.ok(result.plans.every((plan) => plan.duration_unit === "month"));
   assert.ok(result.plans.every((plan) => plan.id.startsWith("preview-")));

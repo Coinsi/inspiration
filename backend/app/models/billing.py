@@ -78,6 +78,9 @@ class MembershipPlan(Base, TimestampMixin):
     credits: Mapped[int] = mapped_column(BigInteger)
     duration: Mapped[int] = mapped_column(Integer)
     duration_unit: Mapped[str] = mapped_column(String(8))
+    monthly_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("membership_plan.id"), index=True
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -94,6 +97,10 @@ class MembershipPlan(Base, TimestampMixin):
             name="ck_membership_plan_duration",
         ),
         CheckConstraint("jsonb_typeof(features) = 'array'", name="ck_membership_plan_features"),
+        CheckConstraint(
+            "monthly_plan_id is null or monthly_plan_id <> id",
+            name="ck_membership_plan_monthly_link",
+        ),
         Index("ix_membership_plan_catalog", "active", "sort_order"),
     )
 

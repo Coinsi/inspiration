@@ -11,6 +11,7 @@ export interface CreditPack {
 export interface MembershipPlan extends CreditPack {
   features: string[];
   original_amount_minor: number | null;
+  monthly_plan_id?: string | null;
   duration: number;
   duration_unit: "day" | "week" | "month";
   sort_order: number;
@@ -232,8 +233,12 @@ export function membershipDuration(
   return `${duration} ${unit}${duration === 1 ? "" : "s"}`;
 }
 
+export function membershipTermDays(plan: Pick<MembershipPlan, "duration" | "duration_unit">) {
+  return plan.duration * { day: 1, week: 7, month: 30 }[plan.duration_unit];
+}
+
 export function membershipPeriod(plan: Pick<MembershipPlan, "duration" | "duration_unit">) {
-  const days = plan.duration * { day: 1, week: 7, month: 30 }[plan.duration_unit];
+  const days = membershipTermDays(plan);
   if (days === 30) return "monthly";
   if (days === 360 || days === 365 || days === 366) return "yearly";
   return "other";
@@ -245,6 +250,29 @@ export function membershipPurchaseDuration(
 ) {
   if (membershipPeriod(plan) === "monthly") return zh ? "30 天" : "30 days";
   return membershipDuration(plan, zh);
+}
+
+export function membershipAnnualPricing(
+  annual: MembershipPlan,
+  plans: readonly MembershipPlan[],
+  includeInactive = false,
+): { monthlyEquivalentMinor: number | null; savingsPercent: number | null; monthlyYearMinor: number | null } | null {
+  if (membershipTermDays(annual) !== 30 * 12) return null;
+  const monthly = plans.find((plan) => plan.id === annual.monthly_plan_id);
+  const monthlyYearMinor =
+    monthly && (monthly.active || includeInactive) &&
+    membershipTermDays(monthly) === 30 && monthly.currency === annual.currency &&
+    annual.credits >= monthly.credits * 12
+      ? monthly.amount_minor * 12
+      : null;
+  const savingsPercent = monthlyYearMinor && monthlyYearMinor > annual.amount_minor
+    ? Math.floor(((monthlyYearMinor - annual.amount_minor) * 100) / monthlyYearMinor)
+    : null;
+  return {
+    monthlyEquivalentMinor: Math.round(annual.amount_minor / 12) || null,
+    savingsPercent: savingsPercent || null,
+    monthlyYearMinor,
+  };
 }
 
 export function paymentOrderLabel(order: PaymentOrder, zh = true) {

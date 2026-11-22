@@ -629,31 +629,33 @@ export default function Billing() {
               ? previewAllowed && !!planPreview.data
               : catalog.data?.enabled) && (
               <section className="billing-section billing-purchase-section">
-                {!preview && <nav
-                  className="billing-tabs"
-                  aria-label={zh ? "购买类型" : "Purchase type"}
-                >
-                  {(["membership", "credits"] as const).map((value) => (
-                    <button
-                      key={value}
-                      disabled={busy}
-                      aria-current={kind === value ? "page" : undefined}
-                      onClick={() => {
-                        setPurchaseKind(value);
-                        setProvider("");
-                        setError("");
-                      }}
-                    >
-                      {value === "membership"
-                        ? zh
-                          ? "会员套餐"
-                          : "Memberships"
-                        : zh
-                          ? "积分包"
-                          : "Points packs"}
-                    </button>
-                  ))}
-                </nav>}
+                {!preview && (
+                  <nav
+                    className="billing-tabs"
+                    aria-label={zh ? "购买类型" : "Purchase type"}
+                  >
+                    {(["membership", "credits"] as const).map((value) => (
+                      <button
+                        key={value}
+                        disabled={busy}
+                        aria-current={kind === value ? "page" : undefined}
+                        onClick={() => {
+                          setPurchaseKind(value);
+                          setProvider("");
+                          setError("");
+                        }}
+                      >
+                        {value === "membership"
+                          ? zh
+                            ? "会员套餐"
+                            : "Memberships"
+                          : zh
+                            ? "积分包"
+                            : "Points packs"}
+                      </button>
+                    ))}
+                  </nav>
+                )}
                 {kind === "membership" && (
                   <p className="billing-muted billing-membership-note">
                     {zh
@@ -894,8 +896,8 @@ export default function Billing() {
             </dl>
             <p className="billing-muted">
               {zh
-                ? "每期单独付款。续购同一套餐时，下一期从当前到期日开始。"
-                : "Each term is purchased separately. Renewing the same plan starts the next term when the current one ends."}
+                ? "一次支付本期费用，积分整期一次发放，到期失效。续购同一套餐时，下一期从当前到期日开始。"
+                : "Pay for the full term once. All term points are granted together and expire at the end of the term. Renewing the same plan starts the next term when the current one ends."}
             </p>
             {preview ? (
               <div className="billing-actions">

@@ -24,6 +24,7 @@ const {
   providerConfigDefaults,
   paymentOrderLabel,
   membershipDuration,
+  membershipAnnualPricing,
   membershipPeriod,
   membershipLabel,
 } = await import(
@@ -37,6 +38,33 @@ test("membership period groups the configured term and preserves other durations
   assert.equal(membershipPeriod({ duration: 365, duration_unit: "day" }), "yearly");
   assert.equal(membershipPeriod({ duration: 2, duration_unit: "week" }), "other");
   assert.equal(membershipPeriod({ duration: 3, duration_unit: "month" }), "other");
+});
+
+test("annual savings use a linked and comparable monthly offer", () => {
+  const monthly = { id: "monthly", active: true, currency: "usd", duration: 1,
+    duration_unit: "month", credits: 60000, amount_minor: 2000 };
+  const annual = { ...monthly, id: "annual", duration: 12, monthly_plan_id: monthly.id,
+    credits: 720000, amount_minor: 19200 };
+  assert.deepEqual(membershipAnnualPricing(annual, [monthly]), {
+    monthlyEquivalentMinor: 1600,
+    savingsPercent: 20,
+    monthlyYearMinor: 24000,
+  });
+  for (const invalid of [
+    { ...monthly, duration: 2 },
+    { ...monthly, currency: "cny" },
+    { ...monthly, active: false },
+    { ...monthly, credits: 60001 },
+    { ...monthly, id: "unlinked" },
+  ]) {
+    assert.deepEqual(membershipAnnualPricing(annual, [invalid]), {
+      monthlyEquivalentMinor: 1600, savingsPercent: null, monthlyYearMinor: null,
+    });
+  }
+  assert.equal(membershipAnnualPricing(annual, [{ ...monthly, active: false }], true).savingsPercent, 20);
+  assert.equal(membershipAnnualPricing({ ...annual, amount_minor: 24000 }, [monthly]).savingsPercent, null);
+  assert.equal(membershipAnnualPricing({ ...annual, amount_minor: 23900 }, [monthly]).savingsPercent, null);
+  assert.equal(membershipAnnualPricing({ ...annual, duration: 365, duration_unit: "day" }, [monthly]), null);
 });
 
 test("provider defaults retain numeric zero and only apply to the selected provider", () => {

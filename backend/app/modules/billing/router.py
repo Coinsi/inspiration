@@ -76,6 +76,7 @@ class PlanIn(PackIn):
     duration: int = Field(strict=True, ge=1, le=3650)
     duration_unit: Literal["day", "week", "month"] = "month"
     sort_order: int = Field(default=0, strict=True, ge=-10_000, le=10_000)
+    monthly_plan_id: uuid.UUID | None = None
 
 
 class ProviderIn(Input):
@@ -140,14 +141,35 @@ def _plan_view(plan: MembershipPlan) -> dict:
         "duration": plan.duration,
         "duration_unit": plan.duration_unit,
         "sort_order": plan.sort_order,
+        "monthly_plan_id": plan.monthly_plan_id,
     }
 
 
-def _plan_values(data: PlanIn) -> dict:
-    memberships.duration_days(data.duration, data.duration_unit)
+def _plan_values(data: PlanIn, db: Session, current: MembershipPlan | None = None) -> dict:
+    days = memberships.duration_days(data.duration, data.duration_unit)
     if data.original_amount_minor is not None and data.original_amount_minor < data.amount_minor:
         raise CapabilityUnsupported("参考价格不能低于售价")
-    return data.model_dump()
+    values = data.model_dump()
+    # Legacy clients send a full plan payload without this newer optional field.
+    # Only an explicit null clears a saved comparison link.
+    if current is not None and "monthly_plan_id" not in data.model_fields_set:
+        values["monthly_plan_id"] = current.monthly_plan_id
+    monthly_id = values["monthly_plan_id"]
+    if monthly_id is not None:
+        if current is not None and monthly_id == current.id:
+            raise CapabilityUnsupported("会员套餐不能关联自身作为月付方案")
+        if days != 360:
+            raise CapabilityUnsupported("仅360天的年付方案可以关联月付方案")
+        monthly = db.get(MembershipPlan, monthly_id)
+        if monthly is None:
+            raise NotFound("关联的月付方案不存在")
+        if memberships.duration_days(monthly.duration, monthly.duration_unit) != 30:
+            raise CapabilityUnsupported("关联的月付方案有效期必须为30天")
+        if monthly.currency != data.currency:
+            raise CapabilityUnsupported("年付与月付方案必须使用相同币种")
+        if data.credits < monthly.credits * 12:
+            raise CapabilityUnsupported("年付额度不能少于月付额度的12倍")
+    return values
 
 
 def _provider_view(provider: BillingProvider) -> dict:
@@ -421,7 +443,7 @@ def list_plans(db: DB, _: Super):
 
 @router.post("/admin/billing/plans")
 def create_plan(data: PlanIn, db: DB, user: Super):
-    row = MembershipPlan(**_plan_values(data))
+    row = MembershipPlan(**_plan_values(data, db))
     db.add(row)
     db.flush()
     _audit(db, user, "billing.plan_created", row.id)
@@ -433,7 +455,7 @@ def update_plan(plan_id: uuid.UUID, data: PlanIn, db: DB, user: Super):
     row = db.get(MembershipPlan, plan_id)
     if row is None:
         raise NotFound("会员套餐不存在")
-    for key, value in _plan_values(data).items():
+    for key, value in _plan_values(data, db, row).items():
         setattr(row, key, value)
     _audit(db, user, "billing.plan_updated", row.id)
     return _plan_view(row)

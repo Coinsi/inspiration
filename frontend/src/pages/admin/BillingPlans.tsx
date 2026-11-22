@@ -8,6 +8,7 @@ import {
   currencyDecimals,
   decimalAmount,
   membershipDuration,
+  membershipTermDays,
   money,
   parseMinor,
   points,
@@ -169,6 +170,7 @@ export function BillingPlans() {
         {edit && (
           <PlanForm
             initial={edit === "new" ? null : edit}
+            plans={plans.data ?? []}
             onSaved={saved}
             onBusy={setBusy}
           />
@@ -180,10 +182,12 @@ export function BillingPlans() {
 
 function PlanForm({
   initial,
+  plans,
   onSaved,
   onBusy,
 }: {
   initial: MembershipPlan | null;
+  plans: MembershipPlan[];
   onSaved: () => Promise<void>;
   onBusy: (busy: boolean) => void;
 }) {
@@ -213,13 +217,30 @@ function PlanForm({
   );
   const [sort, setSort] = useState(String(initial?.sort_order ?? 0));
   const [active, setActive] = useState(initial?.active ?? false);
+  const [monthlyPlanId, setMonthlyPlanId] = useState(initial?.monthly_plan_id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const currentPrice = parseMinor(amount, currencyDecimals(currency));
+  const currentAllowance = parseMinor(credits);
+  const isAnnual =
+    /^\d+$/.test(duration) &&
+    membershipTermDays({ duration: Number(duration), duration_unit: unit }) === 360;
+  const monthlyPlans = plans.filter(
+    (plan) =>
+      plan.id !== initial?.id &&
+      isAnnual &&
+      plan.currency === currency &&
+      membershipTermDays(plan) === 30 &&
+      currentAllowance != null &&
+      currentAllowance >= plan.credits * 12,
+  );
+  const monthlyPlan = monthlyPlans.find((plan) => plan.id === monthlyPlanId);
+  const monthlyTotal = monthlyPlan ? monthlyPlan.amount_minor * 12 : null;
 
   async function save() {
     if (busy) return;
     const price = parseMinor(amount, currencyDecimals(currency));
-    const originalPrice = original.trim()
+    const originalPrice = !monthlyPlanId && original.trim()
       ? parseMinor(original, currencyDecimals(currency))
       : null;
     const allowance = parseMinor(credits);
@@ -235,6 +256,7 @@ function PlanForm({
       validation =
         "请输入有效售价和期内额度。日元仅支持整数，其他金额与积分最多两位小数。";
     else if (
+      !monthlyPlanId &&
       original.trim() &&
       (!originalPrice || originalPrice < price || originalPrice > 1e9)
     )
@@ -254,6 +276,8 @@ function PlanForm({
       validation = "排序需为 -10000 到 10000 的整数。";
     else if (benefits.length > 12 || benefits.some((item) => item.length > 120))
       validation = "权益最多 12 条，每条不超过 120 个字符。";
+    else if (monthlyPlanId && !monthlyPlan)
+      validation = "对照月付套餐不匹配，请重新选择或改为独立设置参考价。";
     if (validation) {
       setError(new Error(validation));
       return;
@@ -269,6 +293,7 @@ function PlanForm({
         currency,
         amount_minor: price,
         original_amount_minor: originalPrice,
+        monthly_plan_id: monthlyPlanId || null,
         credits: allowance,
         duration: length,
         duration_unit: unit,
@@ -347,16 +372,6 @@ function PlanForm({
           />
         </label>
       </div>
-      <label>
-        原价（可选）
-        <Input
-          inputMode="decimal"
-          value={original}
-          disabled={busy}
-          onChange={(e) => setOriginal(e.target.value)}
-        />
-        <small>可选，填写时须大于或等于售价。</small>
-      </label>
       <div className="billing-form-grid">
         <label>
           期限
@@ -394,6 +409,76 @@ function PlanForm({
         />
         <small>只在该期内使用，到期失效，不计入永久积分。</small>
       </label>
+      {(isAnnual || monthlyPlanId) && (
+        <>
+          <label>
+            对照月付套餐
+            <StudioSelect
+              aria-label="对照月付套餐"
+              value={monthlyPlanId}
+              disabled={busy}
+              onValueChange={setMonthlyPlanId}
+            >
+              <option value="">独立设置参考价</option>
+              {monthlyPlanId && !monthlyPlan && (
+                <option value={monthlyPlanId} disabled>
+                  原对照已不匹配，请重新选择
+                </option>
+              )}
+              {monthlyPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name} · {money(plan.amount_minor, plan.currency)} / 30 天
+                  {plan.active ? "" : " · 草稿 / 已下架"}
+                </option>
+              ))}
+            </StudioSelect>
+            <small>
+              仅 360 天年付套餐可对照同币种的 30 天月付套餐，年付额度须不少于月付的
+              12 倍；草稿也可选择。
+            </small>
+          </label>
+          {monthlyPlanId && !monthlyPlan ? (
+            <p className="billing-notice" role="status">
+              原对照已不匹配当前币种、期限或额度，请重新选择或改为独立设置。
+            </p>
+          ) : monthlyPlan && monthlyTotal != null ? (
+            <div className="billing-notice" role="status">
+              <p>
+                月付 12 期合计：{money(monthlyTotal, currency)}
+                {currentPrice != null &&
+                  `；年付售价：${money(currentPrice, currency)}。`}
+              </p>
+              {currentPrice != null && (
+                <p>
+                  {currentPrice < monthlyTotal
+                    ? `相比月付 12 期节省 ${money(monthlyTotal - currentPrice, currency)}。`
+                    : currentPrice === monthlyTotal
+                      ? "与月付 12 期价格相同。"
+                      : `比月付 12 期高 ${money(currentPrice - monthlyTotal, currency)}。`}
+                </p>
+              )}
+            </div>
+          ) : (
+            monthlyPlans.length === 0 && (
+              <p className="billing-muted">
+                暂无匹配的月付套餐，请先检查币种与额度，或独立填写参考价。
+              </p>
+            )
+          )}
+        </>
+      )}
+      {!monthlyPlanId && (
+        <label>
+          原价（可选）
+          <Input
+            inputMode="decimal"
+            value={original}
+            disabled={busy}
+            onChange={(e) => setOriginal(e.target.value)}
+          />
+          <small>独立参考价，填写时须大于或等于售价，不代表月付 12 期价格。</small>
+        </label>
+      )}
       <label>
         排序
         <Input

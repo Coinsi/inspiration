@@ -718,7 +718,11 @@
   min-width: 0;
   border: 1px solid hsl(var(--border));
   border-radius: 16px;
-  background: linear-gradient(153deg, hsl(var(--accent) / 0.055), transparent 52%),
+  background: linear-gradient(
+      153deg,
+      hsl(var(--accent) / 0.055),
+      transparent 52%
+    ),
     hsl(var(--card));
 }
 .billing-plan-card:focus-within,
@@ -750,8 +754,38 @@
   gap: 5px 8px;
   color: hsl(var(--muted));
   font-size: 13px;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
   font-variant-numeric: tabular-nums;
+}
+.billing-plan-pricing-note {
+  margin-bottom: 18px;
+  color: hsl(var(--muted));
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.billing-plan-pricing-note span {
+  display: block;
+}
+.billing-plan-saving {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border: 1px solid hsl(var(--accent) / 0.25);
+  border-radius: 6px;
+  background: hsl(var(--accent) / 0.08);
+  color: hsl(var(--fg));
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.billing-plan-grant-note {
+  margin-top: 8px;
+  color: hsl(var(--muted));
+  font-size: 12px;
+  line-height: 1.7;
 }
 .billing-plan-price > strong {
   color: hsl(var(--fg));

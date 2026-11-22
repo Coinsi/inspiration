@@ -3,18 +3,19 @@ import type { MembershipPlan } from "@/lib/billing";
 
 function samplePlans(): MembershipPlan[] {
   const tiers = [
-    { key: "starter", name: "基础会员", amount: 1990, credits: 100_000 },
-    { key: "plus", name: "进阶会员", amount: 3990, credits: 300_000 },
+    { key: "creator", name: "创作会员", amount: 2000, credits: 60_000, description: "适合日常出图和视频创作。" },
+    { key: "plus", name: "进阶会员", amount: 4000, credits: 150_000, description: "适合持续制作和更多生成任务。" },
   ];
   return [1, 12].flatMap((months) =>
     tiers.map((tier, index) => ({
       // Non-UUID IDs cannot be submitted as actual checkout products.
       id: `preview-${tier.key}-${months}m`,
       name: tier.name,
-      description: "",
+      description: tier.description,
       currency: "usd",
-      amount_minor: tier.amount * months,
+      amount_minor: months === 12 ? (tier.amount * 12 * 80) / 100 : tier.amount,
       original_amount_minor: null,
+      monthly_plan_id: months === 12 ? `preview-${tier.key}-1m` : null,
       credits: tier.credits * months,
       duration: months,
       duration_unit: "month" as const,
