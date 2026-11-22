@@ -1,6 +1,7 @@
 """identity 路由:认证、当前用户、项目、成员、审计。"""
 
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy import select
@@ -181,6 +182,21 @@ def remove_cover(
 
 
 # ── 成员 ──
+@router.post(
+    "/projects/{project_id}/members/lookup",
+    response_model=schemas.MemberLookupOut,
+    tags=["member"],
+)
+def lookup_member(
+    data: schemas.MemberLookupIn,
+    response: Response,
+    ctx: Annotated[ProjectContext, Depends(require_action("member.manage"))],
+    db: Annotated[Session, Depends(get_db, scope="function")],
+):
+    response.headers["Cache-Control"] = "no-store"
+    return service.lookup_member(db, ctx.project, data)
+
+
 @router.post("/projects/{project_id}/members", response_model=schemas.MemberOut, tags=["member"])
 def add_member(
     data: schemas.MemberIn,

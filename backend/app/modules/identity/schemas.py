@@ -102,15 +102,50 @@ class ProjectOut(BaseModel):
     created_at: datetime
 
 
-class MemberIn(BaseModel):
-    user_id: uuid.UUID | None = None
+class MemberIdentifierIn(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=64)
+    email: EmailStr | None = None
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def strip_username(cls, value):
+        return RegisterIn.strip_text(value)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value):
+        return LoginIn.normalize_email(value)
+
+
+class MemberLookupIn(MemberIdentifierIn):
+    member_only: bool = False
+
+    @model_validator(mode="after")
+    def one_target(self):
+        if (self.username is None) == (self.email is None):
+            raise ValueError("请填写邮箱或用户名之一")
+        return self
+
+
+class MemberLookupOut(BaseModel):
+    user_id: uuid.UUID
+    username: str
+    display_name: str
+    avatar_data: str | None = None
+    is_member: bool
+
+
+class MemberIn(MemberIdentifierIn):
+    user_id: uuid.UUID | None = None
+    expected_user_id: uuid.UUID | None = None
     role: Role
 
     @model_validator(mode="after")
     def one_target(self):
-        if (self.user_id is None) == (self.username is None):
-            raise ValueError("请填写用户名")
+        if sum(value is not None for value in (self.user_id, self.username, self.email)) != 1:
+            raise ValueError("请填写用户 ID、邮箱或用户名之一")
+        if self.expected_user_id is not None and self.user_id is not None:
+            raise ValueError("用户确认信息只能与邮箱或用户名一起提交")
         return self
 
 
@@ -131,13 +166,19 @@ class MemberRoleIn(BaseModel):
 
 
 class ProfileIn(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=64)
     display_name: str = Field(min_length=1, max_length=128)
     bio: str = Field(default="", max_length=500)
 
-    @field_validator("display_name", "bio", mode="before")
+    @field_validator("username", "display_name", "bio", mode="before")
     @classmethod
     def strip_text(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("username")
+    @classmethod
+    def valid_username(cls, value):
+        return RegisterIn.valid_username(value)
 
 
 class PasswordIn(BaseModel):

@@ -2,6 +2,7 @@ import { Languages, LogOut, UserRound, ChevronDown } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { isGeneratedUsername } from "@/lib/username";
 import { Avatar } from "@/components/ui/avatar";
 import { AccountSettings } from "@/components/AccountSettings";
 import { HeaderMenu, headerMenuItem } from "@/components/ui/header-menu";
@@ -10,6 +11,7 @@ export function AccountMenu() {
   const { me, logout, logoutError } = useAuth(),
     { lang } = useI18n();
   const zh = lang === "zh";
+  const username = me?.user.username;
   const [params, setParams] = useSearchParams();
   const panel = params.get("account");
   const show = (value: string | null) => {
@@ -43,9 +45,9 @@ export function AccountMenu() {
           <p className="truncate text-sm font-medium">
             {me?.user.display_name}
           </p>
-          <p className="truncate mt-1 text-xs text-muted-foreground">
-            @{me?.user.username}
-          </p>
+          {username && !isGeneratedUsername(username) && (
+            <p className="truncate mt-1 text-xs text-muted-foreground">@{username}</p>
+          )}
         </div>
         <button
           role="menuitem"

@@ -1,7 +1,7 @@
 import { StudioSelect } from "@/components/ui/studio-select";
 import { SearchField } from "@/components/ui/search-field";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ShieldCheck, UserPlus, Users, Crown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
-import { api, type Member } from "@/lib/api";
+import { api, ApiError, type Member } from "@/lib/api";
+import { isGeneratedUsername } from "@/lib/username";
 import "./members.css";
 
 const roles = [
@@ -58,14 +59,36 @@ const roles = [
   },
 ];
 
+type LookupTarget =
+  | { email: string; username?: never }
+  | { username: string; email?: never };
+interface MemberLookup {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_data: string | null;
+  is_member: boolean;
+}
+interface MemberSearch {
+  state: "idle" | "loading" | "found" | "missing" | "error";
+  userId?: string;
+  message?: string;
+}
+const completeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function ProjectMembers() {
-  const { projectId } = useParams(),
-    qc = useQueryClient(),
+  const { projectId = "" } = useParams();
+  return <ProjectMembersPanel key={projectId} projectId={projectId} />;
+}
+
+function ProjectMembersPanel({ projectId }: { projectId: string }) {
+  const qc = useQueryClient(),
     { lang } = useI18n(),
     { me, refresh } = useAuth(),
     confirm = useConfirm();
   const zh = lang === "zh",
     base = `/projects/${projectId}/members`;
+  const text = (chinese: string, english: string) => zh ? chinese : english;
   const members = useQuery({
     queryKey: ["members", projectId],
     queryFn: () => api.get<Member[]>(base),
@@ -74,16 +97,152 @@ export default function ProjectMembers() {
     canManage = mine?.role === "admin";
   const [search, setSearch] = useState(""),
     [adding, setAdding] = useState(false),
-    [username, setUsername] = useState(""),
+    [identity, setIdentity] = useState(""),
     [role, setRole] = useState("artist");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [match, setMatch] = useState<{
+    target: LookupTarget;
+    user: MemberLookup;
+  } | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [listLookup, setListLookup] = useState<MemberSearch>({ state: "idle" });
+  const addRequest = useRef<AbortController | null>(null);
+  const listRequest = useRef<AbortController | null>(null);
+  const operationBusy = useRef(false);
+  useEffect(() => {
+    return () => {
+      addRequest.current?.abort();
+      listRequest.current?.abort();
+    };
+  }, []);
+  useEffect(() => {
+    if (!canManage) {
+      addRequest.current?.abort();
+      listRequest.current?.abort();
+      setAdding(false);
+      setMatch(null);
+      setFinding(false);
+      setListLookup({ state: "idle" });
+    }
+  }, [canManage]);
+  const nameOf = (user: Pick<Member, "display_name" | "username">) => {
+    const displayName = user.display_name?.trim();
+    if (displayName && !isGeneratedUsername(displayName)) return displayName;
+    if (user.username && !isGeneratedUsername(user.username)) return user.username;
+    return text("未设置昵称", "Unnamed user");
+  };
+  const emailSearch = canManage && completeEmail.test(search.trim());
+  function changeSearch(value: string) {
+    listRequest.current?.abort();
+    setSearch(value);
+    setListLookup({ state: "idle" });
+  }
+  function changeIdentity(value: string) {
+    addRequest.current?.abort();
+    setIdentity(value);
+    setMatch(null);
+    setFinding(false);
+    setError("");
+  }
+  function closeAdd() {
+    if (busy) return;
+    addRequest.current?.abort();
+    setAdding(false);
+    setMatch(null);
+    setFinding(false);
+  }
+  async function findMemberByEmail() {
+    if (!canManage || !emailSearch) return;
+    const email = search.trim().toLowerCase();
+    if (!completeEmail.test(email)) {
+      setListLookup({
+        state: "error",
+        message: text(
+          "请输入完整邮箱地址后查找。",
+          "Enter a complete email address to search.",
+        ),
+      });
+      return;
+    }
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    setListLookup({ state: "loading" });
+    try {
+      const user = await api.post<MemberLookup>(
+        `${base}/lookup`,
+        { email, member_only: true },
+        { signal: controller.signal },
+      );
+      if (!controller.signal.aborted && listRequest.current === controller) {
+        setListLookup({ state: "found", userId: user.user_id });
+      }
+    } catch (e) {
+      if (controller.signal.aborted || listRequest.current !== controller) return;
+      const missing = e instanceof ApiError && e.code === "NOT_FOUND";
+      setListLookup({
+        state: missing ? "missing" : "error",
+        message: missing
+          ? text(
+              "没有匹配的项目成员，请核对完整邮箱。",
+              "No project member matches this email address.",
+            )
+          : text("查找失败，请重试。", "Search failed. Please try again."),
+      });
+    }
+  }
+  async function findAccount() {
+    if (!canManage || busy || finding) return;
+    const value = identity.trim().replace(/^@/, "");
+    if (!value) return;
+    const target: LookupTarget = value.includes("@")
+      ? { email: value.toLowerCase() }
+      : { username: value };
+    if (target.email && !completeEmail.test(target.email)) {
+      setError(text(
+        "请输入完整邮箱地址，或使用用户名查找。",
+        "Enter a complete email address or use a username.",
+      ));
+      return;
+    }
+    addRequest.current?.abort();
+    const controller = new AbortController();
+    addRequest.current = controller;
+    setFinding(true);
+    setError("");
+    setMatch(null);
+    try {
+      const user = await api.post<MemberLookup>(`${base}/lookup`, target, {
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted && addRequest.current === controller) {
+        setMatch({ target, user });
+      }
+    } catch (e) {
+      if (controller.signal.aborted || addRequest.current !== controller) return;
+      setError(
+        e instanceof ApiError && e.code === "NOT_FOUND"
+          ? text(
+              "未找到该账号，请确认对方已注册，并核对邮箱或用户名。",
+              "No account found. Check the registered email address or exact username.",
+            )
+          : text("查找失败，请重试。", "Search failed. Please try again."),
+      );
+    } finally {
+      if (!controller.signal.aborted && addRequest.current === controller) {
+        setFinding(false);
+      }
+    }
+  }
   const label = (id: string) => {
     const r = roles.find((r) => r.id === id);
     return r ? (zh ? r.zh : r.en) : id;
   };
   async function perform(action: () => Promise<unknown>, message: string) {
+    if (operationBusy.current) return false;
+    operationBusy.current = true;
     setBusy(true);
     setError("");
     setNotice("");
@@ -97,14 +256,34 @@ export default function ProjectMembers() {
       setError((e as Error).message);
       return false;
     } finally {
+      operationBusy.current = false;
       setBusy(false);
     }
   }
-  const filtered = (members.data || []).filter((m) =>
-    `${m.display_name} ${m.username}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
+  const searchTerm = search.trim().replace(/^@/, "").toLowerCase();
+  const filtered = (members.data || []).filter((m) => {
+    if (emailSearch) {
+      return listLookup.state === "found" && m.user_id === listLookup.userId;
+    }
+    return `${nameOf(m)} ${m.username ?? ""}`.toLowerCase().includes(searchTerm);
+  });
+  const searchPlaceholder = canManage
+    ? text("昵称、用户名或完整邮箱", "Name, username or full email")
+    : text("搜索昵称或用户名", "Search name or username");
+  let searchMessage = listLookup.message;
+  if (listLookup.state === "idle") {
+    searchMessage = text(
+      "输入完整邮箱并点击查找，仅匹配此项目的成员。",
+      "Enter a full email and search for a member of this project.",
+    );
+  } else if (listLookup.state === "loading") {
+    searchMessage = text("正在查找项目成员…", "Searching project members…");
+  } else if (listLookup.state === "found") {
+    searchMessage = text(
+      "已按完整邮箱匹配项目成员。",
+      "Project member matched by exact email.",
+    );
+  }
   return (
     <div className="members-page">
       <header className="members-heading">
@@ -122,7 +301,7 @@ export default function ProjectMembers() {
             onClick={() => {
               setAdding(true);
               setError("");
-              setUsername("");
+              changeIdentity("");
               setRole("artist");
             }}
           >
@@ -164,14 +343,45 @@ export default function ProjectMembers() {
       <section className="members-panel">
         <div className="members-toolbar">
           <h2>{zh ? "项目成员" : "Project members"}</h2>
-          <SearchField
-            className="w-full sm:w-64"
-            label={zh ? "搜索成员" : "Search members"}
-            placeholder={zh ? "搜索昵称或用户名" : "Search name or username"}
-            value={search}
-            onValueChange={(value) => setSearch(value)}
-          />
+          <form
+            className="members-search"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void findMemberByEmail();
+            }}
+          >
+            <SearchField
+              className="members-search-field"
+              label={zh ? "搜索成员" : "Search members"}
+              placeholder={searchPlaceholder}
+              value={search}
+              onValueChange={changeSearch}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={254}
+            />
+            {emailSearch && (
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={listLookup.state === "loading"}
+              >
+                {listLookup.state === "loading"
+                  ? text("查找中…", "Searching…")
+                  : text("查找", "Search")}
+              </Button>
+            )}
+          </form>
         </div>
+        {emailSearch && (
+          <p
+            className={`members-search-status${listLookup.state === "error" ? " members-search-error" : ""}`}
+            role={listLookup.state === "error" ? "alert" : "status"}
+          >
+            {searchMessage}
+          </p>
+        )}
         {members.isLoading ? (
           <p className="members-empty">
             {zh ? "正在加载成员…" : "Loading members…"}
@@ -200,15 +410,17 @@ export default function ProjectMembers() {
                   <div className="members-row" key={m.id}>
                     <Avatar
                       src={m.avatar_data}
-                      name={m.display_name || m.username}
+                      name={nameOf(m)}
                       size={42}
                     />
                     <div className="members-name">
                       <strong>
-                        {m.display_name || m.username}
+                        {nameOf(m)}
                         {own && <small>{zh ? "你" : "You"}</small>}
                       </strong>
-                      <span>@{m.username}</span>
+                      {m.username && !isGeneratedUsername(m.username) && (
+                        <span>@{m.username}</span>
+                      )}
                     </div>
                     <div className="members-role">
                       {m.is_owner ? (
@@ -218,7 +430,7 @@ export default function ProjectMembers() {
                         </span>
                       ) : canManage && !protectedMember ? (
                         <StudioSelect
-                          aria-label={`${zh ? "调整角色" : "Role for"} ${m.display_name || m.username}`}
+                          aria-label={`${zh ? "调整角色" : "Role for"} ${nameOf(m)}`}
                           disabled={busy}
                           value={m.role}
                           onValueChange={async (selectedValue) => {
@@ -229,8 +441,8 @@ export default function ProjectMembers() {
                                   ? "调整成员角色？"
                                   : "Change member role?",
                                 message: zh
-                                  ? `将 ${m.display_name} 的角色改为「${label(next)}」。新权限会立即生效。`
-                                  : `Change ${m.display_name} to ${label(next)}? Access changes take effect immediately.`,
+                                  ? `将 ${nameOf(m)} 的角色改为「${label(next)}」。新权限会立即生效。`
+                                  : `Change ${nameOf(m)} to ${label(next)}? Access changes take effect immediately.`,
                                 confirmText: zh ? "确认调整" : "Change role",
                               }))
                             )
@@ -257,15 +469,15 @@ export default function ProjectMembers() {
                     {canManage && !protectedMember && (
                       <button
                         className="members-remove"
-                        aria-label={`${zh ? "移除成员" : "Remove"} ${m.display_name || m.username}`}
+                        aria-label={`${zh ? "移除成员" : "Remove"} ${nameOf(m)}`}
                         disabled={busy}
                         onClick={async () => {
                           if (
                             !(await confirm({
                               title: zh ? "移除项目成员？" : "Remove member?",
                               message: zh
-                                ? `${m.display_name} 将失去此项目的访问权限，已创作的内容会保留。`
-                                : `${m.display_name} will lose access. Their existing work will remain.`,
+                                ? `${nameOf(m)} 将失去此项目的访问权限，已创作的内容会保留。`
+                                : `${nameOf(m)} will lose access. Their existing work will remain.`,
                               danger: true,
                               confirmText: zh ? "移除成员" : "Remove",
                             }))
@@ -283,7 +495,7 @@ export default function ProjectMembers() {
                   </div>
                 );
               })}
-              {!filtered.length && (
+              {!filtered.length && (!emailSearch || listLookup.state === "found") && (
                 <p className="members-empty">
                   {zh ? "没有匹配的成员" : "No matching members"}
                 </p>
@@ -313,9 +525,7 @@ export default function ProjectMembers() {
       </details>
       <Modal
         open={adding}
-        onClose={() => {
-          if (!busy) setAdding(false);
-        }}
+        onClose={closeAdd}
         title={zh ? "添加项目成员" : "Add project member"}
         width={500}
       >
@@ -323,9 +533,34 @@ export default function ProjectMembers() {
           className="members-add-form"
           onSubmit={async (e) => {
             e.preventDefault();
+            if (!match) {
+              void findAccount();
+              return;
+            }
+            if (match.user.is_member || busy || !canManage) return;
             if (
               await perform(
-                () => api.post(base, { username: username.trim(), role }),
+                async () => {
+                  try {
+                    return await api.post(base, {
+                      ...match.target,
+                      expected_user_id: match.user.user_id,
+                      role,
+                    });
+                  } catch (error) {
+                    if (
+                      error instanceof ApiError &&
+                      error.code === "VERSION_CONFLICT"
+                    ) {
+                      setMatch(null);
+                      throw new Error(text(
+                        "成员信息已变化，请重新查找并确认后添加。",
+                        "This account or its membership changed. Search again before adding.",
+                      ));
+                    }
+                    throw error;
+                  }
+                },
                 zh ? "成员已加入项目" : "Member added",
               )
             )
@@ -334,42 +569,97 @@ export default function ProjectMembers() {
         >
           <p>
             {zh
-              ? "输入对方已注册的用户名。添加后，对方即可在自己的项目列表中看到此项目。"
-              : "Enter an existing username. The project will appear in their project list."}
+              ? "使用对方注册的邮箱或用户名查找，核对头像和昵称后再添加。"
+              : "Find a registered email address or username, then check the avatar and display name before adding."}
           </p>
-          <label>
-            {zh ? "用户名" : "Username"}
-            <input
-              required
-              autoComplete="off"
-              minLength={3}
-              maxLength={64}
-              value={username}
-              disabled={busy}
-              placeholder={zh ? "例如：story_writer" : "e.g. story_writer"}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </label>
-          <label>
-            {zh ? "项目角色" : "Project role"}
-            <StudioSelect
-              aria-label={zh ? "项目角色" : "Project role"}
-              value={role}
-              disabled={busy}
-              onValueChange={(selectedValue) => setRole(selectedValue)}
-            >
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {zh ? r.zh : r.en}
-                </option>
-              ))}
-            </StudioSelect>
-          </label>
-          <p className="members-role-description">
-            {zh
-              ? roles.find((r) => r.id === role)?.desc
-              : roles.find((r) => r.id === role)?.eng}
-          </p>
+          <div className="members-identity-field">
+            <label htmlFor="member-lookup-identity">
+              {zh ? "注册邮箱或用户名" : "Registered email or username"}
+            </label>
+            <div className="members-lookup-input">
+              <input
+                id="member-lookup-identity"
+                required
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={254}
+                value={identity}
+                disabled={busy}
+                placeholder={zh ? "输入完整邮箱或用户名" : "Full email address or username"}
+                onChange={(e) => changeIdentity(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing && !match) {
+                    e.preventDefault();
+                    void findAccount();
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || finding || !identity.trim()}
+                onClick={() => void findAccount()}
+              >
+                {finding
+                  ? text("查找中…", "Searching…")
+                  : text("查找用户", "Find user")}
+              </Button>
+            </div>
+          </div>
+          {finding && (
+            <p role="status">{text("正在查找账号…", "Looking up account…")}</p>
+          )}
+          {match && (
+            <div className="members-lookup-result" role="status">
+              <Avatar
+                src={match.user.avatar_data}
+                name={nameOf(match.user)}
+                size={44}
+              />
+              <div className="members-name">
+                <strong>{nameOf(match.user)}</strong>
+                {!isGeneratedUsername(match.user.username) && (
+                  <span>@{match.user.username}</span>
+                )}
+                <span>
+                  {match.user.is_member
+                    ? text(
+                        "已是项目成员，无需重复添加。",
+                        "Already a project member. No need to add again.",
+                      )
+                    : text(
+                        "请确认这是你要添加的人。",
+                        "Confirm this is the person you want to add.",
+                      )}
+                </span>
+              </div>
+            </div>
+          )}
+          {match && !match.user.is_member && (
+            <>
+              <label>
+                {zh ? "项目角色" : "Project role"}
+                <StudioSelect
+                  aria-label={zh ? "项目角色" : "Project role"}
+                  value={role}
+                  disabled={busy}
+                  onValueChange={(selectedValue) => setRole(selectedValue)}
+                >
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {zh ? r.zh : r.en}
+                    </option>
+                  ))}
+                </StudioSelect>
+              </label>
+              <p className="members-role-description">
+                {zh
+                  ? roles.find((r) => r.id === role)?.desc
+                  : roles.find((r) => r.id === role)?.eng}
+              </p>
+            </>
+          )}
           {error && (
             <p role="alert" className="members-error">
               {error}
@@ -380,18 +670,17 @@ export default function ProjectMembers() {
               type="button"
               variant="ghost"
               disabled={busy}
-              onClick={() => setAdding(false)}
+              onClick={closeAdd}
             >
               {zh ? "取消" : "Cancel"}
             </Button>
-            <Button type="submit" disabled={busy || !username.trim()}>
+            <Button
+              type="submit"
+              disabled={busy || finding || !match || match.user.is_member}
+            >
               {busy
-                ? zh
-                  ? "添加中…"
-                  : "Adding…"
-                : zh
-                  ? "添加到项目"
-                  : "Add to project"}
+                ? text("添加中…", "Adding…")
+                : text("确认添加到项目", "Confirm and add")}
             </Button>
           </footer>
         </form>

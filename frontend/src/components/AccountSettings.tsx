@@ -1,7 +1,7 @@
 import { StudioSelect } from "@/components/ui/studio-select";
 import { PersonalModelServices } from "./PersonalModelServices";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import {
   Camera,
@@ -17,6 +17,7 @@ import { api, apiUpload, setToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
+import { isGeneratedUsername } from "@/lib/username";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -54,8 +55,14 @@ function SettingsContent({
   const zh = lang === "zh",
     confirm = useConfirm();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const savedUsername = me?.user.username;
+  const editableUsername = isGeneratedUsername(savedUsername)
+    ? ""
+    : (savedUsername ?? "");
   const [name, setName] = useState(me?.user.display_name || "");
   const [bio, setBio] = useState(me?.user.bio || "");
+  const [username, setUsername] = useState(editableUsername);
   const [current, setCurrent] = useState(""),
     [password, setPassword] = useState(""),
     [repeat, setRepeat] = useState("");
@@ -79,12 +86,13 @@ function SettingsContent({
       }>("/me/security"),
     enabled: panel === "security",
   });
-  const dirty =
+  const nextUsername = username.trim();
+  const usernameChanged = nextUsername !== editableUsername;
+  const profileDirty =
     name !== me?.user.display_name ||
     bio !== (me?.user.bio || "") ||
-    !!current ||
-    !!password ||
-    !!repeat;
+    usernameChanged;
+  const dirty = profileDirty || !!current || !!password || !!repeat;
   async function connectGoogle() {
     if (busy) return;
     if (dirty && !(await confirm({
@@ -166,7 +174,7 @@ function SettingsContent({
             />
             <div>
               <strong>{me?.user.display_name}</strong>
-              <span>@{me?.user.username}</span>
+              {editableUsername && <span>@{editableUsername}</span>}
             </div>
           </div>
           {tabs.map(({ key, label, icon: Icon }) => (
@@ -276,15 +284,32 @@ function SettingsContent({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (
+                    usernameChanged &&
+                    !/^[A-Za-z0-9_.-]{3,64}$/.test(nextUsername)
+                  ) {
+                    setNotice("");
+                    setError(
+                      zh
+                        ? "请填写 3–64 个字符的用户名，可用英文字母、数字、下划线、点和连字符。"
+                        : "Use 3–64 letters, digits, underscores, dots or hyphens for the username.",
+                    );
+                    return;
+                  }
                   void perform(
                     async () => {
                       await api.put("/me/profile", {
                         display_name: name.trim(),
                         bio: bio.trim(),
+                        ...(usernameChanged ? { username: nextUsername } : {}),
                       });
                       setName(name.trim());
                       setBio(bio.trim());
-                      await refresh();
+                      setUsername(nextUsername);
+                      await Promise.all([
+                        refresh(),
+                        queryClient.invalidateQueries({ queryKey: ["members"] }),
+                      ]);
                     },
                     zh ? "个人资料已保存" : "Profile saved",
                   );
@@ -316,30 +341,37 @@ function SettingsContent({
                     }
                   />
                 </label>
+                <div>
+                  <label>
+                    {zh ? "用户名" : "Username"}
+                    <input
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      spellCheck={false}
+                      maxLength={64}
+                      value={username}
+                      disabled={busy}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder={zh ? "例如 story_writer" : "e.g. story_writer"}
+                      aria-describedby="account-username-hint"
+                    />
+                  </label>
+                  <p className="account-hint" id="account-username-hint">
+                    {zh
+                      ? "别人可以用用户名把你添加到项目。改名后，用新用户名或邮箱登录。"
+                      : "Others can add you to projects with your username. After changing it, sign in with your new username or email."}
+                  </p>
+                </div>
                 <div className="account-readonly">
-                  <div>
-                    <span>{zh ? "用户名" : "Username"}</span>
-                    <strong>@{me?.user.username}</strong>
-                  </div>
                   <div>
                     <span>{zh ? "注册邮箱" : "Account email"}</span>
                     <strong>{me?.user.email}</strong>
                   </div>
                 </div>
-                <p className="account-hint">
-                  {zh
-                    ? "邮箱用于密码登录，用户名用于加入项目。邮箱验证与变更暂未开放。"
-                    : "Use your email for password sign-in and your username to join projects. Email verification and changes are not yet available."}
-                </p>
                 <div className="account-footer">
                   <Button
                     type="submit"
-                    disabled={
-                      busy ||
-                      !name.trim() ||
-                      (name === me?.user.display_name &&
-                        bio === (me?.user.bio || ""))
-                    }
+                    disabled={busy || !name.trim() || !profileDirty}
                   >
                     {busy
                       ? zh

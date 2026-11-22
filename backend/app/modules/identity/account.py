@@ -2,17 +2,19 @@
 
 import base64
 import io
+import sqlite3
 
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from PIL import Image, ImageOps
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth_controls import limit_auth
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.core.errors import CapabilityUnsupported
+from app.core.errors import CapabilityUnsupported, Conflict
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.identity import User, UserIdentity
 from app.modules.identity import schemas
@@ -52,9 +54,35 @@ def providers(response: Response):
 @router.put("/me/profile", response_model=schemas.UserOut)
 def update_profile(data: schemas.ProfileIn, user: User = USER, db: Session = DB):
     user = locked_user(db, user)
+    changing_username = data.username is not None and data.username != user.username
+    if changing_username:
+        if db.scalar(select(User.id).where(User.username == data.username, User.id != user.id)):
+            raise Conflict("用户名已被使用，请换一个")
+        user.username = data.username
     user.display_name, user.bio = data.display_name, data.bio
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        # A concurrent rename can win after the availability check. Only this
+        # specific unique constraint is a name conflict; other failures remain
+        # visible and the request's DB dependency rolls the whole update back.
+        if changing_username and _username_conflict(exc):
+            raise Conflict("用户名已被使用，请换一个") from exc
+        raise
     return user
+
+
+def _username_conflict(error: IntegrityError) -> bool:
+    original = error.orig
+    if getattr(original, "sqlstate", getattr(original, "pgcode", None)) == "23505":
+        return (
+            getattr(getattr(original, "diag", None), "constraint_name", None) == "ix_user_username"
+        )
+    return (
+        isinstance(original, sqlite3.IntegrityError)
+        and getattr(original, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+        and str(original) == "UNIQUE constraint failed: user.username"
+    )
 
 
 @router.post("/me/avatar", response_model=schemas.UserOut)

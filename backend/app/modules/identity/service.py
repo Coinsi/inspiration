@@ -41,20 +41,27 @@ def register_user(db: Session, data: schemas.RegisterIn) -> User:
     return user
 
 
-def authenticate(db: Session, data: schemas.LoginIn) -> User:
-    if data.email is not None:
+def resolve_user_identifier(db, *, username=None, email=None, user_id=None, lock=False):
+    query = select(User)
+    if email is not None:
         # Legacy data can contain emails that differ only by case or whitespace.
-        # Never choose an arbitrary account or use its password to disambiguate.
-        matches = list(
-            db.scalars(
-                select(User)
-                .where(func.lower(func.trim(User.email)) == str(data.email).lower())
-                .limit(2)
-            )
-        )
-        user = matches[0] if len(matches) == 1 else None
+        # Resolve globally before checking membership or active status, just as
+        # login does: neither may disambiguate two accounts sharing an email.
+        query = query.where(func.lower(func.trim(User.email)) == str(email).strip().lower())
+    elif username is not None:
+        query = query.where(User.username == username)
+    elif user_id is not None:
+        query = query.where(User.id == user_id)
     else:
-        user = db.scalar(select(User).where(User.username == data.username))
+        return None
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    matches = list(db.scalars(query.order_by(User.id).limit(2)))
+    return matches[0] if len(matches) == 1 else None
+
+
+def authenticate(db: Session, data: schemas.LoginIn) -> User:
+    user = resolve_user_identifier(db, email=data.email, username=data.username)
     if (
         user is None
         or not user.is_active
@@ -146,20 +153,45 @@ def set_deleted(db: Session, actor: User, project_id: uuid.UUID, deleted: bool) 
     return project
 
 
+def lookup_member(db: Session, project: Project, data: schemas.MemberLookupIn):
+    user = resolve_user_identifier(db, username=data.username, email=data.email)
+    if user is None or not user.is_active:
+        raise NotFound("未找到可用用户，请核对完整邮箱或用户名")
+    is_member = (
+        db.scalar(
+            select(Membership.id).where(
+                Membership.project_id == project.id, Membership.user_id == user.id
+            )
+        )
+        is not None
+    )
+    if data.member_only and not is_member:
+        raise NotFound("未找到匹配的项目成员")
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "display_name": user.display_name,
+        "avatar_data": user.avatar_data,
+        "is_member": is_member,
+    }
+
+
 def add_member(db: Session, project: Project, actor: User, data: schemas.MemberIn) -> Membership:
     lock_members(db, project, actor)
-    user = (
-        db.get(User, data.user_id)
-        if data.user_id
-        else db.scalar(select(User).where(User.username == data.username))
+    user = resolve_user_identifier(
+        db, user_id=data.user_id, username=data.username, email=data.email, lock=True
     )
+    if data.expected_user_id is not None and (
+        user is None or not user.is_active or user.id != data.expected_user_id
+    ):
+        raise Conflict("成员信息已变化，请重新查找后添加")
     if user is None or not user.is_active:
         raise NotFound("目标用户不存在")
     existing = db.scalar(
         select(Membership).where(Membership.project_id == project.id, Membership.user_id == user.id)
     )
     if existing:
-        if data.username:
+        if data.username is not None or data.email is not None:
             raise Conflict("该用户已是项目成员，请在成员列表调整角色")
         protect_member(project, actor, existing, data.role)
         existing.role = data.role
