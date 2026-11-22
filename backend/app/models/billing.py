@@ -81,6 +81,8 @@ class BillingOrder(Base, TimestampMixin):
     credits: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(24), default="pending")
     provider_order_id: Mapped[str | None] = mapped_column(String(200))
+    checkout_ip: Mapped[str | None] = mapped_column(String(45))
+    checkout_mobile: Mapped[bool | None] = mapped_column(Boolean)
     payment_id: Mapped[str | None] = mapped_column(String(200))
     checkout_url: Mapped[str | None] = mapped_column(Text)
     qr_payload: Mapped[str | None] = mapped_column(Text)

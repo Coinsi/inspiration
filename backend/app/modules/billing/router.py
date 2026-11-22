@@ -1,9 +1,10 @@
 """User checkout and super-admin payment operations."""
 
+import ipaddress
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import String, cast, func, or_, select
@@ -94,6 +95,10 @@ class RefundIn(Input):
 class AdminRefundIn(RefundIn):
     amount_minor: Money
     idempotency_key: uuid.UUID
+
+
+class ResolveRefundIn(RefundIn):
+    outcome: Literal["succeeded", "failed"]
 
 
 class ResolveReservationIn(Input):
@@ -204,8 +209,21 @@ def list_orders(
 
 
 @router.post("/billing/orders")
-def create_order(data: CheckoutIn, db: DB, user: Current):
-    row = orders.create_order(db, user.id, data.pack_id, data.provider_id, data.idempotency_key)
+def create_order(data: CheckoutIn, request: Request, db: DB, user: Current):
+    try:
+        address = str(ipaddress.ip_address(request.client.host)) if request.client else None
+    except ValueError:
+        address = None
+    user_agent = request.headers.get("user-agent", "").lower()
+    row = orders.create_order(
+        db,
+        user.id,
+        data.pack_id,
+        data.provider_id,
+        data.idempotency_key,
+        client_ip=address,
+        is_mobile=any(item in user_agent for item in ("mobile", "android", "iphone", "ipad")),
+    )
     return orders.order_view(db, row)
 
 
@@ -231,10 +249,19 @@ def request_refund(order_id: uuid.UUID, data: RefundIn, db: DB, user: Current):
     return orders.order_view(db, orders.find_order(db, order_id, user_id=user.id))
 
 
-def _receive_notification(db: Session, provider_id: uuid.UUID, raw: bytes, headers):
+def _receive_notification(
+    db: Session,
+    provider_id: uuid.UUID,
+    raw: bytes,
+    headers,
+    *,
+    is_get=False,
+):
     provider = db.get(BillingProvider, provider_id)
     if provider is None:
         raise NotFound("支付渠道不存在")
+    if is_get and provider.kind != "easypay":
+        raise HTTPException(status_code=405, detail="Method Not Allowed", headers={"Allow": "POST"})
     try:
         evidence = orders.provider_for(provider).verify_webhook(raw, headers)
     except ValueError as exc:
@@ -254,9 +281,20 @@ async def webhook(provider_id: uuid.UUID, request: Request, db: DB):
     kind = await run_in_threadpool(
         _receive_notification, db, provider_id, bytes(raw), request.headers
     )
-    if kind == "alipay":
-        return PlainTextResponse("success")
+    if kind in {"alipay", "easypay"}:
+        return PlainTextResponse("success", headers={"Cache-Control": "no-store"})
     return Response(status_code=204)
+
+
+@router.get("/billing/webhook/{provider_id}", include_in_schema=False)
+async def easypay_webhook(provider_id: uuid.UUID, request: Request, db: DB):
+    raw = request.scope["query_string"]
+    if len(raw) > 16_384:
+        raise CapabilityUnsupported("支付通知超过大小限制")
+    await run_in_threadpool(
+        _receive_notification, db, provider_id, raw, request.headers, is_get=True
+    )
+    return PlainTextResponse("success", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/admin/billing/settings")
@@ -340,8 +378,8 @@ def create_provider(data: ProviderIn, db: DB, user: Super):
     credentials = {key: secret.get_secret_value().strip() for key, secret in data.config.items()}
     if any(len(value) > 20_000 for value in credentials.values()):
         raise CapabilityUnsupported("支付渠道参数过长")
-    if data.kind in {"wechatpay", "alipay"} and data.currency != "cny":
-        raise CapabilityUnsupported("微信和支付宝渠道目前仅支持人民币")
+    if data.kind in {"wechatpay", "alipay", "easypay"} and data.currency != "cny":
+        raise CapabilityUnsupported("该支付渠道仅支持人民币")
     if (
         data.kind == "stripe"
         and settings.app_env.lower() in {"prod", "production"}
@@ -460,6 +498,12 @@ def reject_refund(refund_id: uuid.UUID, db: DB, user: Super):
 @router.post("/admin/billing/refunds/{refund_id}/check")
 def check_refund(refund_id: uuid.UUID, db: DB, _: Super):
     row = refunds.check_refund(db, refund_id)
+    return orders.order_view(db, orders.find_order(db, row.order_id), admin=True)
+
+
+@router.post("/admin/billing/refunds/{refund_id}/resolve")
+def resolve_refund(refund_id: uuid.UUID, data: ResolveRefundIn, db: DB, user: Super):
+    row = refunds.resolve_easypay_refund(db, refund_id, data.outcome, user.id, data.reason)
     return orders.order_view(db, orders.find_order(db, row.order_id), admin=True)
 
 

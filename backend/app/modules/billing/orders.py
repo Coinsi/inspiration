@@ -117,6 +117,8 @@ def checkout_request(order: BillingOrder) -> CheckoutRequest:
         cancel_url=redirect,
         webhook_url=f"{order.public_origin}/api/v1/billing/webhook/{order.provider_id}",
         expires_at=order.expires_at,
+        client_ip=order.checkout_ip,
+        is_mobile=bool(order.checkout_mobile),
     )
 
 
@@ -126,6 +128,9 @@ def create_order(
     pack_id: uuid.UUID,
     provider_id: uuid.UUID,
     idempotency_key: uuid.UUID,
+    *,
+    client_ip: str | None = None,
+    is_mobile: bool = False,
 ) -> BillingOrder:
     # Serialize order creation and the pending-order limit per account.
     db.scalar(select(User.id).where(User.id == user_id).with_for_update())
@@ -175,6 +180,8 @@ def create_order(
         public_origin=public_checkout_origin(preferences.public_origin),
         expires_at=timestamp + timedelta(minutes=preferences.checkout_minutes),
         next_check_at=timestamp + timedelta(minutes=1),
+        checkout_ip=client_ip if provider.kind == "easypay" else None,
+        checkout_mobile=is_mobile if provider.kind == "easypay" else None,
     )
     db.add(order)
     db.flush()
@@ -320,7 +327,10 @@ def cancel_order(db: Session, order_id: uuid.UUID, user_id: uuid.UUID) -> Billin
     if not order.provider_order_id:
         raise Conflict("正在确认支付渠道状态，请稍后查询订单")
     provider_id = order.provider_id
-    adapter = provider_for(db.get(BillingProvider, provider_id))
+    provider = db.get(BillingProvider, provider_id)
+    if provider.kind == "easypay":
+        raise CapabilityUnsupported("此易支付渠道请通过查询付款结果确认订单状态")
+    adapter = provider_for(provider)
     request = checkout_request(order)
     reference = order.provider_order_id
     db.commit()
@@ -354,7 +364,7 @@ def qr_image(payload: str) -> str | None:
     return "data:image/png;base64," + base64.b64encode(png.getvalue()).decode("ascii")
 
 
-def refund_view(refund: BillingRefund) -> dict:
+def refund_view(refund: BillingRefund, *, manual_resolution_allowed: bool = False) -> dict:
     return {
         "id": refund.id,
         "status": refund.status,
@@ -362,6 +372,7 @@ def refund_view(refund: BillingRefund) -> dict:
         "credits": refund.credits,
         "reason": refund.reason,
         "created_at": refund.created_at,
+        "manual_resolution_allowed": manual_resolution_allowed,
     }
 
 
@@ -393,8 +404,20 @@ def order_view(
         "expires_at": order.expires_at,
         "paid_at": order.paid_at,
         "refunded_minor": order.refunded_minor,
-        "cancel_allowed": order.status == "pending" and bool(order.provider_order_id),
-        "refunds": [refund_view(item) for item in refunds],
+        "cancel_allowed": (
+            order.status == "pending"
+            and bool(order.provider_order_id)
+            and provider.kind != "easypay"
+        ),
+        "refunds": [
+            refund_view(
+                item,
+                manual_resolution_allowed=(
+                    admin and provider.kind == "easypay" and item.status == "pending"
+                ),
+            )
+            for item in refunds
+        ],
         "refund_allowed": bool(
             provider
             and provider.allow_refunds

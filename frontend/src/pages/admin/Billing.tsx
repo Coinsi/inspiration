@@ -13,12 +13,14 @@ import {
   orderLabel,
   parseMinor,
   points,
+  providerConfigDefaults,
   refundLabel,
   type BillingSettings,
   type CreditPack,
   type PaymentOrder,
   type PaymentProvider,
   type PaymentProviderType,
+  type PaymentRefund,
 } from "@/lib/billing";
 import { BillingOrderDetail } from "@/components/BillingOrderDetail";
 import { Button } from "@/components/ui/button";
@@ -128,27 +130,45 @@ function BillingManager() {
     await qc.invalidateQueries({ queryKey: ["admin", "billing"] });
     await qc.invalidateQueries({ queryKey: ["billing"] });
   }
-  async function action(path: string, confirmation?: string) {
-    if (busy) return;
+  async function action(
+    path: string,
+    confirmation?: string,
+    body: unknown = {},
+    message?: string,
+  ) {
+    if (busy) return false;
     if (
       confirmation &&
       !(await confirm({
         title: confirmation,
-        message: confirmation.startsWith("拒绝")
-          ? "拒绝后不会向支付渠道发起退款，申请人可在订单中查看结果。"
-          : "批准后将向支付渠道提交退款并扣回对应积分。",
+        message:
+          message ??
+          (confirmation.startsWith("拒绝")
+            ? "拒绝后不会向支付渠道发起退款，申请人可在订单中查看结果。"
+            : "批准后将向支付渠道提交退款并扣回对应积分。"),
         confirmText: "确认执行",
         danger: true,
       }))
     )
-      return;
+      return false;
     setBusy(true);
     setError(null);
     try {
-      await api.post(path, {});
+      const updated = await api.post<PaymentOrder>(path, body);
+      if (updated?.id) {
+        qc.setQueriesData<PaymentOrder[]>(
+          { queryKey: ["admin", "billing", "orders"] },
+          (current) =>
+            current?.map((order) =>
+              order.id === updated.id ? updated : order,
+            ),
+        );
+      }
       await refresh();
+      return true;
     } catch (e) {
       setError(e);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -571,6 +591,27 @@ function BillingManager() {
                       </Button>
                     )}
                   </div>
+                  {refund.status === "pending" &&
+                    refund.manual_resolution_allowed && (
+                      <ManualRefundResolution
+                        refund={refund}
+                        currency={order.currency}
+                        busy={busy}
+                        error={error}
+                        onResolve={(outcome, reason) =>
+                          action(
+                            `/admin/billing/refunds/${refund.id}/resolve`,
+                            outcome === "succeeded"
+                              ? "确认商户已退款成功？"
+                              : "确认商户未发生退款？",
+                            { outcome, reason },
+                            outcome === "succeeded"
+                              ? "将结算这笔已实际退款的积分，并记录退款成功，不会再次向渠道发起退款。请确认已有商户后台或退款凭证支持。"
+                              : "将标记退款失败并释放退款预留积分。只有商户已明确确认未发生退款时才能操作；无法确认时请保留处理中。",
+                          )
+                        }
+                      />
+                    )}
                 </div>
               ))}
             {order.status === "completed" &&
@@ -583,6 +624,101 @@ function BillingManager() {
         )}
       </Modal>
     </div>
+  );
+}
+
+function ManualRefundResolution({
+  refund,
+  currency,
+  busy,
+  error,
+  onResolve,
+}: {
+  refund: PaymentRefund;
+  currency: string;
+  busy: boolean;
+  error: unknown;
+  onResolve: (
+    outcome: "succeeded" | "failed",
+    reason: string,
+  ) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [outcome, setOutcome] = useState<"" | "succeeded" | "failed">("");
+  const [reason, setReason] = useState("");
+  if (!open)
+    return (
+      <div className="billing-refund-operation">
+        <p>
+          渠道尚未确认退款最终结果。可先核实商户后台或退款凭证；无法确认时保留处理中。
+        </p>
+        <Button variant="outline" disabled={busy} onClick={() => setOpen(true)}>
+          核实商户退款结果
+        </Button>
+      </div>
+    );
+  return (
+    <form
+      className="billing-refund-form billing-form"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!outcome || !reason.trim() || busy) return;
+        if (await onResolve(outcome, reason.trim())) setOpen(false);
+      }}
+    >
+      <h3>记录已核实的退款结果</h3>
+      <p>
+        核对商户退款 {money(refund.amount_minor, currency)}{" "}
+        的实际结果。此操作只更新退款记录和预留积分，不会重新发起退款。
+      </p>
+      <label>
+        商户实际退款结果
+        <StudioSelect
+          aria-label="商户实际退款结果"
+          value={outcome}
+          disabled={busy}
+          onValueChange={(value) =>
+            setOutcome(value as "" | "succeeded" | "failed")
+          }
+        >
+          <option value="" disabled>
+            请选择已核实的结果
+          </option>
+          <option value="succeeded">已核实退款成功</option>
+          <option value="failed">已核实未发生退款</option>
+        </StudioSelect>
+      </label>
+      <label>
+        核实依据
+        <textarea
+          aria-label="核实依据"
+          value={reason}
+          required
+          maxLength={500}
+          disabled={busy}
+          placeholder="填写商户退款记录、退款凭证或确认结果的依据"
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </label>
+      {error != null && (
+        <div className="billing-error">
+          {error instanceof Error ? error.message : "核实结果未保存，请重试。"}
+        </div>
+      )}
+      <div className="billing-actions">
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => setOpen(false)}
+        >
+          暂不处理
+        </Button>
+        <Button disabled={busy || !outcome || !reason.trim()}>
+          {busy ? "记录中…" : "确认核实结果"}
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -865,13 +1001,37 @@ function ProviderForm({
   const [allowRefunds, setAllowRefunds] = useState(
     initial?.allow_refunds ?? true,
   );
-  const [config, setConfig] = useState<Record<string, string>>({});
+  const [config, setConfig] = useState<Record<string, string>>(() =>
+    initial
+      ? {}
+      : providerConfigDefaults(types.find((type) => type.kind === kind)),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const providerType = types.find((t) => t.kind === kind);
-  const cnyOnly = kind === "wechatpay" || kind === "alipay";
+  const cnyOnly =
+    kind === "wechatpay" || kind === "alipay" || kind === "easypay";
   async function save() {
     if (busy) return;
+    if (!initial) {
+      const missing = providerType?.fields.find(
+        (field) => field.required && !config[field.key]?.trim(),
+      );
+      if (missing) {
+        setError(new Error(`请填写${missing.label}`));
+        return;
+      }
+      const invalid = providerType?.fields.find(
+        (field) =>
+          field.options?.length &&
+          config[field.key] &&
+          !field.options.some((option) => option.value === config[field.key]),
+      );
+      if (invalid) {
+        setError(new Error(`请选择有效的${invalid.label}`));
+        return;
+      }
+    }
     setBusy(true);
     setError(null);
     try {
@@ -926,7 +1086,9 @@ function ProviderForm({
               value={kind}
               onValueChange={(v) => {
                 setKind(v);
-                setConfig({});
+                setConfig(
+                  providerConfigDefaults(types.find((type) => type.kind === v)),
+                );
                 setCurrency("cny");
                 setError(null);
               }}
@@ -938,6 +1100,11 @@ function ProviderForm({
               ))}
             </StudioSelect>
           </label>
+          {kind === "easypay" && (
+            <p className="billing-muted">
+              一个渠道选择一种支付方式。如需同时提供微信和支付宝，请使用同一商户配置分别创建两个渠道，并用渠道名称区分。
+            </p>
+          )}
           <label>
             收款币种
             <CurrencyInput
@@ -983,8 +1150,26 @@ function ProviderForm({
             <label key={field.key}>
               {field.label}
               {field.required ? " *" : ""}
-              {field.key.includes("private_key") ||
-              field.key.endsWith("public_key") ? (
+              {field.options?.length ? (
+                <StudioSelect
+                  aria-label={field.label}
+                  value={config[field.key] ?? ""}
+                  disabled={busy}
+                  onValueChange={(value) =>
+                    setConfig({ ...config, [field.key]: value })
+                  }
+                >
+                  {!field.required && field.default == null && (
+                    <option value="">未指定</option>
+                  )}
+                  {field.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </StudioSelect>
+              ) : field.key.includes("private_key") ||
+                field.key.endsWith("public_key") ? (
                 <textarea
                   className={field.secret ? "billing-secret" : undefined}
                   required={field.required}

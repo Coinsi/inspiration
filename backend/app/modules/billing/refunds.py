@@ -3,6 +3,7 @@
 import logging
 import uuid
 from datetime import timedelta
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -140,7 +141,34 @@ def approve(db: Session, refund_id: uuid.UUID, actor: uuid.UUID) -> BillingRefun
     return check_refund(db, refund_id, start=True)
 
 
-def apply_result(db: Session, refund_id: uuid.UUID, result: RefundEvidence) -> BillingRefund:
+def _finalize(
+    db: Session, order: BillingOrder, refund: BillingRefund, outcome: Literal["succeeded", "failed"]
+) -> BillingRefund:
+    if outcome == "succeeded":
+        wallet.change(db, order.user_id, "refund_settle", refund.id, reserved=-refund.credits)
+        order.refunded_minor += refund.amount_minor
+        order.refunded_credits += refund.credits
+    else:
+        wallet.change(
+            db,
+            order.user_id,
+            "refund_release",
+            refund.id,
+            available=refund.credits,
+            reserved=-refund.credits,
+        )
+    refund.status = outcome
+    db.flush()
+    return refund
+
+
+def apply_result(
+    db: Session,
+    refund_id: uuid.UUID,
+    result: RefundEvidence,
+    *,
+    confirmed_legacy_response: bool = False,
+) -> BillingRefund:
     order, refund = _pair(db, refund_id)
     if refund.status != "pending":
         return refund
@@ -163,25 +191,48 @@ def apply_result(db: Session, refund_id: uuid.UUID, result: RefundEvidence) -> B
         db.flush()
         return refund
     if result.state == "succeeded":
-        if result.amount_minor is None or result.currency is None or not refund.provider_refund_id:
+        if (
+            result.amount_minor is None
+            or result.currency is None
+            or not (refund.provider_refund_id or confirmed_legacy_response)
+        ):
             raise Conflict("支付平台退款凭证不完整")
-        wallet.change(db, order.user_id, "refund_settle", refund.id, reserved=-refund.credits)
-        order.refunded_minor += refund.amount_minor
-        order.refunded_credits += refund.credits
-    elif result.state == "failed":
-        wallet.change(
-            db,
-            order.user_id,
-            "refund_release",
-            refund.id,
-            available=refund.credits,
-            reserved=-refund.credits,
-        )
-    else:
+    elif result.state != "failed":
         raise ProviderError("支付平台返回了未知退款状态")
-    refund.status = result.state
+    _finalize(db, order, refund, result.state)
     _audit(db, f"billing.refund_{result.state}", order, refund)
-    db.flush()
+    return refund
+
+
+def resolve_easypay_refund(
+    db: Session,
+    refund_id: uuid.UUID,
+    outcome: Literal["succeeded", "failed"],
+    actor: uuid.UUID,
+    reason: str,
+) -> BillingRefund:
+    order, refund = _pair(db, refund_id)
+    provider = db.get(BillingProvider, order.provider_id)
+    if provider.kind != "easypay":
+        raise CapabilityUnsupported("请通过原支付渠道查询退款状态")
+    if refund.status == outcome:
+        return refund
+    if refund.status != "pending":
+        raise Conflict("仅待核对的易支付退款可以确认结果")
+    _finalize(db, order, refund, outcome)
+    audit.record(
+        db,
+        action="billing.easypay_refund_resolved",
+        user_id=actor,
+        target_type="billing_order",
+        target_id=order.id,
+        detail={
+            "refund_id": str(refund.id),
+            "outcome": outcome,
+            "reason": reason,
+            "amount_minor": refund.amount_minor,
+        },
+    )
     return refund
 
 
@@ -191,13 +242,31 @@ def check_refund(
     order, refund = _pair(db, refund_id)
     if refund.status != "pending":
         return refund
+    provider = db.get(BillingProvider, order.provider_id)
+    if provider.kind == "easypay":
+        if not start:
+            return refund
+        # Only the approval request may dispatch this legacy refund. Hold its
+        # locks through the attempt so an operator cannot resolve it in flight.
+        adapter = orders.provider_for(provider)
+        try:
+            evidence = adapter.create_refund(
+                orders.checkout_request(order),
+                order.payment_id,
+                str(refund_id),
+                refund.amount_minor,
+            )
+        except ProviderError:
+            logger.warning("EasyPay refund requires merchant reconciliation refund=%s", refund_id)
+            return refund
+        return apply_result(db, refund_id, evidence, confirmed_legacy_response=True)
     moment = orders.now()
     if not start and (
         (worker and refund.next_check_at > moment)
         or (not worker and refund.next_check_at > moment + timedelta(seconds=45))
     ):
         return refund
-    adapter = orders.provider_for(db.get(BillingProvider, order.provider_id))
+    adapter = orders.provider_for(provider)
     request = orders.checkout_request(order)
     payment_id = order.payment_id
     provider_refund_id = refund.provider_refund_id

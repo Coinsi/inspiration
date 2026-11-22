@@ -6,7 +6,7 @@ from threading import Event, Thread
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
-from app.models.billing import BillingOrder, BillingRefund
+from app.models.billing import BillingOrder, BillingProvider, BillingRefund
 from app.modules.billing import orders, refunds
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,13 @@ def reconcile_once(stop: Event | None = None) -> None:
         refund_ids = list(
             db.scalars(
                 select(BillingRefund.id)
-                .where(BillingRefund.status == "pending", BillingRefund.next_check_at <= timestamp)
+                .join(BillingOrder, BillingOrder.id == BillingRefund.order_id)
+                .join(BillingProvider, BillingProvider.id == BillingOrder.provider_id)
+                .where(
+                    BillingRefund.status == "pending",
+                    BillingRefund.next_check_at <= timestamp,
+                    BillingProvider.kind != "easypay",
+                )
                 .order_by(BillingRefund.next_check_at, BillingRefund.id)
                 .limit(BATCH_LIMIT)
             )

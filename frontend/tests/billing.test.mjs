@@ -21,9 +21,43 @@ const {
   checkoutLink,
   qrImage,
   orderLabel,
+  providerConfigDefaults,
 } = await import(
   `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
 );
+
+test("provider defaults retain numeric zero and only apply to the selected provider", () => {
+  const provider = {
+    kind: "easypay",
+    fields: [
+      { key: "refund_success_code", required: true, default: 0 },
+      {
+        key: "payment_mode",
+        required: true,
+        options: [
+          { value: "qrcode", label: "扫码" },
+          { value: "popup", label: "收银台" },
+        ],
+      },
+      { key: "payment_type", required: true, default: "alipay" },
+      { key: "pkey", required: true, secret: true },
+      { key: "channel_id", required: false },
+    ],
+  };
+  assert.deepEqual(providerConfigDefaults(provider), {
+    refund_success_code: "0",
+    payment_mode: "qrcode",
+    payment_type: "alipay",
+  });
+  assert.deepEqual(
+    providerConfigDefaults({
+      kind: "stripe",
+      fields: [{ key: "secret_key", required: true, secret: true }],
+    }),
+    {},
+  );
+  assert.deepEqual(providerConfigDefaults(), {});
+});
 
 test("points and payment minor units remain distinct and reject silent rounding", () => {
   assert.equal(points(1200), "12");

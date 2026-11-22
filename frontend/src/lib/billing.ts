@@ -42,6 +42,7 @@ export interface PaymentRefund {
   credits: number;
   reason: string;
   created_at: string;
+  manual_resolution_allowed?: boolean;
 }
 
 export interface PaymentOrder {
@@ -76,7 +77,27 @@ export interface BillingSettings {
 export interface PaymentProviderType {
   kind: string;
   name: string;
-  fields: { key: string; label: string; secret: boolean; required: boolean }[];
+  fields: {
+    key: string;
+    label: string;
+    secret: boolean;
+    required: boolean;
+    options?: { value: string; label: string }[];
+    default?: string | number;
+  }[];
+}
+
+export function providerConfigDefaults(
+  provider?: PaymentProviderType,
+): Record<string, string> {
+  return Object.fromEntries(
+    (provider?.fields ?? []).flatMap((field) => {
+      const value =
+        field.default ??
+        (field.required ? field.options?.[0]?.value : undefined);
+      return value == null ? [] : [[field.key, String(value)]];
+    }),
+  );
 }
 
 export const billingCurrencies = [

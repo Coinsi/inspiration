@@ -1,9 +1,11 @@
 """The billing API, state transitions, and ledger against isolated PostgreSQL."""
 
+import hashlib
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from urllib.parse import urlencode
 
 import pytest
 from cryptography.fernet import Fernet
@@ -20,6 +22,7 @@ from app.modules.billing.providers import Checkout, PaymentEvidence, RefundEvide
 from tests.test_media_workflow import studio  # noqa: F401
 
 API = "/api/v1"
+EASYPAY_KEY = "fixture_only_easypay_key_2026"
 
 
 class FakeProvider:
@@ -138,6 +141,26 @@ def setup_sales(client):
         },
     )
     return pack, provider
+
+
+def add_easypay(client):
+    return endpoint(
+        client,
+        "POST",
+        "/admin/billing/providers",
+        {
+            "name": "易支付（支付宝）",
+            "kind": "easypay",
+            "currency": "cny",
+            "config": {
+                "api_base": "https://merchant.example.com",
+                "pid": "100001",
+                "pkey": EASYPAY_KEY,
+                "payment_type": "alipay",
+                "payment_mode": "popup",
+            },
+        },
+    )
 
 
 def checkout(client, pack, provider, key=None):
@@ -424,3 +447,147 @@ def test_superadmin_can_only_release_terminal_holds_without_an_active_resume(com
     assert endpoint(client, "POST", path, payload)["status"] == "released"
     assert read_wallet(client)["available"] == 1000
     assert read_wallet(client)["reserved"] == 0
+
+
+def test_easypay_get_and_post_callback_require_live_query_before_credit(commerce, monkeypatch):
+    from app.modules.billing import easypay_provider
+    from app.modules.billing.providers import get_provider
+
+    client, _, _, _, _ = commerce
+    pack, stripe = setup_sales(client)
+    provider = add_easypay(client)
+    queried = []
+    upstream_status = "0"
+
+    def gateway(base_url, path, *, query=None, form=None):
+        assert base_url == "https://merchant.example.com"
+        assert path.strip("/") == "api.php" and query == form
+        assert query["act"] == "order" and query["pid"] == "100001"
+        assert query["key"] == EASYPAY_KEY
+        queried.append(query["out_trade_no"])
+        return {
+            "code": 1,
+            "status": upstream_status,
+            "pid": "100001",
+            "type": "alipay",
+            "out_trade_no": query["out_trade_no"],
+            "money": "1.03",
+            "trade_no": "gateway-101",
+        }
+
+    monkeypatch.setattr(orders, "get_provider", get_provider)
+    monkeypatch.setattr(easypay_provider, "request_json", gateway)
+    order = checkout(client, pack, provider)
+    assert order["checkout_url"].startswith("https://merchant.example.com/submit.php?")
+    assert EASYPAY_KEY not in order["checkout_url"]
+    assert not order["cancel_allowed"]
+    form = {
+        "pid": "100001",
+        "type": "alipay",
+        "out_trade_no": uuid.UUID(order["id"]).hex,
+        "trade_no": "gateway-101",
+        "money": "1.03",
+        "trade_status": "TRADE_SUCCESS",
+    }
+    to_sign = "&".join(key + "=" + form[key] for key in sorted(form))
+    form["sign"] = hashlib.md5((to_sign + EASYPAY_KEY).encode(), usedforsecurity=False).hexdigest()
+    form["sign_type"] = "MD5"
+    wire = urlencode(form)
+    path = f"{API}/billing/webhook/{provider['id']}"
+    assert client.get(f"{API}/billing/webhook/{stripe['id']}?" + wire).status_code == 405
+    assert not queried
+    assert client.get(path + "?" + wire).status_code >= 400
+    assert read_wallet(client)["available"] == 0
+    upstream_status = "1"
+    callback = client.get(path + "?" + wire)
+    assert callback.status_code == 200 and callback.text == "success"
+    callback = client.post(
+        path,
+        content=wire,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    assert callback.status_code == 200 and callback.text == "success"
+    assert queried == [form["out_trade_no"]] * 3
+    assert read_wallet(client)["available"] == 10001
+
+
+def test_easypay_refund_timeout_has_no_redelivery_and_manual_resolution_is_audited(
+    commerce,
+):
+    client, sessions, ids, fake, other = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    order = checkout(client, pack, provider)
+    assert notify(client, provider, order).text == "success"
+    fake.refund_timeout_once = True
+    path = f"/admin/billing/orders/{order['id']}/refunds"
+    payload = {
+        "amount_minor": 103,
+        "reason": "退款测试",
+        "idempotency_key": str(uuid.uuid4()),
+    }
+    original = endpoint(client, "POST", path, payload)
+    refund = original["refunds"][0]
+    assert refund["status"] == "pending" and refund["manual_resolution_allowed"]
+    assert read_wallet(client)["reserved"] == 10001
+    with sessions() as db:
+        db.get(BillingRefund, uuid.UUID(refund["id"])).next_check_at = orders.now()
+        db.commit()
+    worker.reconcile_once()
+    assert endpoint(client, "POST", path, payload)["refunds"][0]["status"] == "pending"
+    assert (
+        endpoint(client, "POST", f"/admin/billing/refunds/{refund['id']}/check")["refunds"][0][
+            "status"
+        ]
+        == "pending"
+    )
+    assert len(fake.refunded) == 1
+    resolution = f"/admin/billing/refunds/{refund['id']}/resolve"
+    evidence = {"outcome": "succeeded", "reason": "商户后台确认已完成退款"}
+    assert client.post(API + resolution, json=evidence, headers=other).status_code == 403
+    assert endpoint(client, "POST", resolution, evidence)["refunded_minor"] == 103
+    assert endpoint(client, "POST", resolution, evidence)["refunded_minor"] == 103
+    assert client.post(API + resolution, json={**evidence, "outcome": "failed"}).status_code == 409
+    assert read_wallet(client)["available"] == read_wallet(client)["reserved"] == 0
+    from app.models.identity import AuditLog
+
+    with sessions() as db:
+        log = db.scalars(
+            select(AuditLog).where(AuditLog.action == "billing.easypay_refund_resolved")
+        ).one()
+        assert log.user_id == ids["user"] and log.detail["reason"] == evidence["reason"]
+
+
+def test_easypay_recorded_refund_success_does_not_require_a_fabricated_id(
+    commerce,
+    monkeypatch,
+):
+    client, sessions, _, fake, _ = commerce
+    pack, _ = setup_sales(client)
+    provider = add_easypay(client)
+    order = checkout(client, pack, provider)
+    assert notify(client, provider, order).text == "success"
+    monkeypatch.setattr(
+        fake,
+        "create_refund",
+        lambda order, _, refund, amount: RefundEvidence(
+            "succeeded", amount_minor=amount, currency=order.currency
+        ),
+    )
+    result = endpoint(
+        client,
+        "POST",
+        f"/admin/billing/orders/{order['id']}/refunds",
+        {
+            "amount_minor": 30,
+            "reason": "部分退款",
+            "idempotency_key": str(uuid.uuid4()),
+        },
+    )
+    refund = result["refunds"][0]
+    assert refund["status"] == "succeeded" and not refund["manual_resolution_allowed"]
+    with sessions() as db:
+        assert db.get(BillingRefund, uuid.UUID(refund["id"])).provider_refund_id is None
+    assert result["refunded_minor"] == 30 and read_wallet(client)["reserved"] == 0

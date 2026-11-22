@@ -113,6 +113,9 @@ async function fixture({
     failCreate: false,
     failRefund: false,
     failAdminRefund: false,
+    failProvider: false,
+    failResolution: false,
+    refundResolutions: [],
     reservations: [
       {
         job_id: "reservation-test",
@@ -247,6 +250,59 @@ async function fixture({
     if (path === "/admin/billing/provider-types")
       return send([
         {
+          kind: "easypay",
+          name: "易支付",
+          fields: [
+            {
+              key: "api_base",
+              label: "易支付接口地址",
+              secret: false,
+              required: true,
+            },
+            { key: "pid", label: "商户 PID", secret: false, required: true },
+            { key: "pkey", label: "商户密钥", secret: true, required: true },
+            {
+              key: "payment_type",
+              label: "支付方式",
+              secret: false,
+              required: true,
+              default: "alipay",
+              options: [
+                { value: "alipay", label: "支付宝" },
+                { value: "wxpay", label: "微信支付" },
+              ],
+            },
+            {
+              key: "payment_mode",
+              label: "付款入口",
+              secret: false,
+              required: true,
+              default: "qrcode",
+              options: [
+                { value: "qrcode", label: "二维码" },
+                { value: "popup", label: "收银台" },
+              ],
+            },
+            {
+              key: "channel_id",
+              label: "通道 ID",
+              secret: false,
+              required: false,
+            },
+            {
+              key: "refund_success_code",
+              label: "退款成功返回码",
+              secret: false,
+              required: false,
+              default: "1",
+              options: [
+                { value: "1", label: "1" },
+                { value: "0", label: "0" },
+              ],
+            },
+          ],
+        },
+        {
           kind: "wechatpay",
           name: "微信支付 Native",
           fields: [
@@ -336,10 +392,35 @@ async function fixture({
     if (path === "/admin/billing/providers") {
       if (method === "POST") {
         providerBodies.push(body());
+        if (state.failProvider) {
+          state.failProvider = false;
+          return send({ error: { message: "渠道保存失败，请重试" } }, 502);
+        }
         const { config, ...publicFields } = body();
         state.providers.push({ id: "provider-created", ...publicFields });
       }
       return send(state.providers);
+    }
+    const resolution = path.match(
+      /^\/admin\/billing\/refunds\/([^/]+)\/resolve$/,
+    );
+    if (resolution) {
+      state.refundResolutions.push(body());
+      if (state.failResolution) {
+        state.failResolution = false;
+        return send({ error: { message: "核实结果暂未保存，请重试" } }, 500);
+      }
+      const owner = state.orders.find((order) =>
+        order.refunds.some((refund) => refund.id === resolution[1]),
+      );
+      const refund = owner.refunds.find(
+        (refund) => refund.id === resolution[1],
+      );
+      refund.status = body().outcome;
+      refund.manual_resolution_allowed = false;
+      if (refund.status === "succeeded")
+        owner.refunded_minor += refund.amount_minor;
+      return send(owner);
     }
     if (path.startsWith("/admin/billing/providers/")) {
       Object.assign(
@@ -481,7 +562,10 @@ try {
     "未使用的积分，希望申请退款",
   );
   await user.page.getByRole("button", { name: "提交退款申请" }).click();
-  await user.page.getByRole("dialog").getByText("退款待审核", { exact: true }).waitFor();
+  await user.page
+    .getByRole("dialog")
+    .getByText("退款待审核", { exact: true })
+    .waitFor();
   checks.push(
     "user purchase retry preserves idempotency, reload restores order, GET polling, paid/completed distinction, refund failure preserves reason",
   );
@@ -547,6 +631,12 @@ try {
     .getByRole("button", { name: "支付渠道", exact: true })
     .click();
   await admin.page.getByRole("button", { name: "添加支付渠道" }).click();
+  await admin.page
+    .getByRole("button", { name: "支付服务商", exact: true })
+    .click();
+  await admin.page
+    .getByRole("option", { name: "微信支付 Native", exact: true })
+    .click();
   await admin.page.getByLabel("渠道名称").fill("新微信渠道");
   await admin.page.getByLabel("App ID", { exact: false }).fill("fixture-app");
   await admin.page
@@ -571,6 +661,12 @@ try {
   await admin.page.getByRole("button", { name: "保存支付渠道" }).click();
   await admin.page.getByRole("cell", { name: "新微信渠道" }).waitFor();
   await admin.page.getByRole("button", { name: "添加支付渠道" }).click();
+  await admin.page
+    .getByRole("button", { name: "支付服务商", exact: true })
+    .click();
+  await admin.page
+    .getByRole("option", { name: "微信支付 Native", exact: true })
+    .click();
   assert.equal(
     await admin.page.getByLabel("API v3 密钥", { exact: false }).inputValue(),
     "",
@@ -657,6 +753,280 @@ try {
     .waitFor();
   await screenshot(english.page, "user-phone-360-english-dark");
   await english.context.close();
+  const easy = await fixture({ width: 390, height: 844, theme: "light" });
+  await easy.page.goto(`${base}/admin/billing`);
+  await easy.page
+    .getByRole("button", { name: "支付渠道", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "添加支付渠道", exact: true })
+    .click();
+  assert.match(
+    await easy.page
+      .getByRole("button", { name: "支付方式", exact: true })
+      .innerText(),
+    /支付宝/,
+  );
+  assert.match(
+    await easy.page
+      .getByRole("button", { name: "付款入口", exact: true })
+      .innerText(),
+    /二维码/,
+  );
+  assert.match(
+    await easy.page
+      .getByRole("button", { name: "退款成功返回码", exact: true })
+      .innerText(),
+    /1/,
+  );
+  assert.equal(
+    await easy.page
+      .getByRole("button", { name: "币种", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await easy.page.getByLabel("渠道名称").fill("易支付 · 微信");
+  await easy.page
+    .getByLabel("易支付接口地址")
+    .fill("https://gateway.example.test");
+  await easy.page.getByLabel("商户 PID").fill("fixture-pid");
+  await easy.page.getByLabel("商户密钥").fill("fixture-pkey");
+  await easy.page.getByLabel("通道 ID").fill("123");
+  for (const [name, option] of [
+    ["支付方式", "微信支付"],
+    ["付款入口", "收银台"],
+    ["退款成功返回码", "0"],
+  ]) {
+    await easy.page.getByRole("button", { name, exact: true }).click();
+    await easy.page.getByRole("option", { name: option, exact: true }).click();
+  }
+  easy.state.failProvider = true;
+  await easy.page
+    .getByRole("button", { name: "保存支付渠道", exact: true })
+    .click();
+  await easy.page
+    .getByRole("alert")
+    .filter({ hasText: "渠道保存失败" })
+    .waitFor();
+  assert.equal(
+    await easy.page.getByLabel("商户密钥").inputValue(),
+    "fixture-pkey",
+  );
+  assert.match(
+    await easy.page
+      .getByRole("button", { name: "付款入口", exact: true })
+      .innerText(),
+    /收银台/,
+  );
+  await screenshot(easy.page, "easypay-parameters-phone-light");
+  await easy.page
+    .getByRole("button", { name: "保存支付渠道", exact: true })
+    .click();
+  await easy.page
+    .getByRole("cell", { name: "易支付 · 微信", exact: true })
+    .waitFor();
+  assert.deepEqual(easy.providerBodies[0], easy.providerBodies[1]);
+  assert.equal(easy.providerBodies[1].currency, "cny");
+  assert.deepEqual(easy.providerBodies[1].config, {
+    api_base: "https://gateway.example.test",
+    pid: "fixture-pid",
+    pkey: "fixture-pkey",
+    channel_id: "123",
+    payment_type: "wxpay",
+    payment_mode: "popup",
+    refund_success_code: "0",
+  });
+  await easy.page.reload();
+  await easy.page
+    .getByRole("button", { name: "支付渠道", exact: true })
+    .click();
+  await easy.page
+    .getByRole("cell", { name: "易支付 · 微信", exact: true })
+    .waitFor();
+  await easy.page
+    .getByRole("button", { name: "添加支付渠道", exact: true })
+    .click();
+  assert.equal(await easy.page.getByLabel("商户密钥").inputValue(), "");
+  assert.match(
+    await easy.page
+      .getByRole("button", { name: "退款成功返回码", exact: true })
+      .innerText(),
+    /1/,
+  );
+  await easy.page.getByRole("button", { name: "关闭", exact: true }).click();
+
+  const pendingRefund = {
+    id: "manual-refund",
+    status: "pending",
+    amount_minor: 2800,
+    credits: 12000,
+    reason: "商户受理后等待核实",
+    created_at: now,
+    manual_resolution_allowed: false,
+  };
+  easy.state.orders[0].refunds = [pendingRefund];
+  await easy.page
+    .getByRole("button", { name: "订单与退款", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "查看订单", exact: true })
+    .click();
+  assert.equal(
+    await easy.page
+      .getByRole("button", { name: "核实商户退款结果", exact: true })
+      .count(),
+    0,
+  );
+  pendingRefund.manual_resolution_allowed = true;
+  await easy.page
+    .getByRole("button", { name: "查询退款结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "核实商户退款结果", exact: true })
+    .waitFor();
+  assert.equal(pendingRefund.status, "pending");
+  await easy.page
+    .getByRole("button", { name: "核实商户退款结果", exact: true })
+    .click();
+  assert.equal(
+    await easy.page
+      .getByRole("button", { name: "确认核实结果", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await easy.page
+    .getByRole("button", { name: "商户实际退款结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("option", { name: "已核实退款成功", exact: true })
+    .click();
+  await easy.page
+    .getByLabel("核实依据", { exact: true })
+    .fill("已核对商户后台退款记录及到账凭证，确认原路退回。");
+  await screenshot(easy.page, "easypay-refund-verification-phone-light");
+  easy.state.failResolution = true;
+  await easy.page
+    .getByRole("button", { name: "确认核实结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "确认执行", exact: true })
+    .click();
+  await easy.page
+    .getByRole("alert")
+    .filter({ hasText: "核实结果暂未保存" })
+    .waitFor();
+  assert.equal(pendingRefund.status, "pending");
+  if ((await easy.page.getByLabel("核实依据", { exact: true }).count()) === 0) {
+    await writeFile(
+      resolve(output, "manual-refund-failure-dom.txt"),
+      await easy.page.locator("body").innerText(),
+    );
+    await screenshot(easy.page, "manual-refund-failure");
+    throw new Error("Manual refund form disappeared after failed request");
+  }
+  assert.match(
+    await easy.page.getByLabel("核实依据", { exact: true }).inputValue(),
+    /到账凭证/,
+  );
+  await screenshot(easy.page, "easypay-refund-retry-phone-light");
+  await easy.page
+    .getByRole("button", { name: "确认核实结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "确认执行", exact: true })
+    .click();
+  await easy.page.getByText("已全额退款", { exact: true }).waitFor();
+  assert.equal(easy.state.refundResolutions.at(-1).outcome, "succeeded");
+  assert.equal(
+    await easy.page
+      .getByRole("button", { name: "核实商户退款结果", exact: true })
+      .count(),
+    0,
+  );
+  easy.state.orders[0].refunded_minor = 0;
+  easy.state.orders[0].refunds = [
+    {
+      ...pendingRefund,
+      id: "manual-refund-failed",
+      status: "pending",
+      manual_resolution_allowed: true,
+    },
+  ];
+  await easy.page.reload();
+  await easy.page
+    .getByRole("button", { name: "查看订单", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "核实商户退款结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "商户实际退款结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("option", { name: "已核实未发生退款", exact: true })
+    .click();
+  await easy.page
+    .getByLabel("核实依据", { exact: true })
+    .fill("商户后台明确退款失败，无实际扣款记录。");
+  const priorResolutionCount = easy.state.refundResolutions.length;
+  await easy.page
+    .getByRole("button", { name: "确认核实结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  assert.equal(easy.state.refundResolutions.length, priorResolutionCount);
+  assert.equal(easy.state.orders[0].refunds[0].status, "pending");
+  await easy.page
+    .getByRole("button", { name: "确认核实结果", exact: true })
+    .click();
+  await easy.page
+    .getByRole("button", { name: "确认执行", exact: true })
+    .click();
+  await easy.page
+    .getByRole("dialog")
+    .getByText("退款失败", { exact: true })
+    .first()
+    .waitFor();
+  assert.equal(easy.state.refundResolutions.at(-1).outcome, "failed");
+  assert.equal(easy.state.orders[0].refunded_minor, 0);
+  await easy.context.close();
+  checks.push(
+    "EasyPay catalog defaults and options persist across failed/retried save; CNY fixed and secrets cleared; pending manual refund requires explicit verified result, reason and confirmation, preserving pending on errors",
+  );
+  const easyBuyer = await fixture({ role: "user" });
+  easyBuyer.state.orders = [
+    {
+      ...orderBase,
+      id: "easypay-checkout",
+      provider_name: "易支付 · 微信",
+      status: "pending",
+      cancel_allowed: false,
+      checkout_url: "https://cashier.example.test/pay",
+    },
+  ];
+  await easyBuyer.page.goto(`${base}/billing?order=easypay-checkout`);
+  await easyBuyer.page
+    .getByRole("dialog")
+    .getByText("易支付 · 微信", { exact: true })
+    .waitFor();
+  assert.equal(
+    await easyBuyer.page
+      .getByRole("link", { name: "打开收银台", exact: true })
+      .getAttribute("href"),
+    "https://cashier.example.test/pay",
+  );
+  assert.equal(
+    await easyBuyer.page
+      .getByRole("button", { name: "取消订单", exact: true })
+      .count(),
+    0,
+  );
+  await easyBuyer.context.close();
+  checks.push(
+    "EasyPay user checkout uses provider name and hosted checkout; unsupported cancellation stays hidden; manual failed result requires confirmation and does not count as refunded",
+  );
   const denied = await fixture({ role: "admin" });
   await denied.page.goto(`${base}/admin/billing`);
   await denied.page
