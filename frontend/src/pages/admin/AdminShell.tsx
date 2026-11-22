@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Users,
   Wallet,
+  CreditCard,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { AccountMenu } from "@/components/AccountMenu";
@@ -97,6 +98,15 @@ export default function AdminShell() {
                 </NavLink>
               </div>
             ))}
+            {(me.user.platform_role == null ||
+              me.user.platform_role === "super") && (
+              <div>
+                <NavLink to="/admin/billing">
+                  <CreditCard size={17} />
+                  <span>支付与积分</span>
+                </NavLink>
+              </div>
+            )}
           </nav>
           <div className="admin-sidebar-foot">
             <span className="admin-role">

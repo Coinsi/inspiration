@@ -163,6 +163,8 @@ def safe_next(raw: str) -> str:
     allowed = (
         parsed.path == "/projects"
         or parsed.path.startswith("/projects/")
+        or parsed.path == "/billing"
+        or parsed.path == "/admin/billing"
         or parsed.path == "/admin/website"
         or parsed.path == "/admin/blog"
         or parsed.path.startswith("/admin/blog/")

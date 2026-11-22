@@ -1,4 +1,4 @@
-import { Languages, LogOut, UserRound, ChevronDown } from "lucide-react";
+import { Languages, LogOut, UserRound, ChevronDown, Coins } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -65,6 +65,10 @@ export function AccountMenu() {
           <Languages size={16} />
           {zh ? "外观与语言" : "Appearance & language"}
         </button>
+        <Link role="menuitem" className={headerMenuItem} to="/billing">
+          <Coins size={16} />
+          {zh ? "积分与账单" : "Points & billing"}
+        </Link>
         {me?.user.is_platform_admin && (
           <Link role="menuitem" className={headerMenuItem} to="/admin">
             <UserRound size={16} />

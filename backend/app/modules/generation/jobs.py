@@ -119,8 +119,16 @@ def dispatch(db, job):
 
             run_generation_job.apply_async(args=[str(job.id)], retry=False)
         except Exception:
-            db.refresh(job)
+            job = db.scalar(
+                select(GenerationJob)
+                .where(GenerationJob.id == job.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
             if job.status == "pending":
+                from app.modules.generation.billing import unsuccessful
+
+                unsuccessful(db, job)
                 job.error = "任务队列连接失败，请启动 worker / Redis，或配置本地执行器后重试"
                 event(job, "failed", job.error)
                 db.commit()
@@ -154,6 +162,9 @@ def recover_local():
             if job.status == "pending":
                 pending.append(job.id)
             else:
+                from app.modules.generation.billing import unsuccessful
+
+                unsuccessful(db, job)
                 job.error = "本地服务重启，任务执行已中断；云端请求可能已计费，请确认后重试"
                 event(job, "failed", job.error)
         db.commit()
@@ -315,6 +326,9 @@ def cancel(db, ctx, job_id):
         require(ctx.role, "timeline.edit")
     if job.status not in ACTIVE:
         raise Conflict("任务已经结束")
+    from app.modules.generation.billing import unsuccessful
+
+    unsuccessful(db, job)
     event(job, "canceled", "已取消本地执行/结果接收；已发送的云端请求可能仍然计费")
     audit.record(
         db,
@@ -405,6 +419,9 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
                 "external_job_id": resume["external_job_id"],
             }
         }
+    from app.modules.generation.billing import retry_snapshot
+
+    retry_snapshot(db, job, snapshot, resuming=bool(routing_state.get("resume")))
     new = GenerationJob(
         project_id=ctx.project.id,
         target_type=job.target_type,
@@ -420,6 +437,9 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
     )
     db.add(new)
     db.flush()
+    from app.modules.generation.billing import prepare as prepare_billing
+
+    prepare_billing(db, new)
     audit.record(
         db,
         action="generation.retry",
@@ -481,9 +501,10 @@ def execute(db, job_id):
         with SessionLocal() as check:
             if not delivery.owned(check, job_id, lease_token):
                 raise delivery.LeaseLost("Generation worker no longer owns this receipt")
-            explicit_cancel = check.scalar(
-                select(GenerationJob.status).where(GenerationJob.id == job_id)
-            ) == "canceled"
+            explicit_cancel = (
+                check.scalar(select(GenerationJob.status).where(GenerationJob.id == job_id))
+                == "canceled"
+            )
         if explicit_cancel:
             try:
                 provider.cancel(handle)
@@ -631,6 +652,19 @@ def execute(db, job_id):
                 mask=materialized_mask,
             )
             validate_job(db, job, snap, phase=submission_phase)
+            from app.modules.generation import billing
+
+            # Serialize the irreversible boundary with cancel. The marker and
+            # reservation are committed before any provider network request.
+            job = db.scalar(
+                select(GenerationJob)
+                .where(GenerationJob.id == job_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if job.status == "canceled":
+                raise media_engine.Canceled()
+            billing.dispatching(db, job)
             if delivery.policy(job) == "remote_receipt" and submission_phase != "resume":
                 delivery.remote_phase(db, job_id, "dispatching")
             delivery.fence(db, job_id)
@@ -649,6 +683,7 @@ def execute(db, job_id):
             if delivery.policy(job) == "remote_receipt":
                 delivery.remote_phase(db, job_id, "accepted", handle.external_job_id)
             job.external_job_id = handle.external_job_id
+            billing.accepted(job)
             db.commit()
             result = None
             for _ in range(600):
@@ -775,6 +810,9 @@ def execute(db, job_id):
             if hasattr(provider, "actual_cost")
             else float(job.estimated_cost or 0)
         )
+        from app.modules.generation.billing import settle
+
+        settle(db, job, points)
         from app.modules.media import renditions
 
         for index, (blob, typ) in enumerate(blobs):
@@ -887,6 +925,10 @@ def execute(db, job_id):
         db.rollback()
         job = db.scalar(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update())
         if job and job.status != "canceled" and delivery.owned(db, job_id, lease_token):
+            from app.modules.generation.billing import unsuccessful
+            from app.modules.generation.model_routing import SubmissionRejected
+
+            unsuccessful(db, job, explicitly_rejected=isinstance(exc, SubmissionRejected))
             job.error = str(exc)[:2000]
             event(job, "failed", job.error)
             from app.modules.generation.personal import record_result

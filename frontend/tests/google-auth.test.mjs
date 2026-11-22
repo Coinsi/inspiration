@@ -46,6 +46,10 @@ test('return targets reject external and normalized off-route URLs while preserv
   }
   assert.equal(safeAuthNext('/projects/123/workbench?account=security#panel'), '/projects/123/workbench?account=security#panel');
   assert.equal(safeAuthNext('/admin/website?tab=brand'), '/admin/website?tab=brand');
+  assert.equal(safeAuthNext('/billing?order=local-order'), '/billing?order=local-order');
+  assert.equal(safeAuthNext('/admin/billing'), '/admin/billing');
+  assert.equal(safeAuthNext('/billing/extra'), '/projects');
+  assert.equal(safeAuthNext('//evil.test/billing'), '/projects');
 });
 
 test('Google start validates the authorization host and sends only the safe return path and mode', async () => {

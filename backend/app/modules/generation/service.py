@@ -605,6 +605,9 @@ def submit(
     )
     db.add(job)
     db.flush()
+    from app.modules.generation.billing import prepare as prepare_billing
+
+    prepare_billing(db, job)
     audit.record(
         db,
         action="generation.submit",

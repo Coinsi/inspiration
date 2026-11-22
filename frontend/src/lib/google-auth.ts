@@ -89,7 +89,7 @@ export function safeAuthNext(requested: string | null | undefined): string {
     const url = new URL(requested, "https://inspiration.invalid");
     if (
       url.origin !== "https://inspiration.invalid" ||
-      !/^\/(?:projects(?:\/|$)|admin\/(?:website$|blog(?:\/|$)))/.test(url.pathname)
+      !/^\/(?:projects(?:\/|$)|billing$|admin\/(?:billing$|website$|blog(?:\/|$)))/.test(url.pathname)
     )
       return "/projects";
     return url.pathname + url.search + url.hash;

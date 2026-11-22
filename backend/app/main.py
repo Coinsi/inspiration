@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.errors import AppError, app_error_handler
 from app.modules.website.router import router as website_router
 from app.modules.admin.router import router as admin_router
+from app.modules.billing.router import router as billing_router
 from app.modules.website.blog import router as blog_router
 from app.modules.skill.router import router as skill_router
 from app.modules.director.router import router as director_router
@@ -130,6 +131,11 @@ async def lifespan(app):
         from app.modules.canvas.worker import start as start_canvas
         canvas_stop = start_canvas()
         background_workers["canvas"] = canvas_stop.is_alive
+    billing_stop = None
+    if not settings.celery_eager:
+        from app.modules.billing.worker import start as start_billing
+
+        billing_stop = start_billing()
     try:
         yield
     finally:
@@ -151,6 +157,8 @@ async def lifespan(app):
             await to_thread(production_stop)
         if canvas_stop:
             await to_thread(canvas_stop)
+        if billing_stop:
+            await to_thread(billing_stop)
         if library_stop:
             await to_thread(library_stop)
         if rendition_stop:
@@ -184,6 +192,7 @@ app.add_exception_handler(AppError, app_error_handler)
 app.include_router(identity_router, prefix="/api/v1")
 app.include_router(website_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(billing_router, prefix="/api/v1")
 app.include_router(blog_router, prefix="/api/v1")
 app.include_router(skill_router, prefix="/api/v1")
 app.include_router(director_router, prefix="/api/v1")

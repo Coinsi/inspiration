@@ -9,6 +9,7 @@ const GoogleAuthComplete = lazy(() => import("@/pages/GoogleAuthComplete"));
 const Projects = lazy(() => import("@/pages/Projects"));
 const Landing = lazy(() => import("@/pages/Landing"));
 const Download = lazy(() => import("@/pages/Download"));
+const Billing = lazy(() => import("@/pages/Billing"));
 const ModelAdmin = lazy(() => import("@/pages/ModelAdmin"));
 const WebsiteAdmin = lazy(() => import("@/pages/WebsiteAdmin"));
 const Blog = lazy(() => import("@/pages/Blog"));
@@ -21,6 +22,7 @@ const AdminTasks = lazy(() => import("@/pages/admin/Tasks"));
 const AdminQuotas = lazy(() => import("@/pages/admin/Quotas"));
 const AdminSystem = lazy(() => import("@/pages/admin/System"));
 const AdminAudit = lazy(() => import("@/pages/admin/Audit"));
+const AdminBilling = lazy(() => import("@/pages/admin/Billing"));
 
 const AssetDetail = lazy(() => import("@/pages/AssetDetail"));
 const Assets = lazy(() => import("@/pages/Assets"));
@@ -82,6 +84,7 @@ export default function App() {
             <Route path="models" element={<ModelAdmin />} />
             <Route path="tasks" element={<AdminTasks />} />
             <Route path="quotas" element={<AdminQuotas />} />
+            <Route path="billing" element={<AdminBilling />} />
             <Route path="system" element={<AdminSystem />} />
             <Route path="audit" element={<AdminAudit />} />
             <Route path="website" element={<WebsiteAdmin />} />
@@ -89,6 +92,7 @@ export default function App() {
             <Route path="blog/:postId" element={<BlogAdmin />} />
           </Route>
           <Route path="/projects" element={<Projects />} />
+          <Route path="/billing" element={<Billing />} />
           <Route path="/projects/:projectId" element={<AppShell />}>
             <Route index element={<Navigate to="workbench" replace />} />
             <Route path="workbench" element={<Workbench />} />

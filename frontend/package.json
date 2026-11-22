@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test:assistant": "node --test tests/assistant-conversation.test.mjs",
     "test:generative": "node --test tests/generative-ui.test.mjs",
+    "test:billing": "node --test tests/billing.test.mjs",
     "sync:generative": "node scripts/sync-generative-ui.mjs"
   },
   "dependencies": {

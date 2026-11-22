@@ -1,5 +1,7 @@
 # Frontend checks
 
+`npm run test:billing` checks payment/points unit conversion, decimal validation, safe checkout links and QR image sources, and the distinction between paid and credited states. With a local Vite server running, `node frontend/tests/billing-browser.mjs` from the repository root uses `APP_URL` (default `http://127.0.0.1:5183`), `PLAYWRIGHT_MODULE`, and optional `ARTIFACT_DIR`. It exercises real React components in Chrome with every API intercepted and all external requests blocked: purchase/refund retries and idempotency, return-to-order recovery, GET-only polling, cancellation, provider credential clearing, super-admin boundaries, settings, and point-reservation settlement. Screenshots cover desktop dark, phone light, and 360px English. These checks do not perform real payments or validate provider credentials.
+
 After `npm run build`, `node tests/platform-models-browser.mjs` (using `PLAYWRIGHT_MODULE` if needed) checks the actual platform model administrator components with intercepted APIs: global defaults and service dialogs, admin-only access, endpoint scope, light/dark and mobile layouts. Screenshots are under `test-results/platform-models`. No real credentials or model calls are used.
 
 `node --test tests/conversation-attachments.test.mjs tests/assistant-conversation.test.mjs` covers committed-offset uploads, prefix verification, refresh recovery, cancel/retry, attachment-only sends, immutable references and conversation isolation.
