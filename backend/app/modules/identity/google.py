@@ -425,6 +425,9 @@ def resolve_user(db, identity: VerifiedGoogleIdentity, payload: dict) -> User:
         )
         db.add(user)
         db.flush()
+        from app.modules.billing.wallet import grant_welcome
+
+        grant_welcome(db, user.id)
     if linked is None:
         db.add(
             UserIdentity(

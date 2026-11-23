@@ -114,7 +114,18 @@ def oauth(tmp_path, google_settings):
             "sqlite:///" + str(tmp_path / "google-auth.sqlite3"),
             connect_args={"check_same_thread": False, "timeout": 10},
         )
-    tables = [User, UserIdentity, AuthAttempt, RevokedToken, OAuthTransaction]
+    from app.models.billing import BillingSettings, CreditAccount, CreditEntry
+
+    tables = [
+        User,
+        UserIdentity,
+        AuthAttempt,
+        RevokedToken,
+        OAuthTransaction,
+        BillingSettings,
+        CreditAccount,
+        CreditEntry,
+    ]
     for model in tables:
         model.__table__.create(engine)
     sessions = sessionmaker(bind=engine, autoflush=False)

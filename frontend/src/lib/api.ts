@@ -546,6 +546,7 @@ export interface Generation {
 export interface Quota {
   limit_cost: number;
   used_cost: number;
+  blocked?: boolean;
 }
 export interface ProviderConfig {
   display_name?: string;

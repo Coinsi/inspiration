@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core import audit, health
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.errors import Conflict, NotFound
+from app.core.errors import CapabilityUnsupported, Conflict, NotFound
 from app.core.platform_permissions import platform_admin, role, super_admin
 from app.models.attachment import Attachment as ConversationAttachment
 from app.models.generation import GenerationJob, Quota
@@ -195,7 +195,10 @@ def task_detail(kind: TaskKind, task_id: uuid.UUID, db: Session = DB, actor: Use
 
 
 def quota_out(q):
-    token = hashlib.sha256(f"{q.id}:{q.limit_cost}:{q.period}:{q.updated_at}".encode()).hexdigest()
+    limit = format(q.limit_cost, ".2f")
+    token = hashlib.sha256(
+        f"{q.id}:{limit}:{q.period}:{q.blocked}:{q.updated_at}".encode()
+    ).hexdigest()
     return {
         "id": q.id,
         "project_id": q.project_id,
@@ -204,6 +207,7 @@ def quota_out(q):
         "limit": q.limit_cost,
         "used": q.used_cost,
         "period": q.period,
+        "blocked": q.blocked,
         "version": token,
     }
 
@@ -213,10 +217,13 @@ def quotas(
     offset: int = Query(0, ge=0),
     limit: int = Query(25, ge=1, le=100),
     user_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
     db: Session = DB,
     actor: User = ADMIN,
 ):
     conditions = [Quota.user_id == user_id] if user_id else []
+    if project_id:
+        conditions.append(Quota.project_id == project_id)
     rows = db.scalars(
         select(Quota)
         .where(*conditions)
@@ -235,10 +242,114 @@ class QuotaChange(BaseModel):
     expected_version: str = Field(min_length=64, max_length=64)
     limit: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
     reason: str = Field(min_length=1, max_length=300)
+    blocked: bool | None = None
+
+
+class QuotaCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    project_id: uuid.UUID
+    user_id: uuid.UUID | None = None
+    limit: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    reason: str = Field(min_length=1, max_length=300)
+    blocked: bool = False
+
+
+@router.get("/quotas/projects")
+def quota_projects(search: str = Query("", max_length=120), db: Session = DB, actor: User = SUPER):
+    stmt = select(Project).where(Project.deleted_at.is_(None))
+    if search.strip():
+        term = search.strip()
+        stmt = stmt.where(
+            or_(
+                Project.name.icontains(term, autoescape=True),
+                Project.code.icontains(term, autoescape=True),
+            )
+        )
+    return [
+        {"id": project.id, "name": project.name, "code": project.code}
+        for project in db.scalars(stmt.order_by(Project.updated_at.desc(), Project.id).limit(25))
+    ]
+
+
+@router.get("/quotas/projects/{project_id}/members")
+def quota_members(
+    project_id: uuid.UUID,
+    search: str = Query("", max_length=254),
+    db: Session = DB,
+    actor: User = SUPER,
+):
+    if not db.scalar(
+        select(Project.id).where(Project.id == project_id, Project.deleted_at.is_(None))
+    ):
+        raise NotFound("项目不存在")
+    stmt = (
+        select(User)
+        .join(Membership, Membership.user_id == User.id)
+        .where(Membership.project_id == project_id)
+    )
+    if search.strip():
+        term = search.strip()
+        stmt = stmt.where(
+            or_(
+                User.email.icontains(term, autoescape=True),
+                User.display_name.icontains(term, autoescape=True),
+            )
+        )
+    return [
+        {"id": member.id, "display_name": member.display_name, "email": member.email}
+        for member in db.scalars(stmt.order_by(User.display_name, User.id).limit(25))
+    ]
+
+
+@router.post("/quotas", status_code=201)
+def create_quota(data: QuotaCreate, db: Session = DB, actor: User = SUPER):
+    project_id = db.scalar(
+        select(Project.id)
+        .where(Project.id == data.project_id, Project.deleted_at.is_(None))
+        .with_for_update()
+    )
+    if not project_id:
+        raise NotFound("项目不存在")
+    if data.user_id and not db.scalar(
+        select(Membership.id).where(
+            Membership.project_id == project_id, Membership.user_id == data.user_id
+        )
+    ):
+        raise CapabilityUnsupported("请选择该项目的成员")
+    scope = "user" if data.user_id else "project"
+    if db.scalar(
+        select(Quota.id)
+        .where(Quota.project_id == project_id, Quota.scope == scope, Quota.user_id == data.user_id)
+        .limit(1)
+    ):
+        raise Conflict("已有该用量上限，请直接在列表中调整")
+    q = Quota(
+        project_id=project_id,
+        user_id=data.user_id,
+        scope=scope,
+        limit_cost=data.limit,
+        blocked=data.blocked,
+    )
+    db.add(q)
+    db.flush()
+    audit.record(
+        db,
+        user_id=actor.id,
+        project_id=project_id,
+        action="admin.quota.create",
+        target_type="quota",
+        target_id=q.id,
+        detail={"limit": str(data.limit), "blocked": q.blocked, "reason": data.reason},
+    )
+    return quota_out(q)
 
 
 @router.put("/quotas/{quota_id}")
 def change_quota(quota_id: uuid.UUID, data: QuotaChange, db: Session = DB, actor: User = SUPER):
+    project_id = db.scalar(select(Quota.project_id).where(Quota.id == quota_id))
+    if project_id is None:
+        raise NotFound("配额不存在")
+    db.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
     q = db.scalar(
         select(Quota)
         .where(Quota.id == quota_id)
@@ -249,17 +360,25 @@ def change_quota(quota_id: uuid.UUID, data: QuotaChange, db: Session = DB, actor
         raise NotFound("配额不存在")
     if quota_out(q)["version"] != data.expected_version:
         raise Conflict("额度已被修改，请刷新后重试")
-    if not data.reason.strip() or data.limit < q.used_cost:
+    unlimited = data.limit == 0 and data.blocked is not None
+    if not data.reason.strip() or (not unlimited and data.limit < q.used_cost):
         raise Conflict("请填写原因，额度不能小于已使用额度")
     before = str(q.limit_cost)
     q.limit_cost = data.limit
+    if data.blocked is not None:
+        q.blocked = data.blocked
     audit.record(
         db,
         user_id=actor.id,
         action="admin.quota.update",
         target_type="quota",
         target_id=q.id,
-        detail={"before": before, "after": str(data.limit), "reason": data.reason.strip()},
+        detail={
+            "before": before,
+            "after": str(data.limit),
+            "blocked": q.blocked,
+            "reason": data.reason.strip(),
+        },
     )
     db.flush()
     return quota_out(q)

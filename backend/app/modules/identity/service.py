@@ -38,6 +38,9 @@ def register_user(db: Session, data: schemas.RegisterIn) -> User:
             db.flush()
     except IntegrityError as exc:
         raise Conflict("邮箱或用户名已被使用" if data.username else "邮箱已被使用") from exc
+    from app.modules.billing.wallet import grant_welcome
+
+    grant_welcome(db, user.id)
     return user
 
 

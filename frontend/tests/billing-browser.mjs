@@ -151,6 +151,7 @@ async function fixture({
     requests.push(`${method} ${path}`);
     const send = (json, status = 200) => route.fulfill({ status, json });
     const body = () => req.postDataJSON();
+    if (path === "/projects") return send([]);
     if (path === "/me")
       return send({
         user: {

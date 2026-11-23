@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
-const out = resolve('../test-results/production-chat');
+const out = resolve(process.env.ARTIFACT_DIR || '../test-results/production-chat');
 await mkdir(out, { recursive: true });
 const css = (await readdir(resolve('dist/assets'))).find(n => n.startsWith('index-') && n.endsWith('.css'));
 await writeFile(resolve(out, 'production.css'), await readFile(resolve('dist/assets', css)));
@@ -22,7 +22,8 @@ await writeFile(resolve(out, 'index.html'), '<!doctype html><html class="light">
 const server = createServer(async (req, res) => { const name = ({ '/fixture.js': 'fixture.js', '/fixture.css': 'fixture.css', '/production.css': 'production.css' })[req.url] || 'index.html'; res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html'); res.end(await readFile(resolve(out, name))); });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
-let run, conversation, rejectSend = false;
+let run, conversation, rejectSend = false, rejectControl = false;
+let controlGate, controlArrived;
 const sends = [], controls = [], errors = [];
 function scenario(status, taskStatus, error = {}) {
   run = { id: 'run', goal: '内部评估用户指导，只提出有证据的影响范围', engine: 'mock', status, revision: 7, event_sequence: 1, policy: { budget_points: 0 }, tasks: [{ id: 'task', key: 'story', role: 'writer', goal: '整理雨夜开场', status: taskStatus, state: { question: '配乐偏悬疑还是舒缓？' }, error, result: {} }] };
@@ -46,7 +47,7 @@ try {
       if (rejectSend) return route.fulfill({ status: 409, json: { error: { code: 'VERSION_CONFLICT', message: '制作进展已更新，请查看最新消息后再发送；你的输入已保留' } } });
       return ok(conversation);
     }
-    if (path.endsWith('/control') && method === 'POST') { controls.push(route.request().postDataJSON()); return ok(path.startsWith('/production') ? run : conversation); }
+    if (path.endsWith('/control') && method === 'POST') { controls.push(route.request().postDataJSON()); controlArrived?.(); if (controlGate) await controlGate; if (rejectControl) { rejectControl = false; return route.fulfill({ status: 503, json: { error: { code: 'PROVIDER_ERROR', message: '测试连接中断，原步骤未变' } } }); } return ok(path.startsWith('/production') ? run : conversation); }
     if (path.startsWith('/conversations/chat')) return ok(conversation);
     if (path === '/production/runs/run') return ok(run);
     throw new Error(`Unexpected API ${method} ${path}`);
@@ -81,6 +82,48 @@ try {
   await page.locator('.production-brief').getByRole('button', { name: '重试', exact: true }).click();
   assert.equal(controls.at(-1).action, 'retry');
   assert.deepEqual(controls.at(-1).task_ids, ['task']);
+  scenario('needs_attention', 'failed', { code: 'QUOTA_EXCEEDED', message: '当前个人积分不足，请补充积分后重试', retryable: true, detail: { reason: 'insufficient_personal_credits', required_units: 125, available_units: 100, shortfall_units: 25 } }); await load();
+  const beforeRetry = controls.length;
+  await page.locator('.production-brief-toggle').click();
+  const actions = page.locator('.production-step-actions');
+  await actions.getByRole('button', { name: '重试', exact: true }).waitFor();
+  assert.equal(await actions.getByRole('button', { name: '调整：整理雨夜开场', exact: true }).count(), 1);
+  assert.equal(await actions.getByRole('link', { name: '补充积分', exact: true }).getAttribute('href'), '/billing?section=memberships&project=fixture');
+  assert.equal(controls.length, beforeRetry, 'opening a failed task must not submit anything');
+  await actions.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(out, 'credit-retry-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  assert.ok((await actions.getByRole('link', { name: '补充积分', exact: true }).boundingBox()).height >= 44);
+  await actions.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(out, 'credit-retry-mobile.png'), fullPage: true });
+  let releaseControl;
+  controlGate = new Promise(resolve => { releaseControl = resolve; });
+  const arrived = new Promise(resolve => { controlArrived = resolve; });
+  await actions.getByRole('button', { name: '重试', exact: true }).evaluate(button => { button.click(); button.click(); });
+  await arrived;
+  assert.equal(controls.length, beforeRetry + 1, 'synchronous repeated clicks submit once');
+  assert.equal(controls.at(-1).action, 'retry');
+  assert.deepEqual(controls.at(-1).task_ids, ['task']);
+  assert.equal(controls.at(-1).expected_revision, 7);
+  releaseControl(); controlGate = undefined; controlArrived = undefined;
+  await page.waitForFunction(() => document.querySelector('.production-task').getAttribute('aria-busy') === 'false');
+  rejectControl = true;
+  await actions.getByRole('button', { name: '重试', exact: true }).click();
+  await page.getByRole('button', { name: '重试操作', exact: true }).waitFor();
+  const failedRequest = controls.at(-1);
+  await page.getByRole('button', { name: '重试操作', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.production-task').getAttribute('aria-busy') === 'false');
+  assert.deepEqual(controls.at(-1), failedRequest, 'a connection-error retry must reuse the original idempotency key');
+  scenario('needs_attention', 'failed', { message: '上游已完成，重新接收原结果', retryable: false, recovery: 'resume_receipt' }); await load();
+  await page.locator('.production-brief').getByRole('button', { name: '重新接收结果', exact: true }).click();
+  assert.equal(controls.at(-1).action, 'resume_receipt');
+  assert.equal(await page.getByRole('button', { name: '重试', exact: true }).count(), 0);
+  scenario('canceled', 'failed', { message: '之前失败的步骤', retryable: true }); await load();
+  assert.equal(await page.getByRole('button', { name: '重试', exact: true }).count(), 0);
+  await page.locator('.production-brief-toggle').click();
+  assert.equal(await page.getByRole('button', { name: '重试', exact: true }).count(), 0);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   scenario('needs_attention', 'uncertain', { message: '未知提交结果', retryable: false }); await load();
   assert.equal(await page.getByRole('button', { name: '重试', exact: true }).count(), 0);
   scenario('running', 'running'); await load();
@@ -96,5 +139,5 @@ try {
   assert.ok((await page.locator('.production-task').boundingBox()).height < 60);
   assert.equal(await page.getByRole('button', { name: '停止后续步骤', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
-  console.log('PASS compact task UI, single composer reply, version-bound request, preserved draft on conflict, safe retry, uncertain no resend, stop, light/dark/mobile.');
+  console.log('PASS compact task UI, single composer reply, version-bound request, preserved draft on conflict, original-step credit retry and membership link, synchronous double-click guard, receipt-only recovery, canceled/uncertain no resend, stop, light/dark/mobile.');
 } finally { await browser.close(); await new Promise(r => server.close(r)); }

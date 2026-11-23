@@ -52,6 +52,8 @@ export interface BillingCatalog {
 export interface CreditWallet {
   available: number;
   reserved: number;
+  grant_available?: number;
+  grant_reserved?: number;
   entries: {
     id: string;
     kind: string;

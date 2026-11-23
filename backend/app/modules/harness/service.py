@@ -62,6 +62,7 @@ def get_run(db, ctx, run_id, lock=False):
 
 def out(db, run, detail=True):
     from app.modules.harness.resources import summary as resource_summary
+    from app.modules.harness.retry import error_view
 
     value = {
         key: getattr(run, key)
@@ -87,22 +88,25 @@ def out(db, run, detail=True):
     if detail:
         value["tasks"] = [
             {
-                key: getattr(t, key)
-                for key in (
-                    "id",
-                    "parent_id",
-                    "key",
-                    "role",
-                    "kind",
-                    "goal",
-                    "status",
-                    "dependencies",
-                    "revision",
-                    "result",
-                    "error",
-                    "attempts",
-                    "state",
-                )
+                **{
+                    key: getattr(t, key)
+                    for key in (
+                        "id",
+                        "parent_id",
+                        "key",
+                        "role",
+                        "kind",
+                        "goal",
+                        "status",
+                        "dependencies",
+                        "revision",
+                        "result",
+                        "error",
+                        "attempts",
+                        "state",
+                    )
+                },
+                "error": error_view(db, run, t),
             }
             for t in tasks(db, run)
         ]
@@ -333,12 +337,21 @@ def control(db, ctx, run_id, data):
             if task.status not in TERMINAL:
                 task.status, task.lease_token, task.lease_expires_at = "canceled", None, None
     elif data.action == "update_limits":
+        from app.modules.harness.retry import generation_quota_attempt
+
         if run.status not in {"paused", "failed", "needs_attention", "needs_plan_approval"}:
             raise Conflict("请先暂停制作，再调整资源限额")
         run.policy = schemas.Policy.model_validate({**run.policy, **data.limits}).model_dump(
             mode="json"
         )
         for task in rows:
+            # Resource settings do not authorize replaying an original paid
+            # action. Keep its failure until the user explicitly retries it.
+            if (
+                task.error.get("detail", {}).get("reason") == "insufficient_personal_credits"
+                or generation_quota_attempt(db, task) is not None
+            ):
+                continue
             recoverable_limit = task.error.get("code") == "QUOTA_EXCEEDED" or (
                 task.error.get("code") == "ACTION_LIMIT"
                 and task.attempts < run.policy["max_actions"]
@@ -456,20 +469,34 @@ def control(db, ctx, run_id, data):
         task.status, task.error = "queued", {}
         run.status, run.error = "queued", {}
     elif data.action == "retry":
+        from app.modules.harness.retry import blocked_generation_action
+
+        if run.status in {"canceled", "succeeded", "superseded"}:
+            raise Conflict("已结束的制作任务不能重试")
         targets = [
             t for t in rows if t.status == "failed" and (not data.task_ids or t.id in data.task_ids)
         ]
         if not targets:
             raise Conflict("没有可以重试的失败步骤；提交结果不确定时请先核对上游状态")
+        frozen_actions = {}
         for task in targets:
-            if task.error.get("retryable") is not True:
+            frozen = blocked_generation_action(db, run, task)
+            if frozen is not None:
+                frozen_actions[task.id] = frozen
+            if frozen is None and (
+                task.error.get("code") == "QUOTA_EXCEEDED"
+                or task.error.get("retryable") is not True
+            ):
                 raise Conflict("此步骤不能直接重试，需要修正输入或核对执行状态")
             if task.state.get("retries", 0) >= run.policy["max_retries"]:
                 raise Conflict("此步骤已达到重试上限")
         for task in targets:
             task.state = {**task.state, "retries": task.state.get("retries", 0) + 1}
+            if task.id in frozen_actions:
+                task.state = {**task.state, "pending_action": frozen_actions[task.id]}
             task.status, task.error = "queued", {}
         run.status = "queued"
+        run.error = {}
     elif data.action in {"approve_tool", "reject_tool"}:
         task = next(t for t in rows if t.id == data.task_ids[0])
         if task.status != "waiting_review" or task.state.get("review_id") != str(data.review_id):

@@ -44,8 +44,8 @@ const sections = [
   },
   {
     id: "quota",
-    label: "项目配额",
-    description: "用量与内部额度",
+    label: "项目用量上限",
+    description: "用量与生成限制",
     icon: Wallet,
     group: "当前项目",
   },
@@ -316,11 +316,11 @@ function QuotaPane({
     <div className="settings-pane">
       <div className="settings-pane-heading">
         <span>当前项目</span>
-        <h2>项目配额</h2>
-        <p>为项目设置内部额度，了解已记录的创作用量。</p>
+        <h2>项目用量上限</h2>
+        <p>设置当前项目的生成用量上限。</p>
       </div>
       {query.isPending ? (
-        <p role="status">正在读取项目配额…</p>
+        <p role="status">正在读取项目用量…</p>
       ) : query.error ? (
         <div role="alert">
           <p>{query.error.message}</p>
@@ -334,13 +334,16 @@ function QuotaPane({
               <strong>{query.data?.used_cost ?? "—"}</strong>
             </div>
             <div>
-              <span>当前额度</span>
-              <strong>{query.data?.limit_cost ?? "未设置"}</strong>
+              <span>用量上限</span>
+              <strong>{query.data?.blocked ? "已暂停" : query.data?.limit_cost || "不限"}</strong>
             </div>
           </div>
           <p className="settings-note">
-            项目内部额度不代表上游账户余额；未配置模型计价时，以上游实际账单为准。
+            平台生成的积分从提交任务的账号扣除。
           </p>
+          <Link className="underline underline-offset-4" to={`/billing?section=memberships&project=${encodeURIComponent(projectId)}`}>
+            查看本项目用量和我的积分
+          </Link>
           {admin ? (
             <form
               onSubmit={async (e) => {
@@ -358,12 +361,12 @@ function QuotaPane({
             >
               <div className="settings-row">
                 <label htmlFor="project-quota">
-                  <h3>项目额度</h3>
-                  <p>修改后影响当前项目的新任务。</p>
+                  <h3>项目用量上限</h3>
+                  <p>0 表示不限。修改后影响当前项目的新任务。</p>
                 </label>
                 <Input
                   id="project-quota"
-                  aria-label="项目配额"
+                  aria-label="项目用量上限"
                   type="number"
                   min={0}
                   step="0.01"

@@ -28,6 +28,7 @@ from app.models.billing import (
     BillingRefund,
     BillingSettings,
     CreditAccount,
+    CreditAdjustment,
     CreditEntry,
     CreditReservation,
     MembershipPlan,
@@ -141,6 +142,31 @@ class ResolveReservationIn(Input):
     action: Literal["release", "settle"]
     reason: Reason
     units: int | None = Field(default=None, strict=True, gt=0, le=10**12)
+
+
+class CreditAdjustmentIn(Input):
+    idempotency_key: uuid.UUID
+    operation: Literal["grant", "revoke"]
+    points: str = Field(min_length=1, max_length=32)
+    reason: Reason
+
+    @field_validator("points")
+    @classmethod
+    def validate_points(cls, value):
+        credit_wallet.exact_points_to_units(value, maximum=credit_wallet.MAX_ADJUSTMENT_UNITS)
+        return value
+
+
+class CreditSettingsIn(Input):
+    welcome_points: str = Field(min_length=1, max_length=32)
+
+    @field_validator("welcome_points")
+    @classmethod
+    def validate_welcome_points(cls, value):
+        credit_wallet.exact_points_to_units(
+            value, maximum=credit_wallet.MAX_WELCOME_UNITS, allow_zero=True
+        )
+        return value
 
 
 def _pack_view(pack: BillingPack | MembershipPlan) -> dict:
@@ -287,19 +313,131 @@ def wallet(db: DB, user: Current):
         .limit(50)
     )
     return {
-        "available": account.available if account else 0,
-        "reserved": account.reserved if account else 0,
+        **credit_wallet.balance_view(account),
         "entries": [
             {
                 "id": entry.id,
                 "kind": entry.kind,
                 "available_delta": entry.available_delta,
                 "reserved_delta": entry.reserved_delta,
+                "grant_available_delta": entry.grant_available_delta,
+                "grant_reserved_delta": entry.grant_reserved_delta,
                 "created_at": entry.created_at,
             }
             for entry in entries
         ],
     }
+
+
+def _admin_credit_view(db: Session, user: User) -> dict:
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "display_name": user.display_name,
+        "is_active": user.is_active,
+        **credit_wallet.balance_view(db.get(CreditAccount, user.id)),
+    }
+
+
+def _adjustment_view(item: CreditAdjustment) -> dict:
+    return {
+        "id": item.id,
+        "operation": item.operation,
+        "units": item.units,
+        "reason": item.reason,
+        "actor_id": item.actor_id,
+        "created_at": item.created_at,
+    }
+
+
+@router.get("/admin/billing/credits")
+def admin_credits(
+    db: DB,
+    _: Super,
+    search: Annotated[str, Query(max_length=320)] = "",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    query = select(User)
+    if search.strip():
+        query = query.where(
+            or_(
+                User.username == search.strip(),
+                func.lower(func.trim(User.email)) == search.strip().lower(),
+            )
+        )
+    users = db.scalars(query.order_by(User.created_at.desc(), User.id).limit(limit).offset(offset))
+    return [_admin_credit_view(db, user) for user in users]
+
+
+@router.get("/admin/billing/credits/{user_id}")
+def admin_credit(db: DB, _: Super, user_id: uuid.UUID):
+    user = db.get(User, user_id)
+    if user is None:
+        raise NotFound("用户不存在")
+    changes = db.scalars(
+        select(CreditAdjustment)
+        .where(CreditAdjustment.user_id == user_id)
+        .order_by(CreditAdjustment.created_at.desc(), CreditAdjustment.id.desc())
+        .limit(50)
+    )
+    return {
+        **_admin_credit_view(db, user),
+        "adjustments": [_adjustment_view(item) for item in changes],
+    }
+
+
+@router.post("/admin/billing/credits/{user_id}/adjustments")
+def adjust_credit(db: DB, actor: Super, user_id: uuid.UUID, data: CreditAdjustmentIn):
+    adjustment = credit_wallet.adjust(
+        db,
+        user_id,
+        actor.id,
+        data.idempotency_key,
+        data.operation,
+        credit_wallet.exact_points_to_units(
+            data.points, maximum=credit_wallet.MAX_ADJUSTMENT_UNITS
+        ),
+        data.reason,
+    )
+    user = db.get(User, user_id)
+    return {**_admin_credit_view(db, user), "adjustment": _adjustment_view(adjustment)}
+
+
+def _credit_settings_view(preferences: BillingSettings | None) -> dict:
+    units = preferences.welcome_credits if preferences else 0
+    return {"welcome_points": credit_wallet.units_to_points(units), "welcome_credits": units}
+
+
+@router.get("/admin/billing/credit-settings")
+def credit_settings(db: DB, _: Super):
+    return _credit_settings_view(db.get(BillingSettings, 1))
+
+
+@router.patch("/admin/billing/credit-settings")
+def update_credit_settings(db: DB, actor: Super, data: CreditSettingsIn):
+    units = credit_wallet.exact_points_to_units(
+        data.welcome_points, maximum=credit_wallet.MAX_WELCOME_UNITS, allow_zero=True
+    )
+    preferences = db.scalar(
+        insert(BillingSettings)
+        .values(id=1, welcome_credits=units)
+        .on_conflict_do_update(
+            index_elements=[BillingSettings.id],
+            set_={"welcome_credits": units, "updated_at": func.now()},
+        )
+        .returning(BillingSettings)
+        .execution_options(populate_existing=True)
+    )
+    audit.record(
+        db,
+        action="billing.credit_settings_updated",
+        user_id=actor.id,
+        target_type="billing",
+        detail={"welcome_credits": units},
+    )
+    return _credit_settings_view(preferences)
 
 
 @router.get("/billing/memberships")

@@ -120,6 +120,37 @@ try{
  await answer.locator('.conversation-result-more > summary').click();
  await page.getByRole('button',{name:'本轮创作方式',exact:true}).click();
  await page.getByRole('option',{name:'图片',exact:true}).click();
+ const longDraft=Array.from({length:30},(_,index)=>`第${index+1}段：镜头缓慢推进人物，保留雨夜氛围与背景层次。`).join('\n');
+ await composer.fill(longDraft);
+ for(const viewport of [{width:1440,height:900},{width:390,height:844}]) {
+  await page.setViewportSize(viewport);
+  const composerPanel=page.locator('.conversation-compose');
+  const expandedHeight=(await composerPanel.boundingBox()).height;
+  const textSize=await composer.evaluate(input=>({client:input.clientHeight,scroll:input.scrollHeight,overflow:getComputedStyle(input).overflowY}));
+  assert.ok(textSize.client<=160&&textSize.scroll>textSize.client,'long drafts scroll inside a bounded input');
+  assert.equal(textSize.overflow,'auto');
+  await page.getByRole('button',{name:'收起输入框',exact:true}).click();
+  const expand=page.getByRole('button',{name:'展开输入框',exact:true});
+  assert.equal(await expand.getAttribute('aria-expanded'),'false');
+  assert.equal(await page.locator('textarea[aria-label="对话消息"]').isVisible(),false);
+  const collapsedHeight=(await composerPanel.boundingBox()).height;
+  assert.ok(collapsedHeight<=64&&expandedHeight-collapsedHeight>100,'collapsed composer frees message space');
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:resolve(out,`composer-collapsed-${viewport.width}.png`),fullPage:true});
+  await expand.focus();
+  await page.keyboard.press('Enter');
+  await composer.waitFor({state:'visible'});
+  assert.equal(await composer.inputValue(),longDraft);
+  assert.equal(await tray.locator('.conversation-attachment-card').count(),2);
+  assert.match(await page.getByRole('button',{name:'本轮创作方式',exact:true}).innerText(),/图片/);
+  await page.getByRole('button',{name:'收起输入框',exact:true}).click();
+  await page.getByRole('button',{name:'再次引用 角色参考.webp',exact:true}).click();
+  await composer.waitFor({state:'visible'});
+  assert.equal(await composer.inputValue(),longDraft,'reusing a historical attachment reopens the retained draft');
+  assert.equal(await tray.locator('.conversation-attachment-card').count(),2,'existing references stay deduplicated');
+ }
+ await page.setViewportSize({width:1440,height:900});
+ assert.equal(writes.length,0,'collapse and reopen do not send a request');
  await composer.fill('让雨再大一些。');
  deferSend=true;
  await page.getByRole('button',{name:'发送消息',exact:true}).click();

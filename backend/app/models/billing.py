@@ -33,10 +33,12 @@ class BillingSettings(Base, TimestampMixin):
     public_origin: Mapped[str] = mapped_column(String(300), default="")
     checkout_minutes: Mapped[int] = mapped_column(Integer, default=60)
     subscription_usd_to_cny_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    welcome_credits: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
 
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_billing_settings_singleton"),
         CheckConstraint("checkout_minutes between 35 and 120", name="ck_billing_checkout_minutes"),
+        CheckConstraint("welcome_credits between 0 and 1000000", name="ck_billing_welcome_credits"),
         CheckConstraint(
             "subscription_usd_to_cny_rate is null or "
             "subscription_usd_to_cny_rate between 0 and 999999.999999",
@@ -211,9 +213,16 @@ class CreditAccount(Base, TimestampMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), primary_key=True)
     available: Mapped[int] = mapped_column(BigInteger, default=0)
     reserved: Mapped[int] = mapped_column(BigInteger, default=0)
+    grant_available: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    grant_reserved: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    welcome_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint("available >= 0 and reserved >= 0", name="ck_credit_account_balance"),
+        CheckConstraint(
+            "grant_available between 0 and available and grant_reserved between 0 and reserved",
+            name="ck_credit_account_grants",
+        ),
     )
 
 
@@ -226,6 +235,8 @@ class CreditEntry(Base, TimestampMixin):
     reference_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     available_delta: Mapped[int] = mapped_column(BigInteger)
     reserved_delta: Mapped[int] = mapped_column(BigInteger)
+    grant_available_delta: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    grant_reserved_delta: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
 
     __table_args__ = (
         UniqueConstraint("kind", "reference_id", name="uq_credit_entry_operation"),
@@ -239,14 +250,37 @@ class CreditReservation(Base, TimestampMixin):
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generation_job.id"), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("credit_account.user_id"))
     units: Mapped[int] = mapped_column(BigInteger)
+    grant_units: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     settled_units: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(16), default="reserved")
 
     __table_args__ = (
         CheckConstraint("units > 0 and settled_units >= 0", name="ck_credit_reservation_units"),
+        CheckConstraint("grant_units between 0 and units", name="ck_credit_reservation_grants"),
         CheckConstraint(
             "status in ('reserved','settled','released')", name="ck_credit_reservation_status"
         ),
+    )
+
+
+class CreditAdjustment(Base, TimestampMixin):
+    """An administrator's idempotent, reasoned change to complimentary credits."""
+
+    __tablename__ = "credit_adjustment"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("credit_account.user_id"))
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"))
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    operation: Mapped[str] = mapped_column(String(8))
+    units: Mapped[int] = mapped_column(BigInteger)
+    reason: Mapped[str] = mapped_column(String(500))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_credit_adjustment_idempotency"),
+        CheckConstraint("operation in ('grant','revoke')", name="ck_credit_adjustment_operation"),
+        CheckConstraint("units > 0 and units <= 10000000000", name="ck_credit_adjustment_units"),
+        Index("ix_credit_adjustment_user_created", "user_id", "created_at"),
     )
 
 

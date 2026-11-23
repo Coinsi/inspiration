@@ -19,7 +19,7 @@ from app.core.deps import ProjectContext
 from app.core.errors import CapabilityUnsupported, NotFound
 from app.models.enums import JobStatus, QuotaScope
 from app.models.generation import Generation, GenerationJob, ProviderConfig, Quota
-from app.models.identity import Project
+from app.models.identity import Membership, Project
 from app.modules.generation import schemas
 from app.modules.generation.channels import model_snapshot
 from app.modules.shot import service as shot_service
@@ -118,14 +118,28 @@ def list_providers(db: Session, project_id: uuid.UUID, user_id=None) -> list[Pro
 
 # ── 配额 ──
 def set_quota(db: Session, ctx: ProjectContext, data: schemas.QuotaIn) -> Quota:
+    if data.scope not in ("project", "user") or (data.scope == "user") != (
+        data.user_id is not None
+    ):
+        raise CapabilityUnsupported("请选择整个项目或一位项目成员")
+    if data.user_id and not db.scalar(
+        select(Membership.id).where(
+            Membership.project_id == ctx.project.id,
+            Membership.user_id == data.user_id,
+        )
+    ):
+        raise NotFound("项目成员不存在")
     # Serialize creation in the project; existing rows also lock against platform edits.
     db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     q = db.scalar(
-        select(Quota).where(
+        select(Quota)
+        .where(
             Quota.project_id == ctx.project.id,
             Quota.scope == data.scope,
             Quota.user_id == data.user_id,
-        ).with_for_update().execution_options(populate_existing=True)
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if q is None:
         q = Quota(project_id=ctx.project.id, scope=QuotaScope(data.scope), user_id=data.user_id)
@@ -226,6 +240,16 @@ def get_project_quota(db: Session, project_id: uuid.UUID) -> Quota | None:
             Quota.project_id == project_id,
             Quota.scope == QuotaScope.project,
             Quota.user_id.is_(None),
+        )
+    )
+
+
+def get_member_quota(db: Session, project_id: uuid.UUID, user_id: uuid.UUID) -> Quota | None:
+    return db.scalar(
+        select(Quota).where(
+            Quota.project_id == project_id,
+            Quota.scope == QuotaScope.user,
+            Quota.user_id == user_id,
         )
     )
 
@@ -536,7 +560,7 @@ def submit(
     from app.modules.generation.jobs import reserve_check
     from app.modules.media.generation_reference import public_base
 
-    reserve_check(db, ctx.project.id, est.points)
+    reserve_check(db, ctx.project.id, est.points, user_id=ctx.user.id)
 
     job = GenerationJob(
         project_id=ctx.project.id,

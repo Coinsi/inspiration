@@ -41,7 +41,13 @@ type Task = {
   role: string;
   goal: string;
   status: string;
-  error?: { message?: string; retryable?: boolean; recovery?: string };
+  error?: {
+    code?: string;
+    message?: string;
+    retryable?: boolean;
+    recovery?: string;
+    detail?: { reason?: string; required_units?: number; available_units?: number; shortfall_units?: number };
+  };
   result?: { message?: string; review?: Review };
   state?: {
     question?: string;
@@ -428,6 +434,7 @@ export function ProductionTask({
   const [modelNotice, setModelNotice] = useState("");
   const [resourceNotice,setResourceNotice] = useState("");
   const lastRequest = useRef<ProductionRequest | null>(null);
+  const updateLock = useRef(false);
   const query = useQuery({
     queryKey: key,
     queryFn: () => api.get<ProductionRun>(base),
@@ -528,7 +535,15 @@ export function ProductionTask({
         void query.refetch();
       }
     },
+    onSettled: () => { updateLock.current = false; },
   });
+  const dispatch = (request: ProductionRequest) => {
+    // Block a second click synchronously, before mutation state re-renders.
+    if (updateLock.current) return;
+    updateLock.current = true;
+    lastRequest.current = request;
+    update.mutate(request);
+  };
 
   const tasks = useMemo(
     () => (run?.tasks || []).filter((t) => t.status !== "superseded"),
@@ -574,7 +589,7 @@ export function ProductionTask({
     reviewId?: string,
     guidanceId?: string,
   ) => {
-    if (!run || update.isPending) return;
+    if (!run || update.isPending || updateLock.current) return;
     const impactReply =
       action === "reply" &&
       tasks.some((task) => taskIds.includes(task.id) && task.role === "impact");
@@ -594,8 +609,7 @@ export function ProductionTask({
             ? { endpoint: "guidance" as const }
             : {}),
     };
-    lastRequest.current = request;
-    update.mutate(request);
+    dispatch(request);
   };
   const openForm = (action: "steer" | "reply", task?: Task) => {
     if (compact && onReply) { onReply(); return; }
@@ -621,8 +635,7 @@ export function ProductionTask({
       task_ids: [],
       message: "",
     };
-    lastRequest.current = request;
-    update.mutate(request);
+    dispatch(request);
   };
 
   if (!run)
@@ -664,7 +677,7 @@ export function ProductionTask({
           <ChevronDown size={13} className={detailsOpen ? "production-chevron-open" : ""} />
         </button>
         {run.status === "paused" && <button type="button" className="production-brief-action" disabled={update.isPending} onClick={() => send("resume")}>继续</button>}
-        {actionable.length === 1 && actionable[0].status === "failed" && actionable[0].error?.retryable && !ended && <button type="button" className="production-brief-action" disabled={update.isPending} onClick={() => send(actionable[0].error?.recovery === "resume_receipt" ? "resume_receipt" : "retry", [actionable[0].id])}>重试</button>}
+        {actionable.length === 1 && actionable[0].status === "failed" && (actionable[0].error?.retryable || actionable[0].error?.recovery === "resume_receipt") && !ended && <button type="button" className="production-brief-action" disabled={update.isPending} onClick={() => send(actionable[0].error?.recovery === "resume_receipt" ? "resume_receipt" : "retry", [actionable[0].id])}>{actionable[0].error?.recovery === "resume_receipt" ? "重新接收结果" : "重试"}</button>}
       </div>}
       {compact && query.isError && <p className="production-brief-note" role="status">暂时无法更新进展，可以展开详情重新连接。</p>}
       {compact && update.isError && <p className="production-brief-note" role="alert">操作未完成，请展开详情查看并重试。</p>}
@@ -803,8 +816,7 @@ export function ProductionTask({
 
       <ResourceSettings run={run} pending={update.isPending} onApply={limits=>{
         const request:ProductionRequest={request_key:crypto.randomUUID(),expected_revision:run.revision,action:"update_limits",task_ids:[],message:"",limits};
-        lastRequest.current=request;
-        update.mutate(request);
+        dispatch(request);
       }}/>
 
       {resourceNotice && <p className="production-resource-feedback" role="status">{resourceNotice}</p>}
@@ -982,16 +994,22 @@ export function ProductionTask({
                     </button>
                   )}
                   {task.status === "failed" &&
-                    task.error?.retryable === true && (
+                    !ended && task.error?.retryable === true && task.error?.recovery !== "resume_receipt" && (
                       <button
                         type="button"
                         disabled={update.isPending}
                         onClick={() => send("retry", [task.id])}
+                        title="使用原来的提示词、附件和参数重试此步骤"
                       >
                         <RotateCcw size={14} />
                         重试
                       </button>
                     )}
+                  {task.status === "failed" && task.error?.code === "QUOTA_EXCEEDED" && (
+                    <a className="production-credit-link" href={`/billing?section=memberships&project=${encodeURIComponent(projectId)}`}>
+                      {task.error.detail?.reason === "insufficient_personal_credits" ? "补充积分" : "查看积分与额度"}
+                    </a>
+                  )}
                   {run.status !== "canceled" && (
                     <button
                       type="button"
@@ -1097,7 +1115,7 @@ export function ProductionTask({
               type="button"
               disabled={update.isPending}
               onClick={() =>
-                lastRequest.current && update.mutate(lastRequest.current)
+                lastRequest.current && dispatch(lastRequest.current)
               }
             >
               重试操作

@@ -1,5 +1,5 @@
 import { Languages, LogOut, UserRound, ChevronDown, Coins } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useMatch, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { isGeneratedUsername } from "@/lib/username";
@@ -12,6 +12,9 @@ export function AccountMenu() {
     { lang } = useI18n();
   const zh = lang === "zh";
   const username = me?.user.username;
+  const projectId = useMatch("/projects/:projectId/*")?.params.projectId;
+  const billingSearch = new URLSearchParams({ section: "memberships" });
+  if (projectId) billingSearch.set("project", projectId);
   const [params, setParams] = useSearchParams();
   const panel = params.get("account");
   const show = (value: string | null) => {
@@ -65,7 +68,7 @@ export function AccountMenu() {
           <Languages size={16} />
           {zh ? "外观与语言" : "Appearance & language"}
         </button>
-        <Link role="menuitem" className={headerMenuItem} to="/billing">
+        <Link role="menuitem" className={headerMenuItem} to={`/billing?${billingSearch}`}>
           <Coins size={16} />
           {zh ? "积分与账单" : "Points & billing"}
         </Link>

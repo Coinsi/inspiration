@@ -10,7 +10,7 @@ from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 
 from app.adapters.contracts import GenerationRequest, ReferenceImage
 from app.core import audit
@@ -65,30 +65,30 @@ def source(db, project_id, gen_id, image_only=False):
     return g
 
 
-def reserve_check(db, project_id, points):
-    if points <= 0:
-        return
+def reserve_check(db, project_id, points, *, user_id=None):
     # Serialize submits/retries for a project, including when there is no quota row yet.
     from app.models.identity import Project
 
     db.scalar(select(Project).where(Project.id == project_id).with_for_update())
-    from app.modules.generation.service import get_project_quota
+    from app.modules.generation.service import get_member_quota, get_project_quota
 
-    quota = get_project_quota(db, project_id)
-    reserved = sum(
-        float(j.estimated_cost or 0)
-        for j in db.scalars(
-            select(GenerationJob).where(
-                GenerationJob.project_id == project_id, GenerationJob.status.in_(ACTIVE)
-            )
-        )
+    project_quota = get_project_quota(db, project_id)
+    member_quota = get_member_quota(db, project_id, user_id) if user_id else None
+    pending = select(func.coalesce(func.sum(GenerationJob.estimated_cost), 0)).where(
+        GenerationJob.project_id == project_id, GenerationJob.status.in_(ACTIVE)
     )
-    if (
-        quota
-        and quota.limit_cost
-        and float(quota.used_cost) + reserved + points > float(quota.limit_cost)
-    ):
-        raise QuotaExceeded("项目点数不足（包含排队任务的预留点数）")
+    for quota, label in ((project_quota, "项目"), (member_quota, "成员")):
+        if quota is None:
+            continue
+        if quota.blocked:
+            raise QuotaExceeded(f"{label}生成用量已暂停，请联系管理员")
+        if points <= 0 or not quota.limit_cost:
+            continue
+        query = (
+            pending if quota.user_id is None else pending.where(GenerationJob.created_by == user_id)
+        )
+        if float(quota.used_cost) + float(db.scalar(query)) + points > float(quota.limit_cost):
+            raise QuotaExceeded(f"{label}点数不足（包含排队任务的预留点数）")
 
 
 def dispatch(db, job):
@@ -372,7 +372,7 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
     if existing:
         raise Conflict("该任务已经重试，请查看新任务")
     validate_target(db, ctx.project.id, job.target_type, job.target_id)
-    reserve_check(db, ctx.project.id, float(job.estimated_cost or 0))
+    reserve_check(db, ctx.project.id, float(job.estimated_cost or 0), user_id=ctx.user.id)
     snapshot = copy.deepcopy(job.input_snapshot)
     from app.modules.generation.references import validate_snapshot as validate_references
 
@@ -909,13 +909,14 @@ def execute(db, job_id):
         # Atomic increment prevents simultaneous completions losing usage.
         from sqlalchemy import update
 
+        quota_scope = and_(Quota.scope == "project", Quota.user_id.is_(None))
+        if job.created_by:
+            quota_scope = or_(
+                quota_scope, and_(Quota.scope == "user", Quota.user_id == job.created_by)
+            )
         db.execute(
             update(Quota)
-            .where(
-                Quota.project_id == job.project_id,
-                Quota.scope == "project",
-                Quota.user_id.is_(None),
-            )
+            .where(Quota.project_id == job.project_id, quota_scope)
             .values(used_cost=Quota.used_cost + points)
         )
         db.commit()

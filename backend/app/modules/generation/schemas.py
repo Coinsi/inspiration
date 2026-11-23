@@ -48,6 +48,13 @@ class QuotaOut(BaseModel):
     limit_cost: float
     used_cost: float
     period: str
+    blocked: bool
+
+
+class QuotaOverview(BaseModel):
+    project_name: str
+    project: QuotaOut | None
+    member: QuotaOut | None
 
 
 from app.modules.skill.schemas import SkillUse

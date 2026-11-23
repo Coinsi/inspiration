@@ -203,3 +203,22 @@ test('historical attachment previews and reuse preserve attachment and reference
     assert.equal(reused[1], image);
   } finally { await act(async () => tree.unmount()); }
 });
+
+test('historical image labels prefer filenames and localize missing names without changing reuse data', async () => {
+  const attachment={...saved(image),title:'image',filename:'人物服装参考.webp'};
+  const unnamed={...image,id:'unnamed',title:'image',blob_hash:null};
+  const reused=[];
+  let tree;
+  await act(async () => {
+    tree=create(React.createElement(I18nProvider,null,React.createElement(MessageAttachments,{
+      projectId:'p',attachments:[attachment],references:[unnamed],onReuse:item=>reused.push(item),
+    })));
+  });
+  try {
+    assert.equal(tree.root.findByProps({'aria-label':'预览 人物服装参考.webp'}).props.disabled,false);
+    assert.equal(tree.root.findByProps({'aria-label':'预览 图片 2'}).props.disabled,true);
+    assert.equal(tree.root.findAllByProps({className:'message-attachment-fallback'}).length,1);
+    await act(async()=>tree.root.findByProps({'aria-label':'再次引用 图片 2'}).props.onClick());
+    assert.equal(reused[0],unnamed,'display names must not replace the original reference object');
+  } finally { await act(async()=>tree.unmount()); }
+});

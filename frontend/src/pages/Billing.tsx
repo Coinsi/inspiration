@@ -8,8 +8,9 @@ import { BillingMemberships } from "@/components/BillingMemberships";
 import { BillingPlanCards } from "@/components/BillingPlanCards";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { StudioSelect } from "@/components/ui/studio-select";
 import { useConfirm } from "@/components/ui/confirm";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type Project, type Quota } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { loadPlanPreview } from "@/lib/billingPlanPreview";
@@ -41,6 +42,9 @@ const entryNames: Record<string, [string, string]> = {
   refund_settle: ["退款积分结算", "Refund points settled"],
   refund_release: ["退款预留释放", "Refund hold released"],
   adjustment: ["积分调整", "Points adjustment"],
+  welcome_grant: ["新用户试用积分", "Welcome points"],
+  admin_grant: ["管理员发放积分", "Points granted by administrator"],
+  admin_revoke: ["管理员收回赠送积分", "Gift points reclaimed by administrator"],
 };
 
 export default function Billing() {
@@ -51,6 +55,7 @@ export default function Billing() {
   const confirm = useConfirm();
   const scope = ["billing", me?.user.id];
   const [params, setParams] = useSearchParams();
+  const projectId = params.get("project") ?? "";
   const orderId = params.get("order");
   const preview = params.get("preview") === "1";
   const previewAllowed =
@@ -197,6 +202,7 @@ export default function Billing() {
       return;
     }
     await qc.invalidateQueries({ queryKey: scope });
+    if (projectId) await qc.invalidateQueries({ queryKey: ["quota", projectId] });
   }
 
   function sectionUrl(value: "purchase" | "memberships" | "orders") {
@@ -603,8 +609,8 @@ export default function Billing() {
                 </strong>
                 <small>
                   {zh
-                    ? "永久积分 · 与会员额度分开"
-                    : "Permanent points · separate from membership"}
+                    ? `其中赠送积分 ${points(wallet.data?.grant_available ?? 0, zh)}`
+                    : `${points(wallet.data?.grant_available ?? 0, zh)} gift points included`}
                 </small>
               </div>
               <div>
@@ -626,6 +632,18 @@ export default function Billing() {
                 zh={zh}
               />
             )}
+
+            <ProjectUsage
+              projectId={projectId}
+              userId={me?.user.id}
+              zh={zh}
+              onSelect={(value) => {
+                const next = new URLSearchParams(params);
+                if (value) next.set("project", value);
+                else next.delete("project");
+                setParams(next, { replace: true });
+              }}
+            />
 
             <section
               className="billing-section"
@@ -1108,6 +1126,67 @@ export default function Billing() {
         )}
       </Modal>
     </div>
+  );
+}
+
+function ProjectUsage({ projectId, userId, zh, onSelect }: {
+  projectId: string;
+  userId?: string;
+  zh: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const projects = useQuery({
+    queryKey: ["projects", "billing", userId],
+    queryFn: ({ signal }) => api.get<Project[]>("/projects", { signal }),
+    enabled: !!userId,
+  });
+  const overview = useQuery({
+    queryKey: ["quota", projectId, userId, "overview"],
+    queryFn: ({ signal }) => api.get<{
+      project_name: string;
+      project: Quota | null;
+      member: Quota | null;
+    }>(`/projects/${encodeURIComponent(projectId)}/quota/overview`, { signal }),
+    enabled: !!projectId && !!userId,
+  });
+  const format = new Intl.NumberFormat(zh ? "zh-CN" : "en-US", { maximumFractionDigits: 2 });
+  return (
+    <section className="billing-section" aria-label={zh ? "项目用量" : "Project usage"}>
+      <div className="billing-section-heading flex-wrap gap-3">
+        <h2>{zh ? "项目用量" : "Project usage"}</h2>
+        <StudioSelect aria-label={zh ? "选择项目" : "Select project"} className="max-w-full sm:max-w-72" value={projectId} onValueChange={onSelect}>
+          <option value="">{zh ? "选择项目" : "Select project"}</option>
+          {projectId && !projects.data?.some((project) => project.id === projectId) && (
+            <option value={projectId}>{overview.data?.project_name ?? (zh ? "当前项目" : "Current project")}</option>
+          )}
+          {projects.data?.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </StudioSelect>
+      </div>
+      {projects.error && <BillingError error={projects.error} retry={() => void projects.refetch()} zh={zh} />}
+      {overview.error && <BillingError error={overview.error} retry={() => void overview.refetch()} zh={zh} />}
+      {projectId && overview.isLoading && <p role="status">{zh ? "正在读取项目用量…" : "Loading project usage…"}</p>}
+      {!projectId && !projects.isPending && !projects.error && <p className="billing-muted">
+        {projects.data?.length ? (zh ? "选择项目，查看项目和你在该项目的用量上限。" : "Select a project to see its limit and yours.")
+          : (zh ? "加入项目后可在这里查看用量。" : "Project usage appears here after you join a project.")}
+      </p>}
+      {overview.data && (
+        <>
+          <dl className="billing-details">
+            {([
+              [zh ? "项目用量上限" : "Project limit", overview.data.project],
+              [zh ? "我在本项目的用量上限" : "My project limit", overview.data.member],
+            ] as const).map(([label, quota]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{quota?.blocked ? (zh ? "已暂停" : "Paused") : quota?.limit_cost ? format.format(quota.limit_cost) : (zh ? "不限" : "Unlimited")}</dd>
+                {quota && <small className="billing-muted">{zh ? "已使用 " : "Used "}{format.format(quota.used_cost)}</small>}
+              </div>
+            ))}
+          </dl>
+          <p className="billing-muted">{zh ? "用量上限控制本项目能用多少。平台生成的积分从提交任务的账号扣除。" : "Usage limits apply to this project. Platform generation uses points from the account submitting the task."}</p>
+        </>
+      )}
+    </section>
   );
 }
 

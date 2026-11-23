@@ -92,6 +92,7 @@ class Quota(Base, TimestampMixin):
     limit_cost: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     used_cost: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     period: Mapped[str] = mapped_column(String(16), default="total")
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     __table_args__ = (UniqueConstraint("project_id", "scope", "user_id", name="uq_quota"),)
 

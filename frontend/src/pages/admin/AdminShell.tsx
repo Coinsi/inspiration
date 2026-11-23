@@ -23,7 +23,7 @@ const entries = [
   ["/admin/users", "用户管理", Users],
   ["/admin/models", "模型服务", Server],
   ["/admin/tasks", "任务中心", Activity],
-  ["/admin/quotas", "用量与额度", Wallet],
+  ["/admin/quotas", "用量与积分", Wallet],
   ["/admin/website", "官网内容", BookOpen],
   ["/admin/blog", "博客文章", BookOpen],
   ["/admin/system", "系统状态", Settings2],

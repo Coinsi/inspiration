@@ -230,7 +230,9 @@ def prepare(db, ticket):
     )
     if run.engine == "cloud_llm" and (task.kind == "agent" or compile_generation):
         resolved = resolve_cloud_input(
-            db, ctx, run.model_provider,
+            db,
+            ctx,
+            run.model_provider,
             preferred_profile=run.context.get("kernel_profile"),
             for_request=True,
         )
@@ -493,7 +495,10 @@ def apply_action(db, ticket, action):
             attempt.result = receipt
             status = "waiting_review"
         elif receipt["status"] == "failed":
-            status = "failed" if task.kind == "tool" else "queued"
+            # Budget/credit recovery requires an explicit user decision, also
+            # when an agent chose the operation. Do not loop and resubmit it.
+            budget_blocked = (receipt.get("error") or {}).get("code") == "QUOTA_EXCEEDED"
+            status = "failed" if task.kind == "tool" or budget_blocked else "queued"
         else:
             status = "succeeded" if task.kind == "tool" else "queued"
             data = receipt.get("data")

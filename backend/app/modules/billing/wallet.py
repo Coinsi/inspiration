@@ -1,5 +1,6 @@
 """Points are stored in hundredths. Ledger writes share the caller's transaction."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -8,17 +9,49 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.errors import CapabilityUnsupported, Conflict, QuotaExceeded
+from app.core import audit
+from app.core.errors import CapabilityUnsupported, Conflict, NotFound, QuotaExceeded
 from app.models.billing import (
     BillingSettings,
     CreditAccount,
+    CreditAdjustment,
     CreditEntry,
     CreditReservation,
     MembershipAllocation,
 )
+from app.models.identity import User
 from app.modules.billing import memberships
 
 UNITS_PER_POINT = 100
+MAX_ADJUSTMENT_UNITS = 10**10
+MAX_WELCOME_UNITS = 10_000 * UNITS_PER_POINT
+
+
+def exact_points_to_units(points: str, *, maximum: int, allow_zero: bool = False) -> int:
+    """Administrator input never rounds, accepts exponents, or uses floats."""
+    if (
+        not isinstance(points, str)
+        or len(points) > 32
+        or not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,2})?", points.strip())
+    ):
+        raise CapabilityUnsupported("积分须为普通十进制字符串，最多保留两位小数")
+    units = int(Decimal(points.strip()) * UNITS_PER_POINT)
+    if not (0 if allow_zero else 1) <= units <= maximum:
+        raise CapabilityUnsupported("积分数量超出允许范围")
+    return units
+
+
+def units_to_points(units: int) -> str:
+    return format((Decimal(units) / UNITS_PER_POINT).normalize(), "f")
+
+
+def balance_view(account: CreditAccount | None) -> dict:
+    return {
+        "available": account.available if account else 0,
+        "reserved": account.reserved if account else 0,
+        "grant_available": account.grant_available if account else 0,
+        "grant_reserved": account.grant_reserved if account else 0,
+    }
 
 
 def points_to_units(points) -> int:
@@ -62,6 +95,8 @@ def change(
     *,
     available: int = 0,
     reserved: int = 0,
+    grant_available: int = 0,
+    grant_reserved: int = 0,
 ) -> None:
     account = lock_account(db, user_id)
     existing = db.scalar(
@@ -70,10 +105,18 @@ def change(
         )
     )
     if existing:
-        if (existing.user_id, existing.available_delta, existing.reserved_delta) != (
+        if (
+            existing.user_id,
+            existing.available_delta,
+            existing.reserved_delta,
+            existing.grant_available_delta,
+            existing.grant_reserved_delta,
+        ) != (
             user_id,
             available,
             reserved,
+            grant_available,
+            grant_reserved,
         ):
             raise Conflict("积分流水与原操作不一致")
         return
@@ -81,8 +124,20 @@ def change(
         raise QuotaExceeded("可用积分不足")
     if account.reserved + reserved < 0:
         raise Conflict("冻结积分与原操作不一致")
+    new_grant_available = account.grant_available + grant_available
+    new_grant_reserved = account.grant_reserved + grant_reserved
+    if new_grant_available < 0 or new_grant_reserved < 0:
+        raise Conflict("赠送积分与原操作不一致")
+    # Refunds pass no grant deltas. They can freeze only purchased/legacy
+    # credit, never exchange a user's remaining gifts for a cash refund.
+    if new_grant_available > account.available + available:
+        raise QuotaExceeded("可用的非赠送积分不足，不能占用赠送积分")
+    if new_grant_reserved > account.reserved + reserved:
+        raise Conflict("冻结积分来源与原操作不一致")
     account.available += available
     account.reserved += reserved
+    account.grant_available = new_grant_available
+    account.grant_reserved = new_grant_reserved
     db.add(
         CreditEntry(
             user_id=user_id,
@@ -90,9 +145,107 @@ def change(
             reference_id=reference_id,
             available_delta=available,
             reserved_delta=reserved,
+            grant_available_delta=grant_available,
+            grant_reserved_delta=grant_reserved,
         )
     )
     db.flush()
+
+
+def adjust(
+    db: Session,
+    user_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    idempotency_key: uuid.UUID,
+    operation: str,
+    units: int,
+    reason: str,
+) -> CreditAdjustment:
+    user = db.get(User, user_id)
+    if user is None:
+        raise NotFound("用户不存在")
+    account = lock_account(db, user_id)
+    existing = db.scalar(
+        select(CreditAdjustment).where(
+            CreditAdjustment.user_id == user_id,
+            CreditAdjustment.idempotency_key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        if (existing.actor_id, existing.operation, existing.units, existing.reason) != (
+            actor_id,
+            operation,
+            units,
+            reason,
+        ):
+            raise Conflict("重复请求与原积分调整内容不一致")
+        return existing
+    if operation not in {"grant", "revoke"} or not 0 < units <= MAX_ADJUSTMENT_UNITS:
+        raise CapabilityUnsupported("积分调整无效")
+    if not reason.strip() or len(reason) > 500:
+        raise CapabilityUnsupported("请填写积分调整原因")
+    if operation == "grant" and not user.is_active:
+        raise Conflict("已停用用户不能接收赠送积分")
+    if operation == "revoke" and units > account.grant_available:
+        raise Conflict("只能收回尚未使用且未被任务预留的赠送积分")
+    with db.begin_nested():
+        adjustment = CreditAdjustment(
+            user_id=user_id,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+            operation=operation,
+            units=units,
+            reason=reason,
+        )
+        db.add(adjustment)
+        db.flush()
+        delta = units if operation == "grant" else -units
+        change(
+            db,
+            user_id,
+            "admin_" + operation,
+            adjustment.id,
+            available=delta,
+            grant_available=delta,
+        )
+        audit.record(
+            db,
+            action="billing.credit_" + operation,
+            user_id=actor_id,
+            target_type="credit_account",
+            target_id=user_id,
+            detail={"adjustment_id": str(adjustment.id), "units": units, "reason": reason},
+        )
+        db.flush()
+    return adjustment
+
+
+def grant_welcome(db: Session, user_id: uuid.UUID) -> None:
+    """Call only while creating a new user, in that same transaction.
+
+    Login/linking never calls this hook. Even a disabled (zero) policy is marked
+    processed, so retrying onboarding after a policy change cannot issue a gift.
+    """
+    account = lock_account(db, user_id)
+    if account.welcome_processed_at is not None:
+        return
+    preferences = db.get(BillingSettings, 1)
+    units = preferences.welcome_credits if preferences else 0
+    with db.begin_nested():
+        if units:
+            change(db, user_id, "welcome_grant", user_id, available=units, grant_available=units)
+            audit.record(
+                db,
+                action="billing.welcome_granted",
+                user_id=user_id,
+                target_type="credit_account",
+                target_id=user_id,
+                detail={"units": units},
+            )
+        # change() refreshes the locked account in sessions with autoflush=False.
+        # Set the one-time marker after that refresh, including zero policies.
+        account.welcome_processed_at = datetime.now(UTC)
+        db.flush()
 
 
 def _reservation(db: Session, job_id: uuid.UUID) -> CreditReservation | None:
@@ -115,7 +268,7 @@ def reserve_generation(db: Session, user_id: uuid.UUID, job_id: uuid.UUID, units
         return
     # The caller owns the new job row. Lock the account before looking up the
     # reservation so repeated calls cannot race an initially missing row.
-    lock_account(db, user_id)
+    account = lock_account(db, user_id)
     existing = db.get(CreditReservation, job_id, populate_existing=True)
     if existing:
         if (existing.user_id, existing.units) != (user_id, units):
@@ -128,11 +281,32 @@ def reserve_generation(db: Session, user_id: uuid.UUID, job_id: uuid.UUID, units
     with db.begin_nested():
         reserved_terms = memberships.reserve(db, user_id, units, datetime.now(UTC))
         permanent = units - sum(taken for _, taken in reserved_terms)
+        if permanent > account.available:
+            available = units - permanent + account.available
+            raise QuotaExceeded(
+                "可用积分不足",
+                detail={
+                    "reason": "insufficient_personal_credits",
+                    "required_units": units,
+                    "available_units": available,
+                    "shortfall_units": units - available,
+                },
+            )
+        grant_units = min(permanent, account.grant_available)
         if permanent:
             change(
-                db, user_id, "generation_reserve", job_id, available=-permanent, reserved=permanent
+                db,
+                user_id,
+                "generation_reserve",
+                job_id,
+                available=-permanent,
+                reserved=permanent,
+                grant_available=-grant_units,
+                grant_reserved=grant_units,
             )
-        db.add(CreditReservation(job_id=job_id, user_id=user_id, units=units))
+        db.add(
+            CreditReservation(job_id=job_id, user_id=user_id, units=units, grant_units=grant_units)
+        )
         db.flush()
         for term, taken in reserved_terms:
             db.add(MembershipAllocation(job_id=job_id, order_id=term.order_id, units=taken))
@@ -146,6 +320,8 @@ def _membership_units(db: Session, reservation: CreditReservation) -> int:
     units = sum(allocation.units for _, allocation in allocated)
     if not 0 <= units <= reservation.units:
         raise Conflict("任务会员额度与原记录不一致")
+    if not 0 <= reservation.grant_units <= reservation.units - units:
+        raise Conflict("任务赠送积分与原记录不一致")
     return units
 
 
@@ -166,6 +342,12 @@ def settle_generation(db: Session, job_id: uuid.UUID, units: int) -> None:
         membership_used = min(units, membership_reserved)
         permanent_reserved = reservation.units - membership_reserved
         permanent_used = units - membership_used
+        account = lock_account(db, reservation.user_id)
+        # Use the original grant reservation first. Extra actual usage may use
+        # currently available gifts, but never another task's reserved gifts.
+        grant_used = min(permanent_used, reservation.grant_units) + min(
+            max(0, permanent_used - permanent_reserved), account.grant_available
+        )
         if permanent_reserved or permanent_used:
             change(
                 db,
@@ -174,6 +356,8 @@ def settle_generation(db: Session, job_id: uuid.UUID, units: int) -> None:
                 job_id,
                 available=permanent_reserved - permanent_used,
                 reserved=-permanent_reserved,
+                grant_available=reservation.grant_units - grant_used,
+                grant_reserved=-reservation.grant_units,
             )
         memberships.settle(db, job_id, membership_used)
         reservation.settled_units = units
@@ -195,6 +379,8 @@ def release_generation(db: Session, job_id: uuid.UUID) -> None:
                 job_id,
                 available=permanent_reserved,
                 reserved=-permanent_reserved,
+                grant_available=reservation.grant_units,
+                grant_reserved=-reservation.grant_units,
             )
         memberships.release(db, job_id)
         reservation.status = "released"

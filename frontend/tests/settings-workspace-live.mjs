@@ -64,9 +64,9 @@ try {
   assert.ok((await call("get", root)).cover_blob_hash);
   await page.getByAltText("项目封面", { exact: true }).waitFor();
   await page.screenshot({ path: `${out}/settings-project-dark.png` });
-  await nav.getByRole("button", { name: /项目配额/ }).click();
+  await nav.getByRole("button", { name: /项目用量上限/ }).click();
   await page.getByText("未设置", { exact: true }).waitFor();
-  const quota = page.getByLabel("项目配额", { exact: true });
+  const quota = page.getByLabel("项目用量上限", { exact: true });
   await quota.fill("42.5");
   await page.getByRole("button", { name: "用户菜单", exact: true }).click();
   await page.getByRole("menuitem", { name: "外观与语言", exact: true }).click();

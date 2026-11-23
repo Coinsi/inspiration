@@ -37,6 +37,7 @@ class ToolFailure(BaseModel):
         "correct_input", "refresh_context", "review_budget", "query_status", "inspect"
     ]
     retryable: bool = False
+    detail: dict = Field(default_factory=dict)
 
 
 class ToolResult(BaseModel):
@@ -67,7 +68,19 @@ def _failure(error: AppError) -> ToolFailure:
         "QUOTA_EXCEEDED": ("budget", "review_budget"),
         "PROVIDER_ERROR": ("provider", "query_status"),
     }.get(error.code, ("internal", "inspect"))
-    return ToolFailure(code=error.code, message=error.message, category=category, recovery=recovery)
+    detail = {}
+    if (
+        error.code == "QUOTA_EXCEEDED"
+        and error.detail.get("reason") == "insufficient_personal_credits"
+    ):
+        detail = {"reason": "insufficient_personal_credits"}
+        for key in ("required_units", "available_units", "shortfall_units"):
+            value = error.detail.get(key)
+            if type(value) is int and value >= 0:
+                detail[key] = value
+    return ToolFailure(
+        code=error.code, message=error.message, category=category, recovery=recovery, detail=detail
+    )
 
 
 def invoke(

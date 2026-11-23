@@ -5,12 +5,13 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
+import pytest
 from sqlalchemy import select
 
-from app.core.errors import Conflict
+from app.core.errors import Conflict, QuotaExceeded
 from app.core.security import create_access_token
 from app.models.generation import GenerationJob, Quota
-from app.models.identity import AuditLog, User
+from app.models.identity import AuditLog, Membership, User
 from app.modules.admin.accounts import AccountChange, change
 from tests.test_library_migrations import library_migration_schema  # noqa: F401
 from tests.test_media_workflow import studio  # noqa: F401
@@ -332,3 +333,257 @@ def test_all_task_kinds_resolve_projects_without_exposing_content(studio):
         db.get(ProductionRun, task_ids["production"]).status = "needs_plan_approval"
         db.commit()
     assert client.get(ROOT + "/tasks?state=attention").json()["total"] == 1
+
+
+def quota_setup(studio):
+    client, sessions, ids, basic, normal = setup(studio)
+    with sessions() as db:
+        db.add_all(
+            [
+                Membership(project_id=ids["project"], user_id=normal, role="admin"),
+                Membership(project_id=ids["other"], user_id=basic, role="admin"),
+            ]
+        )
+        db.commit()
+    return client, sessions, ids, basic, normal
+
+
+def create_limit(client, ids, *, member=None, limit="0", blocked=False):
+    response = client.post(
+        ROOT + "/quotas",
+        json={
+            "project_id": ids["project"],
+            "user_id": str(member) if member else None,
+            "limit": limit,
+            "blocked": blocked,
+            "reason": "隔离用量测试",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_create_quota_requires_super_and_valid_project_member(studio):
+    client, sessions, ids, basic, normal = quota_setup(studio)
+    payload = {"project_id": ids["project"], "limit": "100", "reason": "权限测试"}
+    for user in (basic, normal):  # platform operator and project admin are not super admins
+        assert client.post(ROOT + "/quotas", headers=token(user), json=payload).status_code == 403
+        assert client.get(ROOT + "/quotas/projects", headers=token(user)).status_code == 403
+        assert (
+            client.get(
+                ROOT + f"/quotas/projects/{ids['project']}/members", headers=token(user)
+            ).status_code
+            == 403
+        )
+    assert (
+        client.post(ROOT + "/quotas", headers={"Authorization": ""}, json=payload).status_code
+        == 401
+    )
+    assert (
+        client.post(ROOT + "/quotas", json={**payload, "project_id": str(uuid.uuid4())}).status_code
+        == 404
+    )
+    for invalid_member in (basic, uuid.uuid4()):
+        assert (
+            client.post(
+                ROOT + "/quotas", json={**payload, "user_id": str(invalid_member)}
+            ).status_code
+            == 422
+        )
+    assert client.post(ROOT + "/quotas", json={**payload, "limit": "-1"}).status_code == 422
+    assert client.post(ROOT + "/quotas", json={**payload, "reason": "  "}).status_code == 422
+    choices = client.get(ROOT + f"/quotas/projects/{ids['project']}/members").json()
+    assert {item["id"] for item in choices} == {str(ids["user"]), str(normal)}
+    assert client.get(ROOT + f"/quotas/projects/{uuid.uuid4()}/members").status_code == 404
+    for member in (None, normal):
+        created = create_limit(client, ids, member=member, limit="100")
+        assert created["scope"] == ("user" if member else "project")
+        assert float(created["used"]) == 0 and created["blocked"] is False
+        listed = next(
+            item
+            for item in client.get(ROOT + "/quotas").json()["items"]
+            if item["id"] == created["id"]
+        )
+        assert listed["version"] == created["version"]
+        duplicate = client.post(
+            ROOT + "/quotas", json={**payload, "user_id": str(member) if member else None}
+        )
+        assert duplicate.status_code == 409
+    with sessions() as db:
+        assert len(list(db.scalars(select(Quota)))) == 2
+        audit = list(db.scalars(select(AuditLog).where(AuditLog.action == "admin.quota.create")))
+        assert len(audit) == 2 and all(entry.user_id == ids["user"] for entry in audit)
+
+
+@pytest.mark.parametrize("member_scope", [False, True])
+def test_concurrent_quota_creation_cannot_duplicate_a_scope(studio, member_scope):
+    from app.modules.admin.router import QuotaCreate, create_quota
+
+    _, sessions, ids, _, normal = quota_setup(studio)
+    barrier = Barrier(2)
+    data = QuotaCreate(
+        project_id=ids["project"],
+        user_id=normal if member_scope else None,
+        limit="100",
+        reason="并发隔离测试",
+    )
+
+    def create_one(_):
+        barrier.wait(timeout=10)
+        with sessions() as db:
+            try:
+                create_quota(data, db, db.get(User, ids["user"]))
+                db.commit()
+                return "created"
+            except Conflict:
+                db.rollback()
+                return "existing"
+
+    with ThreadPoolExecutor(2) as pool:
+        assert sorted(pool.map(create_one, range(2))) == ["created", "existing"]
+    with sessions() as db:
+        assert len(list(db.scalars(select(Quota)))) == 1
+
+
+def test_quota_overview_exposes_only_callers_member_limit(studio):
+    client, _, ids, basic, normal = quota_setup(studio)
+    project = create_limit(client, ids, limit="100")
+    root_member = create_limit(client, ids, member=ids["user"], limit="70")
+    normal_member = create_limit(client, ids, member=normal, limit="20")
+    path = f"/api/v1/projects/{ids['project']}/quota/overview"
+    for user, own, other in (
+        (ids["user"], root_member, normal_member),
+        (normal, normal_member, root_member),
+    ):
+        response = client.get(path + f"?user_id={other['user_id']}", headers=token(user))
+        assert response.status_code == 200, response.text
+        assert response.json()["project"]["id"] == project["id"]
+        assert response.json()["member"]["id"] == own["id"]
+        assert other["id"] not in response.text
+    assert client.get(path, headers=token(basic)).status_code == 403
+    assert client.get(path, headers={"Authorization": ""}).status_code == 401
+
+
+def test_member_reservation_counts_only_own_pending_usage(studio):
+    from app.modules.generation import jobs
+
+    client, sessions, ids, _, normal = quota_setup(studio)
+    create_limit(client, ids, limit="100")
+    member = create_limit(client, ids, member=normal, limit="20")
+    with sessions() as db:
+        db.get(Quota, uuid.UUID(member["id"])).used_cost = 5
+        for user, points in ((normal, 10), (ids["user"], 8)):
+            db.add(
+                GenerationJob(
+                    project_id=ids["project"],
+                    created_by=user,
+                    target_type="shot",
+                    target_id=ids["shot"],
+                    provider="mock",
+                    request_type="image",
+                    status="pending",
+                    estimated_cost=points,
+                )
+            )
+        db.commit()
+    with sessions() as db:
+        with pytest.raises(QuotaExceeded, match="成员"):
+            jobs.reserve_check(db, uuid.UUID(ids["project"]), 6, user_id=normal)
+        jobs.reserve_check(db, uuid.UUID(ids["project"]), 5, user_id=normal)
+        jobs.reserve_check(db, uuid.UUID(ids["project"]), 30, user_id=ids["user"])
+        with pytest.raises(QuotaExceeded, match="项目"):
+            jobs.reserve_check(db, uuid.UUID(ids["project"]), 83, user_id=ids["user"])
+        assert db.get(Quota, uuid.UUID(member["id"])).used_cost == 5
+
+
+def test_member_usage_accumulates_once_and_pause_is_separate_from_unlimited(studio):
+    from app.modules.generation import jobs
+
+    client, sessions, ids, _, normal = quota_setup(studio)
+    project = create_limit(client, ids)
+    member = create_limit(client, ids, member=normal)
+    other_member = create_limit(client, ids, member=ids["user"])
+    base = f"/api/v1/projects/{ids['project']}"
+    response = client.post(
+        base + f"/shots/{ids['shot']}/generate",
+        headers=token(normal),
+        json={"provider": "mock", "prompt_override": "只用离线模型验证用量"},
+    )
+    assert response.status_code == 200, response.text
+    generated = response.json()
+    assert generated["status"] == "succeeded", generated
+    with sessions() as db:
+        job = db.get(GenerationJob, uuid.UUID(generated["id"]))
+        points = job.actual_cost
+        assert points > 0 and job.created_by == normal
+        jobs.execute(db, job.id)  # redelivery must not double-count completion
+    overview = client.get(base + "/quota/overview", headers=token(normal)).json()
+    assert overview["member"]["used_cost"] == float(points)
+    assert overview["project"]["used_cost"] == float(points)
+    assert client.get(base + "/quota/overview").json()["member"]["used_cost"] == 0
+    current = next(
+        item for item in client.get(ROOT + "/quotas").json()["items"] if item["id"] == member["id"]
+    )
+    path = ROOT + f"/quotas/{member['id']}"
+    paused = client.put(
+        path,
+        json={
+            "expected_version": current["version"],
+            "limit": "0",
+            "blocked": True,
+            "reason": "暂停成员",
+        },
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["blocked"] is True and float(paused.json()["used"]) == float(points)
+    denied = client.post(
+        base + f"/shots/{ids['shot']}/generate",
+        headers=token(normal),
+        json={"provider": "mock", "prompt_override": "暂停期间不能生成"},
+    )
+    assert denied.status_code == 402 and "成员生成用量已暂停" in denied.text
+    with sessions() as db:
+        with pytest.raises(QuotaExceeded, match="成员生成用量已暂停"):
+            jobs.reserve_check(db, uuid.UUID(ids["project"]), 0, user_id=normal)
+        jobs.reserve_check(db, uuid.UUID(ids["project"]), 999999, user_id=ids["user"])
+    # Legacy updates omit the new flag; changing a number must not silently resume usage.
+    still_paused = client.put(
+        path,
+        json={"expected_version": paused.json()["version"], "limit": "100", "reason": "仅调整上限"},
+    )
+    assert still_paused.status_code == 200, still_paused.text
+    assert still_paused.json()["blocked"] is True
+    resumed = client.put(
+        path,
+        json={
+            "expected_version": still_paused.json()["version"],
+            "limit": "0",
+            "blocked": False,
+            "reason": "明确恢复不限额",
+        },
+    )
+    assert resumed.status_code == 200, resumed.text
+    with sessions() as db:
+        jobs.reserve_check(db, uuid.UUID(ids["project"]), 999999, user_id=normal)
+        assert db.get(Quota, uuid.UUID(project["id"])).used_cost == points
+        assert db.get(Quota, uuid.UUID(member["id"])).used_cost == points
+        assert db.get(Quota, uuid.UUID(other_member["id"])).used_cost == 0
+        assert len(list(db.scalars(select(GenerationJob)))) == 1
+    # A project pause still blocks all members, including free/zero-estimate operations.
+    current = next(
+        item for item in client.get(ROOT + "/quotas").json()["items"] if item["id"] == project["id"]
+    )
+    paused = client.put(
+        ROOT + f"/quotas/{project['id']}",
+        json={
+            "expected_version": current["version"],
+            "limit": "0",
+            "blocked": True,
+            "reason": "暂停项目",
+        },
+    )
+    assert paused.status_code == 200
+    with sessions() as db:
+        for user in (normal, ids["user"]):
+            with pytest.raises(QuotaExceeded, match="项目生成用量已暂停"):
+                jobs.reserve_check(db, uuid.UUID(ids["project"]), 0, user_id=user)

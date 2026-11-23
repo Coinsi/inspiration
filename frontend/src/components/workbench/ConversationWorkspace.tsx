@@ -33,6 +33,7 @@ import {
   useRef,
   useState,
   useContext,
+  useId,
 } from "react";
 import { createPortal } from "react-dom";
 import { ConversationNavigationHost } from "@/lib/conversation-navigation";
@@ -54,6 +55,7 @@ import {
   Paperclip,
   Sparkles,
   ChevronDown,
+  ChevronUp,
   Plus,
   Square,
   X,
@@ -68,6 +70,7 @@ import { ConversationText } from "./ConversationText";
 import { api, ApiError, type ProviderConfig } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePersistentState } from "@/lib/usePersistentState";
+import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { WorkPicker, type Work } from "@/components/WorkPicker";
@@ -157,6 +160,8 @@ const statuses: Record<string, string> = {
 };
 
 export function ConversationWorkspace({ projectId }: { projectId: string }) {
+  const { lang } = useI18n();
+  const zh = lang === "zh";
   const navigationHost = useContext(ConversationNavigationHost);
   const { me } = useAuth();
   const location = useLocation();
@@ -200,6 +205,8 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [fileDrag, setFileDrag] = useState(false);
+  const [composerCollapsed, setComposerCollapsed] = useState(false);
+  const composerBodyId = useId();
   const attachments = useConversationAttachments(projectId, scopeKey);
   const [skillOpen, setSkillOpen] = useState(false);
   const [workOpen, setWorkOpen] = useState(false);
@@ -214,6 +221,15 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   );
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  function focusComposer() {
+    setComposerCollapsed(false);
+    requestAnimationFrame(() => {
+      // The autosizing textarea stays mounted while hidden; measure it again
+      // after revealing it before restoring keyboard focus.
+      window.dispatchEvent(new Event("resize"));
+      input.current?.focus();
+    });
+  }
   const messageList = useRef<HTMLDivElement>(null);
   const messageContent = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
@@ -465,7 +481,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       (detail.data && !detail.data.archived && !detail.data.messages.length)
     ) {
       setSidebarOpen(false);
-      input.current?.focus();
+      focusComposer();
       return;
     }
     select("");
@@ -647,7 +663,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
         setMode("text");
         setProvider(original.model_provider || "");
       }
-      input.current?.focus();
+      focusComposer();
     },
   });
   const control = useMutation({
@@ -679,6 +695,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     control.reset();
     loadOlder.reset();
     setInspect(null);
+    setComposerCollapsed(false);
     setContextOpen(false);
     setSkillOpen(false);
     setWorkOpen(false);
@@ -690,12 +707,13 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       if (!selected) setDraftWork(cut.workId || "");
       setMode("text");
       navigate(location.pathname + location.search, { replace: true, state: null });
-      input.current?.focus();
+      focusComposer();
       return;
     }
     const incoming = location.state?.creativeGoal;
     if (typeof incoming !== "string" || !incoming.trim()) return;
     setDraft(incoming.slice(0, 8000));
+    focusComposer();
     navigate(location.pathname + location.search, {
       replace: true,
       state: null,
@@ -772,6 +790,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     next.delete("reuse");
     next.set("view", "chat");
     setParams(next, { replace: true });
+    focusComposer();
   }, [importId, imported.data]);
   function rememberComposer(notice: string) {
     setComposerUndo({
@@ -789,7 +808,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     setDraft(previous.draft); setMode(previous.mode); setProvider(previous.provider); setTargets(previous.targets); setSkills(previous.skills);
     media.setRefs(previous.references); attachments.restoreDrafts(previous.attachments);
     if (previous.mode !== "text") media.restore(previous.mode, previous.mediaProvider, previous.mediaParameters);
-    setComposerUndo(null); setComposerNotice("已恢复原来的输入。"); input.current?.focus();
+    setComposerUndo(null); setComposerNotice("已恢复原来的输入。"); focusComposer();
   };
   const useOutput = (output: MediaOutput, nextMode: CreationMode, selection?: MediaReferenceSelection) => {
     const exists = media.refs.some(ref => ref.id === output.id && ref.source_type !== "media_version");
@@ -800,17 +819,17 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
     const title = `${output.type === "video" ? "视频" : "图片"}${selection ? ` · 方案 ${selection.index + 1}` : ""}${range}`;
     media.setRefs(current => exists ? current : [...current, { id: output.id, source_type: "generation", title, blob_hash: output.blob_hash, kind: output.type, thumbnail_hash: output.thumbnail_hash, role: "reference" }]);
     if (range) setDraft(current => `${current}${current.trim() ? "\n\n" : ""}针对${title}：`);
-    setMode(nextMode); input.current?.focus();
+    setMode(nextMode); focusComposer();
   };
   const reuseAttachment = (item: MessageAttachmentItem) => {
     if (!item.id) return;
     const exists = "filename" in item ? attachments.items.some(value => value.attachment?.id === item.id) : media.refs.some(value => value.id === item.id && value.source_type === item.source_type);
-    if (exists) { setComposerNotice("这份内容已在输入框中。"); input.current?.focus(); return; }
-    if (media.refs.length + attachments.items.length >= 8) { setComposerNotice("参考内容已满，请移除一项再添加。"); return; }
+    if (exists) { setComposerNotice("这份内容已在输入框中。"); focusComposer(); return; }
+    if (media.refs.length + attachments.items.length >= 8) { setComposerNotice("参考内容已满，请移除一项再添加。"); focusComposer(); return; }
     rememberComposer("已再次引用，现有输入已保留。");
     if ("filename" in item) attachments.addSaved(item, media.refs.length);
     else media.setRefs(current => [...current, { ...item, role: "reference" }]);
-    setMode("text"); input.current?.focus();
+    setMode("text"); focusComposer();
   };
   const addLocalFiles = (files: FileList | File[]) => {
     const { accepted, errors } = preflightAttachmentFiles(files, {
@@ -820,10 +839,14 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
       references: [...media.refs, ...attachments.items],
     });
     attachments.addFiles(accepted.map(item => item.file), media.refs.length, new Map(accepted.map(item => [item.file, item.role])));
+    if (accepted.length || errors.length) focusComposer();
     if (errors.length) attachments.setError(errors.join(" "));
   };
 
   const messageById = new Map(messages.map(message => [message.id, message]));
+  const composerContentCount = attachments.items.length + media.refs.length + skills.length
+    + (mode === "text" ? targets.length + (cutSelection ? 1 : 0) : 0);
+  const composerSummary = draft.trim().replace(/\s+/g, " ") || (zh ? "继续编写消息或提示词" : "Continue writing your message or prompt");
 
   return (
     <AssistantConversation
@@ -1102,7 +1125,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                   onReply={text => {
                     const next = draft.trim() ? `${draft}\n\n${text}` : text;
                     if (next.length > 8000) throw new Error("输入框内容较长，请整理后再加入这份选择。");
-                    setMode("text"); setDraft(next); input.current?.focus();
+                    setMode("text"); setDraft(next); focusComposer();
                   }}
                 >
                   {m.context.media_progress && m.context.production?.is_current !== false && <ConversationGenerationProgress progress={m.context.media_progress} />}
@@ -1131,7 +1154,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                   {m.execution_kind === "production" && m.task_id && m.context.production?.is_current !== false ? (
                     <ProductionTask compact projectId={projectId} runId={m.task_id} onUpdated={() => void refresh()}
                       hasMediaProgress={!!m.context.media_progress && ["queued", "generating", "materializing"].includes(m.context.media_progress.phase)}
-                      onReply={() => { setMode("text"); input.current?.focus(); }} />
+                      onReply={() => { setMode("text"); focusComposer(); }} />
                   ) : m.execution_kind !== "production" ? <ConversationTaskState
                     status={m.status}
                     kind={
@@ -1236,11 +1259,35 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
             {error.message}
           </p>
         )}
-        <ComposerPrimitive.Root asChild><div className={`conversation-compose${fileDrag ? " is-file-drag" : ""}`}
+        <ComposerPrimitive.Root asChild><div className={`conversation-compose${fileDrag ? " is-file-drag" : ""}${composerCollapsed ? " is-collapsed" : ""}`}
           onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); if (!busy && !detail.data?.archived) setFileDrag(true); } }}
           onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setFileDrag(false); }}
           onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); event.stopPropagation(); setFileDrag(false); if (!busy && !detail.data?.archived) addLocalFiles(event.dataTransfer.files); }}
           onPaste={event => { if (!event.clipboardData.files.length || busy || detail.data?.archived) return; event.preventDefault(); addLocalFiles(event.clipboardData.files); const text = event.clipboardData.getData("text/plain"); if (text) setDraft(`${draft}${text}`); }}>
+          <button
+            type="button"
+            className="conversation-composer-toggle"
+            aria-label={composerCollapsed ? (zh ? "展开输入框" : "Expand composer") : (zh ? "收起输入框" : "Collapse composer")}
+            aria-expanded={!composerCollapsed}
+            aria-controls={composerBodyId}
+            onClick={() => {
+              if (composerCollapsed) focusComposer();
+              else {
+                setComposerCollapsed(true);
+                setMoreOpen(false);
+                setModelPickerOpen(false);
+              }
+            }}
+          >
+            <span className="conversation-composer-mode">{zh ? modeLabels[mode] : { text: "Chat", image: "Image", video: "Video" }[mode]}</span>
+            {composerCollapsed && <span className="conversation-composer-summary">{composerSummary}</span>}
+            {composerCollapsed && composerContentCount > 0 && <span className="conversation-composer-count"><Paperclip size={13} aria-hidden="true" />{composerContentCount}</span>}
+            <span className="conversation-composer-toggle-label">
+              {composerCollapsed ? (zh ? "展开输入框" : "Expand") : (zh ? "收起输入框" : "Collapse")}
+              {composerCollapsed ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+            </span>
+          </button>
+          <div id={composerBodyId} className="conversation-compose-body" hidden={composerCollapsed}>
           <ComposerAttachmentTray projectId={projectId} uploads={attachments} references={media.refs} setReferences={media.setRefs} disabled={busy || !!detail.data?.archived} frameRoles={mode === "video" ? (media.capabilities?.features || []).filter(feature => feature === "first_frame" || feature === "last_frame") : []} />
           {((mode === "text" && targets.length > 0) || skills.length > 0) && (
             <div className="conversation-attachments" aria-label="本轮已选内容">
@@ -1446,6 +1493,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               ：处理完当前任务后可继续发送，也可以新开一段对话。
             </p>
           )}
+          </div>
         </div></ComposerPrimitive.Root>
         {!messages.length && (!selected || detail.isSuccess) && (
                 <div className="conversation-starters">
@@ -1469,7 +1517,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                       onClick={() => {
                         setDraft(text);
                         setMode("text");
-                        input.current?.focus();
+                        focusComposer();
                       }}
                     >
                       {label}

@@ -70,7 +70,7 @@ try {
   await page.getByRole('navigation', { name: '管理后台导航' }).getByRole('link', { name: '用户管理' }).click();
   await page.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
   await page.getByRole('heading', { name: '用户管理', exact: true }).waitFor();
-  for (const [path, heading] of [['models','全局模型配置'], ['system','系统状态'], ['quotas','用量与额度'], ['audit','操作记录']]) {
+  for (const [path, heading] of [['models','全局模型配置'], ['system','系统状态'], ['quotas','用量与积分'], ['audit','操作记录']]) {
     await page.goto(base + '/admin/' + path);
     await page.getByRole('heading', { name: heading, exact: true }).waitFor();
     await page.waitForLoadState('networkidle');

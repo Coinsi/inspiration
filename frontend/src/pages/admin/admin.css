@@ -316,6 +316,57 @@
 .admin-table-scroll strong {
   font-weight: 500;
 }
+.admin-resource-label {
+  display: none;
+}
+.admin-resource-actions .studio-button {
+  color: hsl(var(--fg));
+}
+@media (max-width: 700px) {
+  .admin-resource-table,
+  .admin-resource-table tbody {
+    display: block;
+  }
+  .admin-resource-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .admin-resource-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    padding: 16px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .admin-resource-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .admin-resource-table td {
+    min-width: 0;
+    max-width: none;
+    padding: 0;
+    border: 0;
+  }
+  .admin-resource-table td:first-child,
+  .admin-resource-table .admin-resource-actions {
+    grid-column: 1 / -1;
+  }
+  .admin-resource-table td:first-child {
+    font-weight: 500;
+  }
+  .admin-resource-label {
+    display: block;
+    color: hsl(var(--muted));
+    font-size: 12px;
+    margin-bottom: 3px;
+  }
+  .admin-resource-actions .studio-button {
+    min-height: 44px;
+  }
+}
 .admin-text-link {
   color: hsl(var(--primary));
   font-weight: 500;

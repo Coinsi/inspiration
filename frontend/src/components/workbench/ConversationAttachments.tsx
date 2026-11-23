@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, FileAudio, Film, FolderOpen, ImagePlus, Loader2, Paperclip, RotateCcw, Upload, X } from "lucide-react";
+import { Check, FileAudio, Film, FolderOpen, ImageOff, ImagePlus, Loader2, Paperclip, RotateCcw, Upload, X } from "lucide-react";
 import { api, blobUrl } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { mediaSize } from "@/lib/library";
 import { MediaImage } from "@/components/MediaImage";
 import { MediaVideo } from "@/components/MediaVideo";
@@ -68,22 +69,70 @@ export function ComposerAttachmentTray({ projectId, uploads, references, setRefe
 
 export type MessageAttachmentItem = ConversationAttachment | ComposerReference;
 
+function messageAttachmentName(item: MessageAttachmentItem, index: number, zh: boolean) {
+  const generic = /^(image|video|audio|attachment|图片|图像|视频|音频|附件)$/i;
+  const names = [item.title, "filename" in item ? item.filename : ""];
+  const name = names.find(value => value?.trim() && !generic.test(value.trim()));
+  if (name) return name.trim();
+  const kind = item.kind || "image";
+  const label = zh
+    ? ({ image: "图片", video: "视频", audio: "音频" }[kind] || "附件")
+    : ({ image: "Image", video: "Video", audio: "Audio" }[kind] || "Attachment");
+  return `${label} ${index + 1}`;
+}
+
 export function MessageAttachments({ projectId, attachments = [], references = [], onReuse, reuseDisabled = false }: {
   projectId: string; attachments?: ConversationAttachment[]; references?: ComposerReference[];
   onReuse?: (item: MessageAttachmentItem) => void; reuseDisabled?: boolean;
 }) {
+  const { lang } = useI18n();
+  const zh = lang === "zh";
   const [preview, setPreview] = useState<PreviewItem | null>(null);
   const items: MessageAttachmentItem[] = [...attachments.map(item => ({ ...item, source_type: "attachment" as const, title: item.title || item.filename })), ...references];
   if (!items.length) return null;
   return <>
-    <div className="message-attachments">{items.map((item, i) => <div className="message-attachment-card" key={`${item.id}:${i}`}>
-      <button type="button" className="message-attachment-preview" onClick={() => setPreview(item)} aria-label={`预览 ${item.title}`}>
-        <span className="message-attachment-visual"><Thumbnail projectId={projectId} item={item} />{item.kind === "video" && <Film size={19} className="message-attachment-kind" />}</span>
-        <span className="message-attachment-title">{item.title}</span>
-      </button>
-      {onReuse && <button type="button" className="message-attachment-reuse" disabled={reuseDisabled} aria-label={`再次引用 ${item.title}`} onClick={() => onReuse(item)}><RotateCcw size={13} />再次引用</button>}
-    </div>)}</div>
-    <Modal open={!!preview} title={preview?.title || "附件"} onClose={() => setPreview(null)} width={900}>{preview && <AttachmentPreview projectId={projectId} item={preview} />}</Modal>
+    <div className="message-attachments" role="group" aria-label={zh ? "消息附件" : "Message attachments"}>
+      {items.map((item, i) => {
+        const title = messageAttachmentName(item, i, zh);
+        return (
+          <div className="message-attachment-card" key={`${item.id}:${i}`}>
+            <button
+              type="button"
+              className="message-attachment-preview"
+              disabled={!item.blob_hash}
+              onClick={() => setPreview({ ...item, title })}
+              aria-label={`${zh ? "预览" : "Preview"} ${title}`}
+            >
+              <span className="message-attachment-visual">
+                {item.thumbnail_hash || item.blob_hash ? <Thumbnail projectId={projectId} item={item} /> : (
+                  <span className="message-attachment-fallback">
+                    {item.kind === "audio" ? <FileAudio size={24} /> : item.kind === "video" ? <Film size={24} /> : <ImageOff size={24} />}
+                    <span>{zh ? "暂无预览" : "Preview unavailable"}</span>
+                  </span>
+                )}
+                {item.kind === "video" && !!item.blob_hash && <Film size={19} className="message-attachment-kind" />}
+              </span>
+            </button>
+            <div className="message-attachment-caption">
+              <span className="message-attachment-title" title={title}>{title}</span>
+              {onReuse && (
+                <button
+                  type="button"
+                  className="message-attachment-reuse"
+                  disabled={reuseDisabled}
+                  aria-label={`${zh ? "再次引用" : "Reuse"} ${title}`}
+                  title={zh ? "再次引用" : "Reuse attachment"}
+                  onClick={() => onReuse(item)}
+                >
+                  <RotateCcw size={15} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+    <Modal open={!!preview} title={preview?.title || (zh ? "附件" : "Attachment")} onClose={() => setPreview(null)} width={900}>{preview && <AttachmentPreview projectId={projectId} item={preview} />}</Modal>
   </>;
 }
 

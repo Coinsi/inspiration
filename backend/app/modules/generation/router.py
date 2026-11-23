@@ -1,7 +1,7 @@
 """generation 路由(对照 04 §3.2 / §3.6)。"""
 
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy import select
@@ -346,6 +346,18 @@ def get_quota(
 ):
     q = service.get_project_quota(db, ctx.project.id)
     return schemas.QuotaOut.model_validate(q) if q else None
+
+
+@router.get("/quota/overview", response_model=schemas.QuotaOverview)
+def quota_overview(
+    ctx: Annotated[ProjectContext, Depends(get_project_context)],
+    db: Annotated[Session, Depends(get_db, scope="function")],
+):
+    return {
+        "project_name": ctx.project.name,
+        "project": service.get_project_quota(db, ctx.project.id),
+        "member": service.get_member_quota(db, ctx.project.id, ctx.user.id),
+    }
 
 
 # ── 生成 ──
