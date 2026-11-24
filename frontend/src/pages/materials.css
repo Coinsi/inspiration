@@ -59,27 +59,16 @@
 }
 .materials-views {
   display: flex;
-  gap: 16px;
+  gap: 4px;
   align-items: center;
   margin-left: auto;
-  flex-wrap: wrap;
+  min-width: 0;
 }
-.materials-views > button {
-  font-size: 13px;
-  padding: 8px 0;
-  border-bottom: 2px solid transparent;
-  color: hsl(var(--muted));
+.materials-views [role="tablist"] {
+  border: 0;
 }
-.materials-views > button[aria-selected="true"] {
-  color: hsl(var(--fg));
-  border-color: hsl(var(--primary));
-}
-.materials-more {
-  margin-left: auto;
-  position: relative;
-  display: block;
-  font-size: 12px;
-  color: hsl(var(--muted));
+@media (min-width: 701px) {
+  .materials-mobile-view { display: none; }
 }
 .materials-toolbar {
   display: flex;
@@ -220,14 +209,6 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-.material-card-menu > [role="menu"] {
-  top: auto;
-  bottom: calc(100% + 4px);
-  width: 180px;
-}
-.material-tile:has([aria-expanded="true"]) {
-  z-index: 10;
 }
 .material-hover-video,
 .material-preview-open {
@@ -535,9 +516,6 @@
   .materials-heading-actions {
     gap: 12px;
   }
-  .materials-more {
-    margin-left: auto;
-  }
   .materials-search {
     margin-left: 0;
     flex: 1;
@@ -574,51 +552,15 @@
   padding-top: 20px;
 }
 
-.materials-more summary {
-  cursor: pointer;
-  padding: 8px 0;
-  list-style: none;
-}
-.materials-more summary::-webkit-details-marker {
-  display: none;
-}
-.materials-more[open] summary {
-  color: hsl(var(--fg));
-}
-.materials-more > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  width: 175px;
-  padding: 6px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--card));
-  box-shadow: 0 8px 24px #0002;
-  border-radius: 10px;
-}
-.materials-more > div > * {
-  padding: 10px;
-  text-align: left;
-}
-.materials-more > div > *:hover {
-  background: hsl(var(--surface));
-  color: hsl(var(--fg));
-}
 @media (max-width: 700px) {
   .materials-heading {
     gap: 14px;
   }
-  .materials-more {
-    width: auto;
-    padding-bottom: 0;
-  }
   .materials-views {
-    gap: 16px;
-    margin-left: 0;
-    width: 100%;
+    margin-left: auto;
+  }
+  .materials-views [role="tablist"] {
+    display: none;
   }
   .materials-kinds {
     width: 100%;

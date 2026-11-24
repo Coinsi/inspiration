@@ -4,13 +4,15 @@ export function Tabs({
   tabs,
   value,
   onChange,
+  label,
 }: {
   tabs: { key: string; label: string }[];
   value: string;
   onChange: (k: string) => void;
+  label?: string;
 }) {
   return (
-    <div role="tablist" className="flex max-w-full gap-1 overflow-x-auto border-b border-border">
+    <div role="tablist" aria-label={label} className="flex max-w-full gap-1 overflow-x-auto border-b border-border">
       {tabs.map((t) => (
         <button
           key={t.key}

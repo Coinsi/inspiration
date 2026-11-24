@@ -3,7 +3,7 @@ import {
   MaterialProfile,
   MaterialProfileEditor,
 } from "@/components/MaterialProfile";
-import { HeaderMenu, headerMenuItem } from "@/components/ui/header-menu";
+import { ActionMenu, ActionMenuItem, ActionMenuSeparator } from "@/components/ui/header-menu";
 import { useAuth } from "@/lib/auth";
 import { SearchField } from "@/components/ui/search-field";
 import { SelectField } from "@/components/ui/select-field";
@@ -15,10 +15,10 @@ import {
   ArrowLeft,
   ArrowUpRight,
   ChevronDown,
+  Check,
   Download,
   Film,
   Image as ImageIcon,
-  MoreHorizontal,
   Pencil,
   Plus,
   Sparkles,
@@ -47,8 +47,9 @@ import { LibraryReuse } from "@/components/LibraryReuse";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
+import { Tabs } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/toast";
 import type { GeneratedMaterial } from "./GeneratedLibrary";
-import "./materials.css";
 
 const Detail = lazy(() =>
   import("./MediaLibrary").then((m) => ({ default: m.LibraryDetail })),
@@ -68,6 +69,11 @@ const kindNames = {
   audio: "音频",
   entity: "角色与场景",
 };
+const materialViews = [
+  { key: "browse", label: "浏览素材" },
+  { key: "search", label: "查找片段" },
+  { key: "processing", label: "处理进度" },
+];
 
 export default function Materials() {
   const { projectId } = useParams();
@@ -99,6 +105,7 @@ function Collection({ projectId }: { projectId: string }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Material | null>(null);
   const { me } = useAuth();
+  const toast = useToast();
   const canEdit = me?.memberships.some(
     (m) =>
       m.project_id === projectId &&
@@ -133,6 +140,7 @@ function Collection({ projectId }: { projectId: string }) {
     if (!("page" in patch)) next.delete("page");
     setParams(next);
   };
+  const changeView = (tab: string) => choose({ tab, media: "", generation: "", attachment: "" });
   useEffect(() => setSearch(query), [query]);
   useEffect(() => {
     if (search === query) return;
@@ -183,8 +191,12 @@ function Collection({ projectId }: { projectId: string }) {
       "workbench-references",
       "library",
       "library-item",
+      "media-usages",
+      "library-impact",
       "generated-library",
       "assets",
+      "assets-pick",
+      "asset-usages",
       "trash",
       "library-folders",
     ])
@@ -198,7 +210,11 @@ function Collection({ projectId }: { projectId: string }) {
       item: Material;
       action: "restore" | "trash";
     }) => api.post(`${base}/materials/${item.source}/${item.id}/${action}`),
-    onSuccess: refresh,
+    onSuccess: (_, { item, action }) => {
+      refresh();
+      if (item.source === "asset") void qc.invalidateQueries({ queryKey: ["asset", item.id] });
+      toast.push(action === "restore" ? `已恢复「${item.name}」` : `已将「${item.name}」移入回收站`, "success");
+    },
   });
   const closeDetail = () => {
     setSegment(null);
@@ -247,7 +263,7 @@ function Collection({ projectId }: { projectId: string }) {
                 : "返回创作"}{" "}
             ↗
           </Link>
-          {!deleted && (
+          {!deleted && canEdit && (
             <Button onClick={() => setUpload({})}>
               <Plus size={16} />
               导入素材
@@ -257,32 +273,24 @@ function Collection({ projectId }: { projectId: string }) {
       </header>
       {!deleted && <PendingUploads projectId={projectId} canEdit={!!canEdit} onResume={resume => setUpload({ resume })} onChange={refresh} />}
       <div className="materials-navigation">
-      <MaterialTabs projectId={projectId} compact />
-      {!deleted && (
-        <div className="materials-views" role="tablist" aria-label="素材视图">
-          {[
-            ["browse", "浏览素材"],
-            ["search", "查找片段"],
-            ["processing", "处理进度"],
-          ].map(([v, label]) => (
-            <button
-              key={v}
-              role="tab"
-              aria-selected={tab === v}
-              onClick={() => choose({ tab: v, media: "", generation: "", attachment: "" })}
-            >
-              {label}
-            </button>
-          ))}
-          <details className="materials-more">
-            <summary>更多操作</summary>
-            <div>
-              <button onClick={() => setReuse(true)}>从其他项目复用</button>
-              <Link to={`${root}/library`}>管理文件与版本</Link>
-            </div>
-          </details>
-        </div>
-      )}
+        <MaterialTabs projectId={projectId} />
+        {!deleted && (
+          <div className="materials-views">
+            <Tabs label="素材视图" value={tab} tabs={materialViews} onChange={changeView} />
+            <ActionMenu label="素材工具与更多操作" trigger={<>
+              <span className="materials-tool-label">{tab === "browse" ? "工具" : materialViews.find(view => view.key === tab)?.label}</span>
+              <ChevronDown size={14} />
+            </>}>
+              {materialViews.map(view => <ActionMenuItem key={view.key} className="materials-mobile-view"
+                onSelect={() => changeView(view.key)}>
+                {view.label}{view.key === tab && <Check className="ml-auto" />}
+              </ActionMenuItem>)}
+              <div className="materials-mobile-view"><ActionMenuSeparator /></div>
+              {canEdit && <ActionMenuItem onSelect={() => setReuse(true)}>从其他项目复用</ActionMenuItem>}
+              <ActionMenuItem asChild><Link to={`${root}/library`}>管理文件与版本</Link></ActionMenuItem>
+            </ActionMenu>
+          </div>
+        )}
       </div>
       {tab === "search" ? (
         <LibrarySearch
@@ -316,7 +324,7 @@ function Collection({ projectId }: { projectId: string }) {
             </div>
             <SearchField
               label="搜索全部素材"
-              placeholder="搜索名称、说明、标签或提示词"
+              placeholder="搜名称、标签或提示词"
               value={search}
               onValueChange={setSearch}
               className="ml-auto w-full sm:w-72"
@@ -335,7 +343,7 @@ function Collection({ projectId }: { projectId: string }) {
             />
           </div>
           <p className="materials-total" role="status">
-            {list.data
+            {list.isError ? "素材数量暂不可用" : list.data
               ? `${query ? `“${query}” · ` : ""}${list.data.total} 项素材`
               : "正在读取素材…"}
           </p>
@@ -357,10 +365,10 @@ function Collection({ projectId }: { projectId: string }) {
             <div className="materials-empty">
               <ImageIcon size={28} />
               <h2>
-                {deleted
-                  ? "回收站为空"
-                  : query || kind || source
-                    ? "没有匹配的素材"
+                {query || kind || source
+                  ? "没有匹配的素材"
+                  : deleted
+                    ? "回收站为空"
                     : "让素材成为创作的起点"}
               </h2>
               <p>
@@ -465,7 +473,7 @@ function Collection({ projectId }: { projectId: string }) {
                             (item.adopted ? " · 已采用" : " · 候选")}
                         </p>
                         {deleted ? (
-                          <Button
+                          canEdit && <Button
                             size="sm"
                             variant="outline"
                             disabled={mutation.isPending}
@@ -476,50 +484,31 @@ function Collection({ projectId }: { projectId: string }) {
                             恢复
                           </Button>
                         ) : (
-                          <HeaderMenu
-                            label={`更多操作：${item.name}`}
-                            trigger={<MoreHorizontal size={19} />}
-                            className="material-card-menu"
-                          >
-                            <button
-                              role="menuitem"
-                              className={headerMenuItem}
-                              onClick={() => open(item)}
-                            >
+                          <ActionMenu label={`更多操作：${item.name}`}>
+                            <ActionMenuItem onSelect={() => open(item)}>
                               <ImageIcon size={16} />
                               查看详情
-                            </button>
+                            </ActionMenuItem>
                             {canEdit && item.source !== "asset" && (
-                              <button
-                                role="menuitem"
-                                className={headerMenuItem}
-                                onClick={() => setEditing(item)}
-                              >
+                              <ActionMenuItem onSelect={() => setEditing(item)}>
                                 <Pencil size={16} />
                                 编辑资料
-                              </button>
+                              </ActionMenuItem>
                             )}
                             {item.blob_hash && (
-                              <a
-                                role="menuitem"
-                                className={headerMenuItem}
-                                href={`${blobUrl(projectId, item.blob_hash)}&download=true`}
-                                download
-                              >
-                                <Download size={16} />
-                                下载原文件
-                              </a>
+                              <ActionMenuItem asChild>
+                                <a href={`${blobUrl(projectId, item.blob_hash)}&download=true`} download>
+                                  <Download size={16} /> 下载原文件
+                                </a>
+                              </ActionMenuItem>
                             )}
-                            <button
-                              role="menuitem"
-                              className={`${headerMenuItem} text-danger`}
-                              disabled={mutation.isPending}
-                              onClick={() => void trash(item)}
-                            >
-                              <Trash2 size={16} />
-                              移入回收站
-                            </button>
-                          </HeaderMenu>
+                            {canEdit && <>
+                              <ActionMenuSeparator />
+                              <ActionMenuItem danger disabled={mutation.isPending} onSelect={() => void trash(item)}>
+                                <Trash2 size={16} /> 移入回收站
+                              </ActionMenuItem>
+                            </>}
+                          </ActionMenu>
                         )}
                       </div>
                     </div>

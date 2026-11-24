@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { api, blobUrl, type Asset, type RefImage } from "@/lib/api";
 import { Modal } from "@/components/ui/modal";
+import { AssetActions, assetPath } from "@/components/AssetActions";
+import { AssetUsageList } from "@/components/AssetUsageList";
 import { MediaPreview } from "@/components/MediaPreview";
 import { MediaImage } from "@/components/MediaImage";
 import { useI18n } from "@/lib/i18n";
@@ -10,15 +12,19 @@ export function AssetPreview({
   projectId,
   asset,
   onClose,
+  canTrash,
+  onTrash,
 }: {
   projectId: string;
   asset: Asset;
   onClose: () => void;
+  canTrash: boolean;
+  onTrash: () => void;
 }) {
   const { lang, t } = useI18n(),
     zh = lang === "zh";
   const location = useLocation();
-  const returnPath = encodeURIComponent(location.pathname + location.search);
+  const returnPath = location.pathname + location.search;
   const base = `/projects/${projectId}/assets/${asset.id}`;
   const refs = useQuery({
     queryKey: ["asset-refimg", asset.id],
@@ -42,25 +48,35 @@ export function AssetPreview({
           )}
         </div>
         <div className="min-w-0 space-y-4">
-          <p className="text-xs text-muted-foreground">
-            {t(`asset.${asset.type}`)} · {asset.code} ·{" "}
-            {asset.status === "locked"
-              ? zh
-                ? "已锁定"
-                : "Locked"
-              : zh
-                ? "可编辑"
-                : "Editable"}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="min-w-0 break-words text-xs text-muted-foreground">
+              {t(`asset.${asset.type}`)} · {asset.code} ·{" "}
+              {asset.status === "locked"
+                ? zh
+                  ? "已锁定"
+                  : "Locked"
+                : canTrash
+                  ? zh
+                    ? "可编辑"
+                    : "Editable"
+                  : zh
+                    ? "只读"
+                    : "Read only"}
+            </p>
+            <AssetActions
+              projectId={projectId}
+              asset={asset}
+              returnTo={returnPath}
+              canTrash={canTrash}
+              onTrash={onTrash}
+            />
+          </div>
           <p className="whitespace-pre-wrap break-words text-sm leading-7">
             {asset.summary || (zh ? "尚未填写描述" : "No description yet")}
           </p>
           <div className="flex flex-wrap gap-2">
             {asset.tags.map((tag) => (
-              <span
-                className="rounded-full bg-muted px-2 py-1 text-xs"
-                key={tag}
-              >
+              <span className="rounded-full bg-muted px-2 py-1 text-xs" key={tag}>
                 #{tag}
               </span>
             ))}
@@ -69,30 +85,28 @@ export function AssetPreview({
             {[
               [t("detail.ref"), asset.ref_count],
               [t("detail.gen"), asset.gen_count],
-              [t("assets.colShots"), asset.shot_count],
             ].map(([label, value]) => (
               <div key={label}>
-                <strong className="mb-1 block text-lg text-foreground">
-                  {value ?? 0}
-                </strong>
+                <strong className="mb-1 block text-lg text-foreground">{value ?? 0}</strong>
                 {label}
               </div>
             ))}
+            <Link className="studio-link" to={assetPath(projectId, asset.id, returnPath, "usages")}>
+              <strong className="mb-1 block text-lg">{asset.shot_count ?? 0}</strong>
+              {t("assets.colShots")}
+            </Link>
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
-            <Link className="studio-link" to={`${base}?return=${returnPath}`}>
-              {zh ? "打开完整详情" : "Open details"} →
+            <Link className="studio-link" to={assetPath(projectId, asset.id, returnPath)}>
+              {zh ? "查看详情" : "View details"} →
             </Link>
-            <Link
-              className="studio-link"
-              to={`${base}?tab=gen&return=${returnPath}`}
-            >
-              {zh ? "生成与版本" : "Generate & versions"} →
+            <Link className="studio-link" to={assetPath(projectId, asset.id, returnPath, "gen")}>
+              {t("detail.gen")} →
             </Link>
             {asset.type === "character" && (
               <Link
                 className="studio-link"
-                to={`/projects/${projectId}/evidence?asset=${asset.id}&return=${returnPath}`}
+                to={`/projects/${projectId}/evidence?asset=${asset.id}&return=${encodeURIComponent(returnPath)}`}
               >
                 {zh ? "查看关联片段" : "Related clips"} →
               </Link>
@@ -100,6 +114,25 @@ export function AssetPreview({
           </div>
         </div>
       </div>
+      {!!asset.shot_count && (
+        <section className="mt-5 border-t pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium">{t("assets.colShots")}</h3>
+            <Link
+              className="studio-link inline-flex min-h-11 items-center text-sm"
+              to={assetPath(projectId, asset.id, returnPath, "usages")}
+            >
+              {zh ? "查看引用镜头" : "View referencing shots"} →
+            </Link>
+          </div>
+          <AssetUsageList
+            projectId={projectId}
+            assetId={asset.id}
+            returnTo={returnPath}
+            limit={3}
+          />
+        </section>
+      )}
       <div className="mt-5 border-t pt-4">
         <h3 className="mb-3 text-sm font-medium">{t("detail.ref")}</h3>
         {refs.isPending ? (
@@ -122,9 +155,7 @@ export function AssetPreview({
                     alt={r.note || `${t("detail.ref")} ${i + 1}`}
                   />
                 </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {r.note || r.role}
-                </p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{r.note || r.role}</p>
               </div>
             ))}
           </div>

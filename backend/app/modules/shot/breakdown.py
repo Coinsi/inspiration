@@ -94,6 +94,27 @@ def save_draft(db, shot, suggestion, names):
     shot.storyboard = board
 
 
+def next_shot_numbers(rows, scene_code):
+    """Keep display order and public codes independent after a reorder or removal."""
+    prefix = f"{scene_code}-SH"
+    last_ordinal = last_code = 0
+    for ordinal, code in rows:
+        last_ordinal = max(last_ordinal, ordinal)
+        suffix = code.removeprefix(prefix)
+        if code.startswith(prefix) and suffix.isascii() and suffix.isdigit():
+            last_code = max(last_code, int(suffix))
+    return last_ordinal + 1, max(last_code, last_ordinal) + 1
+
+
+def next_scene_shot_numbers(db, scene):
+    rows = db.execute(
+        select(Shot.ordinal, Shot.code).where(
+            Shot.project_id == scene.project_id, Shot.scene_id == scene.id
+        )
+    )
+    return next_shot_numbers(rows, scene.code)
+
+
 def create_drafts(db, ctx, scene, suggestions):
     from app.models.identity import Project
 
@@ -101,13 +122,14 @@ def create_drafts(db, ctx, scene, suggestions):
     names = AssetNames(
         db, ctx.project.id, scope_for(db, scene.script_id, scene.adapted_from_chapter_id)
     )
-    for i, draft in enumerate(suggestions, 1):
+    ordinal, code_number = next_scene_shot_numbers(db, scene)
+    for i, draft in enumerate(suggestions):
         shot = Shot(
             project_id=ctx.project.id,
             scene_id=scene.id,
-            ordinal=i,
-            code=f"{scene.code}-SH{i:03d}",
-            title=draft.title or f"镜头 {i}",
+            ordinal=ordinal + i,
+            code=f"{scene.code}-SH{code_number + i:03d}",
+            title=draft.title or f"镜头 {ordinal + i}",
             description=draft.description,
             created_by=ctx.user.id,
         )

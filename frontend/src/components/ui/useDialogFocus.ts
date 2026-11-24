@@ -12,8 +12,11 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
   const wasOpen = useRef(false);
   const returnFocus = useRef<HTMLElement | null>(null);
   // Capture before React commits an autoFocus input in the newly opened overlay.
-  if (open && !wasOpen.current)
-    returnFocus.current = document.activeElement as HTMLElement | null;
+  if (open && !wasOpen.current) {
+    const active = document.activeElement as HTMLElement | null;
+    const menuTriggerId = active?.closest("[data-action-menu]")?.getAttribute("aria-labelledby");
+    returnFocus.current = menuTriggerId ? document.getElementById(menuTriggerId) ?? active : active;
+  }
   wasOpen.current = open;
   close.current = onClose;
   useEffect(() => {
@@ -35,8 +38,8 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
     });
     const keydown = (e: KeyboardEvent) => {
       if (stack[stack.length - 1] !== id) return;
-      // The select popup owns Escape/Tab; keep the parent dialog open.
-      if ((e.target as HTMLElement)?.closest("[data-select-popup]")) return;
+      // The open popup handles its own keys before the containing dialog.
+      if ((e.target as HTMLElement)?.closest("[data-select-popup], [data-action-menu]")) return;
       // Let search consume Escape to clear its query before closing the overlay.
       if (e.isComposing) return;
       if (

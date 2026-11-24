@@ -101,13 +101,13 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${base}/projects/${project}/storyboard`);
   await page
-    .getByRole("button", { name: "快速预览", exact: true })
+    .getByRole("button", { name: /^快速预览 / })
     .first()
     .waitFor();
   await page.screenshot({ path: `${out}/storyboard.png` });
-  await page.getByRole("button", { name: "分镜编辑", exact: true }).click();
+  await page.getByRole("tab", { name: "编辑", exact: true }).click();
   await page.getByLabel("镜头标题").first().waitFor();
-  await page.getByRole("button", { name: "画面浏览", exact: true }).click();
+  await page.getByRole("tab", { name: "浏览", exact: true }).click();
   const comparisonAsset = assets.find((a) => a.gen_count >= 2) || candidate;
   await page.goto(
     `${base}/projects/${project}/assets/${comparisonAsset.id}?tab=gen`,

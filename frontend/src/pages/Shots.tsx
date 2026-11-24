@@ -1,4 +1,5 @@
 import { ShotNameDialog } from "@/components/ShotNameDialog";
+import { ShotActions, useCanEditShots, useRemoveShots } from "@/components/ShotActions";
 import { useShotContext } from "@/lib/useShotContext";
 import { SelectField } from "@/components/ui/select-field";
 import { SearchField } from "@/components/ui/search-field";
@@ -19,7 +20,6 @@ import {
   Filter,
   X,
   ArrowLeft,
-  Images,
   Clapperboard,
   ChevronLeft,
   ChevronRight,
@@ -61,6 +61,18 @@ const DOT: Record<string, string> = {
   in_cut: "bg-foreground",
 };
 
+function projectReturnPath(value: string | null, base: string) {
+  if (!value?.startsWith(base + "/")) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith(base + "/")) return null;
+    if (/%(?:2f|5c)/i.test(url.pathname)) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 export default function Shots() {
   const { projectId } = useParams();
   const [params] = useSearchParams();
@@ -76,15 +88,22 @@ function ShotsWorkspace() {
   const requestedShot = search.get("shot");
   const requestedTab = search.get("tab");
   const { t: tr, lang } = useI18n();
-  const [open, setOpen] = useState<Shot | null>(null);
-  const [renaming, setRenaming] = useState(false);
+  const [renaming, setRenaming] = useState<Shot | null>(null);
+  const canEdit = useCanEditShots(projectId!);
+  const removal = useRemoveShots(projectId!);
   const context = useShotContext(projectId!);
-  const [mtab, setMtab] = useState("overview");
-  const [compose, setCompose] = useState<ComposeResult | null>(null);
-  const openIdRef = useRef("");
   const navigate = useNavigate();
   const [shotQuery, setShotQuery] = useState("");
-  const [referencesOpen, setReferencesOpen] = useState(false);
+  const referencesOpen = requestedTab === "refs";
+  const referenceTab = search.get("ref") === "media" ? "media" : "assets";
+  const underlyingTab = referencesOpen ? search.get("workspace") || "overview" : requestedTab;
+  const mtab = underlyingTab === "review" || underlyingTab === "overview" ? underlyingTab : "gen";
+  const returnTo = projectReturnPath(search.get("return"), base);
+  const returnLabel = returnTo?.pathname.startsWith(base + "/assets/")
+    ? lang === "zh" ? "返回角色与场景详情" : "Back to asset details"
+    : returnTo?.pathname === base + "/materials" || returnTo?.pathname.startsWith(base + "/library")
+      ? lang === "zh" ? "返回素材" : "Back to materials"
+      : lang === "zh" ? "返回来源页" : "Back to source";
   const [hideEmpty, setHideEmpty] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [scriptFilter, setScriptFilter] = usePersistentState<string>(
@@ -93,7 +112,6 @@ function ShotsWorkspace() {
   );
   const [boardLimit, setBoardLimit] = useState(40);
   const [railLimit, setRailLimit] = useState(60);
-  const [referenceTab, setReferenceTab] = useState("assets");
   const boardScroll = useRef(0);
   const [novelId, setNovelId] = usePersistentState(
     `shots.novel.${projectId}`,
@@ -104,18 +122,30 @@ function ShotsWorkspace() {
     "",
   );
   const openShot = (s: Shot, keepTab = false) => {
-    openIdRef.current = s.id;
-    setOpen(s);
     if (!open)
       boardScroll.current = document.querySelector("main")?.scrollTop ?? 0;
-    if (!keepTab) setMtab("gen");
     const next = new URLSearchParams(search);
     next.set("shot", s.id);
-    if (!keepTab) next.set("tab", "gen");
+    if (!keepTab) {
+      next.set("tab", "gen");
+      next.delete("workspace");
+      next.delete("ref");
+    }
     setSearch(next, { replace: keepTab });
-    setCompose(null);
-    doCompose.mutate(s.id);
   };
+  function changeTab(tab: string) {
+    const next = new URLSearchParams(search);
+    next.set("tab", tab);
+    next.delete("ref");
+    if (tab === "refs") next.set("workspace", mtab);
+    else next.delete("workspace");
+    setSearch(next, { replace: true });
+  }
+  function setReferenceTab(tab: string) {
+    const next = new URLSearchParams(search);
+    next.set("ref", tab);
+    setSearch(next, { replace: true });
+  }
 
   // 筛选数据源:小说列表 + 选中小说的章节
   const { data: novels } = useQuery({
@@ -151,6 +181,7 @@ function ShotsWorkspace() {
     },
   });
 
+  const open = shots?.find(s => s.id === requestedShot) ?? null;
   const boardShots = (shots ?? []).filter(
     (s) =>
       !scriptFilter ||
@@ -212,54 +243,28 @@ function ShotsWorkspace() {
   const transition = useMutation({
     mutationFn: ({ id, to }: { id: string; to: string }) =>
       api.post<Shot>(`${base}/shots/${id}/transition`, { to }),
-    onSuccess: (s) => {
-      if (openIdRef.current === s.id) setOpen(s);
-      refresh();
-    },
+    onSuccess: refresh,
   });
-  const doCompose = useMutation({
-    mutationFn: (id: string) =>
-      api.get<ComposeResult>(`${base}/shots/${id}/compose-prompt`),
-    onSuccess: (result, id) => {
-      if (openIdRef.current === id) setCompose(result);
-    },
+  const promptQuery = useQuery({
+    queryKey: ["shot-prompt", projectId, requestedShot],
+    queryFn: () => api.get<ComposeResult>(`${base}/shots/${requestedShot}/compose-prompt`),
+    enabled: !!open && mtab === "overview" && !referencesOpen,
   });
-
-  useEffect(() => {
-    const found = shots?.find((s) => s.id === requestedShot);
-    if (found && openIdRef.current !== found.id) {
-      openIdRef.current = found.id;
-      setOpen(found);
-      setCompose(null);
-      doCompose.mutate(found.id);
-    } else if (!requestedShot) {
-      openIdRef.current = "";
-      setOpen(null);
-    }
-  }, [shots, requestedShot]);
-  useEffect(() => {
-    if (requestedShot)
-      setMtab(
-        requestedTab === "review"
-          ? "review"
-          : requestedTab === "overview"
-            ? "overview"
-            : "gen",
-      );
-  }, [requestedShot, requestedTab]);
+  const compose = promptQuery.data;
   useEffect(() => {
     document
       .querySelector('.shot-rail-list [aria-current="true"]')
       ?.scrollIntoView({ block: "nearest" });
   }, [open?.id]);
   function closeWorkspace() {
-    setReferencesOpen(false);
+    if (returnTo) {
+      navigate(returnTo.pathname + returnTo.search + returnTo.hash);
+      return;
+    }
     if (search.get("view") !== "status") {
       navigate(`${base}/storyboard?scene=${open?.scene_id || ""}`);
       return;
     }
-    openIdRef.current = "";
-    setOpen(null);
     setSearch({ view: "status" }, { replace: true });
     requestAnimationFrame(() => {
       const main = document.querySelector("main");
@@ -274,22 +279,14 @@ function ShotsWorkspace() {
   const byStatus = (st: string) =>
     boardShots.filter((s) => s.production_status === st);
 
-  useEffect(() => {
-    setOpen((current) =>
-      current ? shots?.find((s) => s.id === current.id) || current : null,
-    );
-  }, [shots]);
-  if (
-    requestedShot &&
-    !open &&
-    !loadError &&
-    (isPending || shots?.some((s) => s.id === requestedShot))
-  )
-    return (
-      <div className="p-6 text-sm text-muted-foreground" role="status">
-        {tr("common.loading")}
-      </div>
-    );
+  if (requestedShot && !open) {
+    if (isPending) return <div className="studio-empty" role="status">{tr("common.loading")}</div>;
+    return <div className="studio-empty">
+      <p role="alert">{loadError?.message || (lang === "zh" ? "这个镜头已移除或不在当前项目中。" : "This shot was removed or is outside this project.")}</p>
+      {loadError && <Button onClick={() => void refetch()}>{lang === "zh" ? "重试" : "Retry"}</Button>}
+      <Button variant="outline" onClick={closeWorkspace}>{returnTo ? returnLabel : lang === "zh" ? "返回" : "Back"}</Button>
+    </div>;
+  }
   return (
     <div className={`shots-studio p-4 md:p-6 ${open ? "is-creating" : ""}`}>
       <h1 hidden={!!open} className="text-xl font-semibold mb-1">
@@ -422,7 +419,7 @@ function ShotsWorkspace() {
       )}
       {!isPending && !loadError && (
         <>
-          {total === 0 && (
+          {!open && total === 0 && (
             <div className="studio-empty mb-5">
               <Clapperboard className="h-7 w-7" />
               <p>
@@ -532,6 +529,10 @@ function ShotsWorkspace() {
                                 </div>
                               )}
                             </button>
+                            <div className="flex justify-end border-t px-1">
+                              <ShotActions projectId={projectId!} shot={s} source="status" canEdit={canEdit}
+                                onRename={() => setRenaming(s)} onRemove={() => void removal.remove([s], s.scene_title || s.scene_code || "")} />
+                            </div>
                           </div>
                         ))}
                         {items.length > boardLimit && (
@@ -558,9 +559,9 @@ function ShotsWorkspace() {
               <nav className="shot-creation-rail" aria-label="镜头导航">
                 <button className="shot-back" onClick={closeWorkspace}>
                   <ArrowLeft size={16} />
-                  {search.get("from") === "storyboard"
-                    ? "返回分镜"
-                    : "返回看板"}
+                  {returnTo ? returnLabel : search.get("view") === "status"
+                    ? lang === "zh" ? "返回看板" : "Back to board"
+                    : lang === "zh" ? "返回分镜" : "Back to storyboard"}
                 </button>
                 <div className="shot-scope-heading">
                   <span>
@@ -658,7 +659,7 @@ function ShotsWorkspace() {
                       {tr(`status.${open.production_status}`)}
                     </Badge>
                   </span>
-                  <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+                  <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
                     <button
                       className="studio-icon-button disabled:opacity-30"
                       aria-label={
@@ -690,14 +691,6 @@ function ShotsWorkspace() {
                     >
                       <ChevronRight size={16} />
                     </button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setReferencesOpen(true)}
-                    >
-                      <Images size={15} />
-                      参考素材
-                    </Button>
                     <button
                       onClick={closeWorkspace}
                       className="h-8 min-w-8 px-2 rounded-md hover:bg-elevated flex items-center justify-center text-muted-foreground"
@@ -714,13 +707,13 @@ function ShotsWorkspace() {
                     {open.title ||
                       (lang === "zh" ? "未命名镜头" : "Untitled shot")}
                   </h2>
-                  <button
+                  {canEdit && <button
                     className="studio-icon-button"
                     aria-label={lang === "zh" ? "重命名镜头" : "Rename shot"}
-                    onClick={() => setRenaming(true)}
+                    onClick={() => setRenaming(open)}
                   >
                     <Pencil size={15} />
-                  </button>
+                  </button>}
                 </div>
                 <p className="shot-context-path">
                   {[currentScript?.title || open.novel_title, open.scene_title]
@@ -730,17 +723,13 @@ function ShotsWorkspace() {
 
                 <div className="px-4 pt-2 shrink-0">
                   <Tabs
-                    value={mtab}
-                    onChange={(tab) => {
-                      setMtab(tab);
-                      const next = new URLSearchParams(search);
-                      next.set("tab", tab);
-                      setSearch(next, { replace: true });
-                    }}
+                    value={referencesOpen ? "refs" : mtab}
+                    onChange={changeTab}
                     tabs={[
                       { key: "overview", label: tr("shot.overview") },
-                      { key: "gen", label: tr("shot.gen") },
-                      { key: "review", label: tr("shot.review") },
+                      { key: "gen", label: lang === "zh" ? "制作画面" : "Produce" },
+                      { key: "refs", label: lang === "zh" ? "参考素材" : "References" },
+                      { key: "review", label: lang === "zh" ? "审阅镜头" : "Review shot" },
                     ]}
                   />
                 </div>
@@ -758,9 +747,9 @@ function ShotsWorkspace() {
                           {transition.error.message}
                         </p>
                       )}
-                      {doCompose.error && (
+                      {promptQuery.error && (
                         <p role="alert" className="text-xs text-danger">
-                          {doCompose.error.message}
+                          {promptQuery.error.message}
                         </p>
                       )}
                       <section>
@@ -772,7 +761,7 @@ function ShotsWorkspace() {
                         </p>
                       </section>
 
-                      <section>
+                      {canEdit && <section>
                         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
                           {tr("shot.transition")}
                         </div>
@@ -798,23 +787,7 @@ function ShotsWorkspace() {
                             </span>
                           )}
                         </div>
-                      </section>
-
-                      <section>
-                        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
-                          {tr("shot.refs")}
-                        </div>
-                        <ShotAssetRefs
-                          projectId={projectId!}
-                          shotId={open.id}
-                          onChange={() => doCompose.mutate(open.id)}
-                        />
-                      </section>
-                      <ShotMediaReferences
-                        key={open.id}
-                        projectId={projectId!}
-                        shotId={open.id}
-                      />
+                      </section>}
 
                       <section>
                         <div className="flex items-center justify-between mb-2">
@@ -824,7 +797,7 @@ function ShotsWorkspace() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => doCompose.mutate(open.id)}
+                            onClick={() => void promptQuery.refetch()}
                           >
                             {tr("shot.recompute")}
                           </Button>
@@ -845,21 +818,24 @@ function ShotsWorkspace() {
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1.5">
-                          {tr("shot.refsHint")}
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          <button className="studio-link" onClick={() => changeTab("refs")}>
+                            {lang === "zh" ? "参考素材" : "References"}
+                          </button>
+                          {lang === "zh" ? "中选用的角色与场景设定会用于组合镜头提示词。" : " supplies the selected character and scene settings for the shot prompt."}
                         </p>
                       </section>
                     </div>
                   )}
 
-                  <div hidden={mtab !== "gen"}>
+                  {mtab === "gen" && (
                     <GenerationPanel
                       projectId={projectId!}
                       targetType="shot"
                       targetId={open.id}
-                      onChooseReferences={() => setReferencesOpen(true)}
+                      onChooseReferences={() => changeTab("refs")}
                     />
-                  </div>
+                  )}
                   {mtab === "review" && (
                     <ReviewPanel projectId={projectId!} shotId={open.id} />
                   )}
@@ -869,57 +845,50 @@ function ShotsWorkspace() {
           </div>
         </>
       )}
-      {open && renaming && (
+      {renaming && (
         <ShotNameDialog
           projectId={projectId!}
-          shot={open}
-          onClose={() => setRenaming(false)}
-          onSaved={(s) =>
-            setOpen((current) =>
-              current?.id === s.id ? { ...current, title: s.title } : current,
-            )
-          }
+          shot={renaming}
+          onClose={() => setRenaming(null)}
         />
       )}
-      {open && (
+      {open && referencesOpen && (
         <Modal
-          open={referencesOpen}
-          onClose={() => setReferencesOpen(false)}
+          open
+          onClose={() => changeTab(mtab)}
           title={`参考素材 · ${open.title || "未命名镜头"}`}
           width={1040}
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <div className="shot-reference-dialog">
+          <div className="shrink-0 px-4 pt-2 sm:px-5">
             <Tabs
               value={referenceTab}
               onChange={setReferenceTab}
               tabs={[
                 { key: "assets", label: "角色与场景" },
-                { key: "video", label: "素材库" },
+                { key: "media", label: "素材库" },
               ]}
             />
-            <p className="text-sm text-muted-foreground my-4">
-              为当前镜头选择参考，完成后继续创作。
-            </p>
+          </div>
+          <div className="shot-reference-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-5 [&_.reference-catalog]:max-h-none [&_.reference-catalog]:overflow-visible">
             {referenceTab === "assets" ? (
               <ShotAssetRefs
                 key={open.id}
                 projectId={projectId!}
                 shotId={open.id}
-                onChange={() => doCompose.mutate(open.id)}
               />
             ) : (
               <ShotMediaReferences
                 key={open.id}
                 projectId={projectId!}
                 shotId={open.id}
-                allowChoose
+                allowChoose={canEdit}
               />
             )}
-            <div className="mt-5 flex justify-end">
-              <Button onClick={() => setReferencesOpen(false)}>
-                完成，继续创作
-              </Button>
-            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t bg-card px-4 py-2 sm:px-5">
+            {returnTo && <Button variant="outline" onClick={closeWorkspace}><ArrowLeft size={15} />{returnLabel}</Button>}
+            <Button onClick={() => changeTab(mtab)}>{lang === "zh" ? "完成" : "Done"}</Button>
           </div>
         </Modal>
       )}

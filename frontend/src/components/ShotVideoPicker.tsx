@@ -68,9 +68,11 @@ export function ShotVideoPicker({
         note: "",
       }),
     onSuccess: async () => {
-      await qc.invalidateQueries({
-        queryKey: ["media-usages", projectId, shotId],
-      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["media-usages", projectId, shotId] }),
+        qc.invalidateQueries({ queryKey: ["library-item", projectId] }),
+        qc.invalidateQueries({ queryKey: ["materials", projectId] }),
+      ]);
       setSelected(null);
     },
   });

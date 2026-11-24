@@ -65,7 +65,9 @@ def list_trash(ctx: ProjectContext = Depends(get_project_context), db: Session =
 
 @router.get("/assets/{asset_id}", response_model=schemas.AssetOut)
 def get_asset(asset_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
-    return schemas.AssetOut.of(service.get(db, ctx.project.id, asset_id))
+    asset = service.get(db, ctx.project.id, asset_id)
+    refs, generations, shots = service.asset_counts(db, [asset.id])[asset.id]
+    return schemas.AssetOut.of(asset, ref_count=refs, gen_count=generations, shot_count=shots)
 
 
 @router.patch("/assets/{asset_id}", response_model=schemas.AssetOut)
@@ -87,6 +89,13 @@ def batch_delete_assets(
 ):
     """批量软删除(进回收站);锁定/不存在的跳过,返回 {deleted, skipped}。"""
     return service.batch_soft_delete(db, ctx, data.ids)
+
+
+@router.post("/assets/batch-delete/preview")
+def preview_asset_trash(
+    data: schemas.BatchDeleteIn, ctx: ProjectContext = Depends(EDIT), db: Session = Depends(get_db, scope="function")
+):
+    return service.trash_preview(db, ctx.project.id, data.ids)
 
 
 @router.post("/assets/{asset_id}/restore", response_model=schemas.AssetOut)

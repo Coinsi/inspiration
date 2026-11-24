@@ -1,7 +1,8 @@
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useI18n } from "@/lib/i18n";
+import "@/pages/materials.css";
 
-export function MaterialTabs({ projectId, compact = false }: { projectId: string; compact?: boolean }) {
+export function MaterialTabs({ projectId }: { projectId: string }) {
   const zh = useI18n().lang === "zh";
   const { pathname } = useLocation();
   const [params] = useSearchParams();
@@ -13,12 +14,12 @@ export function MaterialTabs({ projectId, compact = false }: { projectId: string
   return (
     <nav
       aria-label={zh ? "素材导航" : "Materials"}
-      className={compact ? "materials-sections" : "flex flex-wrap gap-1 border-b pb-3"}
+      className="materials-sections"
     >
       {[
         {
           path: "materials",
-          label: zh ? "全部素材" : "All materials",
+          label: zh ? "素材文件" : "Media files",
           active: !trash && !entities,
         },
         {
@@ -36,7 +37,6 @@ export function MaterialTabs({ projectId, compact = false }: { projectId: string
           key={item.path}
           aria-current={item.active ? "page" : undefined}
           to={`${root}/${item.path}${returnTo?.startsWith(`${root}/`) ? `${item.path.includes("?") ? "&" : "?"}return=${encodeURIComponent(returnTo)}` : ""}`}
-          className={compact ? undefined : `rounded-lg px-4 py-2 text-sm ${item.active ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-elevated"}`}
         >
           {item.label}
         </Link>

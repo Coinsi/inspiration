@@ -472,9 +472,10 @@ def impact(
 ):
     from app.modules.library import reuse
 
-    service.media(db, ctx.project.id, media_id, include_deleted=True)
+    item = service.media(db, ctx.project.id, media_id, include_deleted=True)
     return {
         **service.impact(db, ctx.project.id, media_id),
+        "name": item.name,
         "reuses": reuse.destinations(db, ctx.user.id, media_id),
     }
 

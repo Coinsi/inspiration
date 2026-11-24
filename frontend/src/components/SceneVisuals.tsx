@@ -16,50 +16,43 @@ interface Result {
 export function SceneVisuals({
   base,
   sceneId,
+  canEdit,
+  onClose,
 }: {
   base: string;
   sceneId: string;
+  canEdit: boolean;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const path = `${base}/scenes/${sceneId}/visuals`;
   const query = useQuery({
     queryKey: ["scene-visuals", base, sceneId],
     queryFn: () => api.get<Result>(path),
-    enabled: open,
   });
   const save = useMutation({
     mutationFn: () =>
       api.put(path, { brief: draft, previous: query.data?.brief }),
     onSuccess: async () => {
       await query.refetch();
-      setOpen(false);
+      onClose();
     },
   });
   return (
-    <>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => {
-          setDraft(null);
-          setOpen(true);
-        }}
-      >
-        本场设定
-      </Button>
       <Modal
-        open={open}
-        onClose={() => setOpen(false)}
+        open
+        onClose={onClose}
         title="本场光线与环境"
         width={570}
       >
+        {query.isLoading && <p role="status">正在读取本场设定…</p>}
         {query.data && (
           <div className="space-y-3">
             <Textarea
               aria-label="本场光线与环境"
               rows={4}
               value={draft ?? query.data.brief}
+              readOnly={!canEdit}
               placeholder="例如，临近黄昏，窗外的冷光落在人物右侧"
               onChange={(e) => setDraft(e.target.value)}
             />
@@ -81,20 +74,19 @@ export function SceneVisuals({
               clips={query.data.clips}
               untracked={query.data.untracked_outputs}
             />
-            <Button
+            {canEdit && <Button
               disabled={
                 draft === null || draft === query.data.brief || save.isPending
               }
               onClick={() => save.mutate()}
             >
               保存本场设定
-            </Button>
+            </Button>}
           </div>
         )}
         {(query.error || save.error) && (
           <p role="alert">{(query.error || save.error)?.message}</p>
         )}
       </Modal>
-    </>
   );
 }

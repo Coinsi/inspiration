@@ -29,6 +29,7 @@ export function ShotNameDialog({
     onSuccess: (result) => {
       void qc.invalidateQueries({ queryKey: ["all-shots", projectId] });
       void qc.invalidateQueries({ queryKey: ["scene-shots", projectId] });
+      void qc.invalidateQueries({ queryKey: ["asset-usages", projectId] });
       if (shot) {
         qc.setQueryData(
           ["shot", shot.id],

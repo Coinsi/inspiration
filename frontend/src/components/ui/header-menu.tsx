@@ -1,5 +1,9 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
+import { Button } from "./button";
+import { cn } from "@/lib/utils";
 
 /** Small navigation menu: outside click, Escape, arrow keys and focus return. */
 export function HeaderMenu({
@@ -116,3 +120,43 @@ export function HeaderMenu({
 
 export const headerMenuItem =
   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-elevated focus:bg-elevated focus:outline-none";
+
+/** Object actions use Radix for keyboard navigation, focus and viewport collision handling. */
+export function ActionMenu({ label, children, trigger }: {
+  label: string;
+  children: ReactNode;
+  trigger?: ReactNode;
+}) {
+  const opener = useRef<HTMLButtonElement>(null);
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <Button ref={opener} type="button" variant="ghost" size={trigger ? "sm" : "icon"}
+          aria-label={label} title={label} onClick={event => event.stopPropagation()}>
+          {trigger ?? <MoreHorizontal size={18} aria-hidden />}
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="end" sideOffset={4} collisionPadding={8} loop data-action-menu
+          aria-label={label}
+          onCloseAutoFocus={event => {
+            const dialog = document.activeElement?.closest('[aria-modal="true"]');
+            if (dialog && !dialog.contains(opener.current)) event.preventDefault();
+          }}
+          className="z-[110] min-w-44 max-w-[calc(100vw-16px)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-lg border bg-card p-1 shadow-lg"
+          onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+          {children}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+export function ActionMenuItem({ danger, className, ...props }: DropdownMenu.DropdownMenuItemProps & { danger?: boolean }) {
+  return <DropdownMenu.Item {...props} className={cn(
+    "flex min-h-10 cursor-pointer select-none items-center gap-2.5 rounded-md px-3 py-2 text-sm outline-none data-[highlighted]:bg-elevated data-[disabled]:cursor-default data-[disabled]:opacity-50 [&_svg]:size-4",
+    danger && "text-danger", className,
+  )} />;
+}
+
+export const ActionMenuSeparator = () => <DropdownMenu.Separator className="my-1 border-t" />;

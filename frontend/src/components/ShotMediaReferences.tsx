@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, blobUrl } from "@/lib/api";
-import { mediaTime, type MediaUsage } from "@/lib/library";
+import { api } from "@/lib/api";
+import { libraryPreviewUrl, mediaTime, type MediaUsage } from "@/lib/library";
 import { LibraryMediaPreview } from "@/components/LibraryMediaPreview";
 import { useI18n } from "@/lib/i18n";
 import { useConfirm } from "@/components/ui/confirm";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { JobStatus } from "@/components/JobStatus";
 import type { GenJob } from "@/lib/api";
 import { ShotVideoPicker } from "@/components/ShotVideoPicker";
+import { useCanEditShots } from "@/components/ShotActions";
 
 export function ShotMediaReferences({
   projectId,
@@ -25,6 +26,7 @@ export function ShotMediaReferences({
     qc = useQueryClient(),
     confirm = useConfirm();
   const [results, setResults] = useState<Record<string, string>>({});
+  const canEdit = useCanEditShots(projectId);
   const materialize = useMutation({
     mutationFn: ({
       id,
@@ -54,21 +56,23 @@ export function ShotMediaReferences({
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["media-usages", projectId] });
       void qc.invalidateQueries({ queryKey: ["library", projectId] });
+      void qc.invalidateQueries({ queryKey: ["library-item", projectId] });
+      void qc.invalidateQueries({ queryKey: ["library-impact", projectId] });
+      void qc.invalidateQueries({ queryKey: ["materials", projectId] });
     },
   });
   return (
     <section className="space-y-3">
-      {allowChoose && <ShotVideoPicker projectId={projectId} shotId={shotId} />}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">
-          {zh ? "素材引用" : "Referenced media"}
+          {zh ? "已引用素材" : "Referenced media"}
         </h3>
-        <Link
+        {canEdit && <Link
           to={`/projects/${projectId}/library?shot=${shotId}`}
           className="studio-link text-xs"
         >
           {zh ? "从素材库选择" : "Choose from media library"} →
-        </Link>
+        </Link>}
       </div>
       {usages.isPending ? (
         <p className="text-xs text-muted-foreground">
@@ -88,7 +92,9 @@ export function ShotMediaReferences({
             : "No references yet. Images retain the whole picture; audio and video retain the selected range. All references link to their source version."}
         </p>
       ) : (
-        usages.data.map((u) => (
+        usages.data.map((u) => {
+          const preview = libraryPreviewUrl(projectId, u);
+          return (
           <div className="space-y-2 rounded-lg border p-3" key={u.id}>
             <p className="text-sm">
               {u.name} · v{u.ordinal}
@@ -108,16 +114,16 @@ export function ShotMediaReferences({
                   ? "剪辑备选"
                   : "Editing source"}
             </p>
-            <LibraryMediaPreview
+            {preview ? <LibraryMediaPreview
               mediaType={u.media_type}
-              key={`${u.id}.${u.proxy_hash}`}
-              src={blobUrl(projectId, u.proxy_hash)}
+              key={preview}
+              src={preview}
               start={u.start_ms}
               end={u.end_ms}
               label={u.name}
-            />
+            /> : <p className="text-xs text-muted-foreground">{zh ? "此版本暂无预览" : "No preview for this version"}</p>}
             {u.note && <p className="break-words text-xs">{u.note}</p>}
-            <div className="flex flex-wrap gap-2">
+            {canEdit && <div className="flex flex-wrap gap-2">
               {(
                 [
                   [
@@ -167,7 +173,7 @@ export function ShotMediaReferences({
                     {label}
                   </Button>
                 ))}
-            </div>
+            </div>}
             <p className="text-xs leading-5 text-muted-foreground">
               {u.media_type === "image"
                 ? zh
@@ -184,7 +190,7 @@ export function ShotMediaReferences({
             {results[u.id] && (
               <JobStatus projectId={projectId} jobId={results[u.id]} />
             )}
-            <button
+            {canEdit && <button
               className="studio-link text-xs"
               disabled={remove.isPending || materialize.isPending}
               onClick={async () => {
@@ -199,9 +205,9 @@ export function ShotMediaReferences({
               }}
             >
               {zh ? "解除此引用" : "Remove reference"}
-            </button>
+            </button>}
           </div>
-        ))
+        )})
       )}
       {remove.error && (
         <p role="alert" className="text-xs text-danger">
@@ -213,6 +219,10 @@ export function ShotMediaReferences({
           {materialize.error.message}
         </p>
       )}
+      {allowChoose && canEdit && <section className="border-t pt-4">
+        <h3 className="text-sm font-medium">{zh ? "添加参考素材" : "Add a reference"}</h3>
+        <ShotVideoPicker projectId={projectId} shotId={shotId} />
+      </section>}
     </section>
   );
 }

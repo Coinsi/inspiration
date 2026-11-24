@@ -1,17 +1,18 @@
 """asset 业务逻辑:CRUD + 版本 + 参考图 + 回收站 + 影响分析。"""
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.orm import Session
 
 from app.core import audit
 from app.core.deps import ProjectContext
 from app.core.errors import Conflict, Locked, NotFound
-from app.kernel.graph import GraphService
+from app.kernel.graph import GraphService, active_asset_shot_refs
 from app.kernel.versioning import VersioningService
 from app.models.asset import Asset, AssetReferenceImage
 from app.models.consistency import VisualIdentity
-from app.models.enums import AssetType, VersionStatus
+from app.models.enums import AssetType, RefMode, VersionStatus
 from app.models.versioning import Version
 from app.modules.asset import schemas
 from app.platform import coding
@@ -34,8 +35,14 @@ def _snapshot(a: Asset) -> dict:
     }
 
 
-def _get(db: Session, project_id: uuid.UUID, asset_id: uuid.UUID, *, with_deleted=False) -> Asset:
-    a = db.get(Asset, asset_id)
+def _get(
+    db: Session, project_id: uuid.UUID, asset_id: uuid.UUID, *, with_deleted=False, for_update=False
+) -> Asset:
+    if for_update:
+        stmt = select(Asset).where(Asset.project_id == project_id, Asset.id == asset_id)
+        a = db.scalar(stmt.with_for_update().execution_options(populate_existing=True))
+    else:
+        a = db.get(Asset, asset_id)
     if a is None or a.project_id != project_id or (not with_deleted and a.deleted_at is not None):
         raise NotFound("资产不存在")
     return a
@@ -112,13 +119,10 @@ def list_assets(
     if chapter_id is not None:
         # 章节维度:被「该章场次下的镜头」引用过的资产(场次→镜头→引用)
         from app.models.narrative import Scene
-        from app.models.shot import Shot, ShotAssetRef
+        from app.models.shot import ShotAssetRef
 
-        sub = (
-            select(ShotAssetRef.asset_id)
-            .join(Shot, ShotAssetRef.shot_id == Shot.id)
-            .join(Scene, Shot.scene_id == Scene.id)
-            .where(Scene.adapted_from_chapter_id == chapter_id, Shot.deleted_at.is_(None))
+        sub = active_asset_shot_refs(ShotAssetRef.asset_id).where(
+            Scene.adapted_from_chapter_id == chapter_id
         )
         stmt = stmt.where(Asset.id.in_(sub))
     return list(db.scalars(stmt.order_by(Asset.created_at.desc())))
@@ -126,8 +130,6 @@ def list_assets(
 
 def asset_counts(db: Session, asset_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[int, int, int]]:
     """批量取每个资产的(参考图数, 概念图数, 引用镜头数),供列表/图谱角标。"""
-    from sqlalchemy import func
-
     from app.models.generation import Generation
     from app.models.shot import ShotAssetRef
 
@@ -149,7 +151,9 @@ def asset_counts(db: Session, asset_ids: list[uuid.UUID]) -> dict[uuid.UUID, tup
     )
     shots = dict(
         db.execute(
-            select(ShotAssetRef.asset_id, func.count(func.distinct(ShotAssetRef.shot_id)))
+            active_asset_shot_refs(
+                ShotAssetRef.asset_id, func.count(func.distinct(ShotAssetRef.shot_id))
+            )
             .where(ShotAssetRef.asset_id.in_(asset_ids))
             .group_by(ShotAssetRef.asset_id)
         ).all()
@@ -162,31 +166,48 @@ def get(db: Session, project_id: uuid.UUID, asset_id: uuid.UUID) -> Asset:
 
 
 def soft_delete(db: Session, ctx: ProjectContext, asset_id: uuid.UUID) -> None:
-    from sqlalchemy import func
-
-    a = _get(db, ctx.project.id, asset_id)
+    a = _get(db, ctx.project.id, asset_id, for_update=True)
+    if a.status == VersionStatus.locked:
+        raise Locked("资产已锁定，无法移入回收站")
     a.deleted_at = func.now()
     audit.record(db, action="asset.delete", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type=ENTITY, target_id=a.id)
     db.flush()
 
 
+def trash_preview(db: Session, project_id: uuid.UUID, ids: list[uuid.UUID]) -> dict:
+    from app.models.shot import ShotAssetRef
+
+    eligible = list(db.scalars(
+        select(Asset.id).where(
+            Asset.project_id == project_id, Asset.id.in_(ids),
+            Asset.deleted_at.is_(None), Asset.status != VersionStatus.locked,
+        )
+    ))
+    shot_count = func.count(func.distinct(ShotAssetRef.shot_id))
+    total, floating, pinned = db.execute(
+        active_asset_shot_refs(
+            shot_count,
+            shot_count.filter(ShotAssetRef.ref_mode == RefMode.floating),
+            shot_count.filter(ShotAssetRef.ref_mode == RefMode.pinned),
+        ).where(ShotAssetRef.asset_id.in_(eligible))
+    ).one()
+    return {
+        "eligible_ids": eligible, "shot_count": total,
+        "floating_shots": floating, "pinned_shots": pinned,
+    }
+
+
 def batch_soft_delete(db: Session, ctx: ProjectContext, ids: list[uuid.UUID]) -> dict:
     """批量软删除;锁定资产与不存在/已删的跳过,返回 {deleted, skipped}。"""
-    from sqlalchemy import func
-
-    deleted, skipped = 0, 0
-    for aid in ids:
-        a = db.get(Asset, aid)
-        if a is None or a.project_id != ctx.project.id or a.deleted_at is not None:
-            skipped += 1
-            continue
-        status = a.status.value if isinstance(a.status, VersionStatus) else a.status
-        if status == "locked":
-            skipped += 1
-            continue
-        a.deleted_at = func.now()
-        deleted += 1
+    changed = db.scalars(
+        sql_update(Asset)
+        .where(Asset.id.in_(ids), Asset.project_id == ctx.project.id,
+               Asset.deleted_at.is_(None), Asset.status != VersionStatus.locked)
+        .values(deleted_at=func.now())
+        .returning(Asset.id)
+    ).all()
+    deleted, skipped = len(changed), len(ids) - len(changed)
     audit.record(db, action="asset.batch_delete", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type=ENTITY, target_id=None,
                  detail={"deleted": deleted, "skipped": skipped, "total": len(ids)})
@@ -195,7 +216,7 @@ def batch_soft_delete(db: Session, ctx: ProjectContext, ids: list[uuid.UUID]) ->
 
 
 def restore(db: Session, ctx: ProjectContext, asset_id: uuid.UUID) -> Asset:
-    a = _get(db, ctx.project.id, asset_id, with_deleted=True)
+    a = _get(db, ctx.project.id, asset_id, with_deleted=True, for_update=True)
     a.deleted_at = None
     audit.record(db, action="asset.restore", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type=ENTITY, target_id=a.id)
@@ -277,7 +298,7 @@ def rollback(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, version_id: 
 
 
 def lock(db: Session, ctx: ProjectContext, asset_id: uuid.UUID) -> Asset:
-    a = _get(db, ctx.project.id, asset_id)
+    a = _get(db, ctx.project.id, asset_id, for_update=True)
     a.status = VersionStatus.locked
     if a.current_version_id:
         VersioningService(db).lock(a.current_version_id)

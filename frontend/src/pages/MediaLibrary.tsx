@@ -35,12 +35,14 @@ import { usePersistentState } from "@/lib/usePersistentState";
 import { api, blobUrl, type Shot } from "@/lib/api";
 import {
   mediaSize,
+  libraryPreviewUrl,
   mediaTypeName,
   type MediaType,
   mediaStatus,
   mediaTime,
   type LibraryMedia,
   type MediaVersion,
+  type MediaUsage,
   type DeletionImpact,
 } from "@/lib/library";
 import { useI18n } from "@/lib/i18n";
@@ -62,12 +64,21 @@ import { LibraryMediaPreview } from "@/components/LibraryMediaPreview";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useConfirm } from "@/components/ui/confirm";
+import { useToast } from "@/components/ui/toast";
+import { ActionMenu, ActionMenuItem } from "@/components/ui/header-menu";
+import { useAssetPermissions } from "@/components/AssetActions";
+
+function mediaShotLink(projectId: string, shotId: string, returnTo: string) {
+  const params = new URLSearchParams({ shot: shotId, tab: "refs", ref: "media", return: returnTo });
+  return `/projects/${projectId}/shots?${params}`;
+}
 
 export default function MediaLibrary() {
   const { projectId } = useParams();
   return <LibraryContent key={projectId} projectId={projectId!} />;
 }
 function LibraryContent({ projectId }: { projectId: string }) {
+  const { canEdit } = useAssetPermissions(projectId);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const folder = params.get("folder") || "all";
@@ -151,6 +162,7 @@ function LibraryContent({ projectId }: { projectId: string }) {
     void qc.invalidateQueries({ queryKey: ["library", projectId] });
     void qc.invalidateQueries({ queryKey: ["library-item", projectId] });
     void qc.invalidateQueries({ queryKey: ["media-usages", projectId] });
+    void qc.invalidateQueries({ queryKey: ["library-impact", projectId] });
   };
   const action = useMutation({
     mutationFn: (path: string) => api.post(`${base}/${path}`),
@@ -166,20 +178,14 @@ function LibraryContent({ projectId }: { projectId: string }) {
   const open = detail.data;
   const filtered = list.data?.items || [];
   return (
-    <div className="studio-page material-workspace">
-      <MaterialTabs projectId={projectId} />
-      <div className="page-heading mb-6">
+    <div className="studio-page material-workspace unified-materials">
+      <header className="materials-heading">
         <div>
           <h1 className="text-xl font-semibold">
             {zh ? "文件与版本管理" : "Files & versions"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {zh
-              ? "让视频、图片和声音成为创作的起点。保留原文件，随时预览、检索与引用。"
-              : "Keep videos, images and audio together. Preview, find and reference them in your next creation."}
-          </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        {canEdit && <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setReuseOpen(true)}>
             {zh ? "从其他项目复用" : "Reuse from another project"}
           </Button>
@@ -187,8 +193,9 @@ function LibraryContent({ projectId }: { projectId: string }) {
             <Plus className="h-4 w-4" />
             {zh ? "导入素材" : "Import media"}
           </Button>
-        </div>
-      </div>
+        </div>}
+      </header>
+      <div className="materials-navigation"><MaterialTabs projectId={projectId} /></div>
       {params.get("media") && (detail.isError || detail.data?.deleted_at) && (
         <p
           role="status"
@@ -615,13 +622,13 @@ function LibraryContent({ projectId }: { projectId: string }) {
                                   {zh ? "取消此版本" : "Cancel version"}
                                 </Button>
                               )}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setImpactId(item.id)}
-                              >
-                                {zh ? "引用与删除" : "Usage & deletion"}
-                              </Button>
+                              {canEdit && (
+                                <ActionMenu label={zh ? `更多操作：${item.name}` : `Actions for ${item.name}`}>
+                                  <ActionMenuItem danger onSelect={() => setImpactId(item.id)}>
+                                    {zh ? "移入回收站" : "Move to trash"}
+                                  </ActionMenuItem>
+                                </ActionMenu>
+                              )}
                             </>
                           )}
                         </div>
@@ -784,6 +791,7 @@ export function LibraryDetail({
       "",
   );
   const v = item.versions.find((v) => v.id === versionId);
+  const previewUrl = v && (v.proxy_hash || v.status === "ready") ? libraryPreviewUrl(projectId, v) : undefined;
   const kind = v?.media_type || "video";
   const [matchId, setMatchId] = useState(segment?.matches?.[0]?.id || "");
   const selectedMatch =
@@ -791,6 +799,17 @@ export function LibraryDetail({
       ? segment?.matches?.find((match) => match.id === matchId)
       : undefined;
   const isImage = kind === "image";
+  const { canEdit } = useAssetPermissions(projectId);
+  const [showUsages, setShowUsages] = useState(false);
+  const existingUsages = useQuery({
+    queryKey: ["media-usages", projectId, "file", item.id],
+    queryFn: () => api.get<MediaUsage[]>(`/projects/${projectId}/library/usages?media_id=${item.id}`),
+    enabled: showUsages,
+  });
+  const returnParams = new URLSearchParams(location.search);
+  returnParams.set("media", item.id);
+  if (v) returnParams.set("version", v.id);
+  const fileReturn = `${location.pathname}?${returnParams}`;
   const linked = params.get("media") === item.id;
   const linkedTime = (key: string, fallback: number) => {
     const value = Number(params.get(key));
@@ -832,10 +851,10 @@ export function LibraryDetail({
       endMs - startMs >= 100 &&
       endMs <= (v?.duration_ms || 0));
   const reference = useMutation({
-    mutationFn: () =>
+    mutationFn: (shotId: string) =>
       api.post(`/projects/${projectId}/library/usages`, {
         version_id: versionId,
-        shot_id: selectedShot,
+        shot_id: shotId,
         start_ms: isImage ? null : startMs,
         end_ms: isImage ? null : endMs,
         purpose,
@@ -858,12 +877,12 @@ export function LibraryDetail({
             aria-label={zh ? "素材预览" : "Media preview"}
           >
             <div className="library-preview-stage">
-              {v?.proxy_hash ? (
+              {v && previewUrl ? (
                 <LibraryMediaPreview
                   showRangeControls={using || Boolean(segment)}
                   mediaType={kind}
                   key={v.id}
-                  src={blobUrl(projectId, v.proxy_hash)}
+                  src={previewUrl}
                   start={startMs || 0}
                   end={endMs || 0}
                   label={item.name}
@@ -902,7 +921,7 @@ export function LibraryDetail({
             </div>
             <div className="library-preview-caption">
               <span>{zh ? "预览 · 保留完整画面" : "Preview · Full frame"}</span>
-              {isImage && v?.proxy_hash && (
+              {isImage && previewUrl && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1013,14 +1032,30 @@ export function LibraryDetail({
                 <div>
                   <dt>{zh ? "已被引用" : "References"}</dt>
                   <dd>
-                    {item.usage_count}
-                    {zh ? " 次" : ""}
+                    {item.usage_count ? (
+                      <button className="studio-link" aria-expanded={showUsages}
+                        onClick={() => setShowUsages(!showUsages)}>
+                        {zh ? `${item.usage_count} 处镜头引用` : `${item.usage_count} shot references`}
+                      </button>
+                    ) : (zh ? "0 次" : "0")}
                   </dd>
                 </div>
               </dl>
             )}
+            {showUsages && (
+              <section aria-label={zh ? "引用镜头" : "Shot references"} className="space-y-2 text-sm">
+                {existingUsages.isPending ? <p role="status">{zh ? "正在读取引用…" : "Loading references…"}</p>
+                  : existingUsages.isError ? <Button variant="outline" size="sm" onClick={() => void existingUsages.refetch()}>{zh ? "重试读取引用" : "Retry"}</Button>
+                  : existingUsages.data.length ? <ul className="space-y-2">{existingUsages.data.map(ref => (
+                    <li key={ref.id}>{ref.shot_deleted
+                      ? <span className="text-muted-foreground">{ref.shot_title} · {zh ? "镜头已移除" : "Shot removed"}</span>
+                      : <Link className="studio-link" to={mediaShotLink(projectId, ref.shot_id, fileReturn)}>{ref.shot_title} · v{ref.ordinal} ↗</Link>}
+                    </li>
+                  ))}</ul> : <p>{zh ? "暂无镜头引用" : "No shot references"}</p>}
+              </section>
+            )}
             <div className="library-viewer-actions">
-              <Button
+              {canEdit && <Button
                 disabled={!v || v.status !== "ready"}
                 variant={using ? "outline" : "default"}
                 aria-expanded={using}
@@ -1035,7 +1070,7 @@ export function LibraryDetail({
                   : zh
                     ? "用到镜头"
                     : "Use in a shot"}
-              </Button>
+              </Button>}
               {v?.original_hash && (
                 <a
                   className="library-download"
@@ -1049,7 +1084,7 @@ export function LibraryDetail({
             </div>
             <div
               id="library-use-panel"
-              hidden={!using}
+              hidden={!using || !canEdit}
               className="library-use-panel space-y-4"
             >
               <h3 className="text-sm font-medium">
@@ -1163,23 +1198,23 @@ export function LibraryDetail({
               />
               <p className="text-xs text-muted-foreground">
                 {zh
-                  ? "保存后可在镜头详情中查看；不会自动加入时间线或发送给AI。"
-                  : "View it from the shot details. This does not add it to the timeline or send it to AI."}
+                  ? "保存后可在该镜头的「参考素材」中查看。"
+                  : "After saving, open References in this shot to see the file."}
               </p>
               <Button
                 disabled={
                   !valid ||
                   !selectedShot ||
                   v?.status !== "ready" ||
-                  reference.isPending
+                  reference.isPending || reference.isSuccess
                 }
-                onClick={() => reference.mutate()}
+                onClick={() => reference.mutate(selectedShot)}
               >
                 {reference.isPending
                   ? zh
                     ? "保存中…"
                     : "Saving…"
-                  : zh
+                  : reference.isSuccess ? (zh ? "已引用" : "Referenced") : zh
                     ? "引用到镜头"
                     : "Reference in shot"}
               </Button>
@@ -1193,9 +1228,9 @@ export function LibraryDetail({
                   {zh ? "引用已保存。" : "Reference saved."}{" "}
                   <Link
                     className="underline"
-                    to={`/projects/${projectId}/shots?shot=${selectedShot}`}
+                    to={mediaShotLink(projectId, reference.variables, fileReturn)}
                   >
-                    {zh ? "打开镜头" : "Open shot"} →
+                    {zh ? "查看镜头参考" : "View shot references"} →
                   </Link>
                 </p>
               )}
@@ -1332,9 +1367,9 @@ export function LibraryDetail({
           />
         </Modal>
       )}
-      {enlarged && v?.proxy_hash && (
+      {enlarged && v && previewUrl && (
         <Lightbox
-          src={blobUrl(projectId, v.proxy_hash)}
+          src={v.original_hash ? blobUrl(projectId, v.original_hash) : previewUrl}
           alt={item.name}
           filename={v.filename}
           onClose={() => setEnlarged(false)}
@@ -1358,6 +1393,8 @@ export function ImpactDialog({
   const zh = useI18n().lang === "zh",
     base = `/projects/${projectId}/library`,
     confirm = useConfirm();
+  const toast = useToast();
+  const location = useLocation();
   const impact = useQuery({
     queryKey: ["library-impact", projectId, mediaId],
     queryFn: () =>
@@ -1366,6 +1403,7 @@ export function ImpactDialog({
   const trash = useMutation({
     mutationFn: () => api.post(`${base}/${mediaId}/trash`),
     onSuccess: () => {
+      toast.push(zh ? "素材已移入回收站" : "Media moved to trash", "success");
       onChange();
       onClose();
     },
@@ -1381,15 +1419,17 @@ export function ImpactDialog({
   return (
     <Modal
       open
-      title={zh ? "引用与删除影响" : "Usage & deletion impact"}
+      title={impact.data?.name
+        ? zh ? `将「${impact.data.name}」移入回收站？` : `Move “${impact.data.name}” to trash?`
+        : zh ? "移入素材回收站" : "Move media to trash"}
       onClose={onClose}
       width={650}
     >
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
           {zh
-            ? "移入回收站前，会重新检查所有版本的镜头引用和上传/处理任务。回收站可恢复，原片与预览文件暂不物理删除。"
-            : "All version usages and active tasks are checked again before moving to trash. Trash is recoverable; files are retained."}
+            ? "移入后可以在素材回收站恢复原文件及其全部版本。"
+            : "You can restore the original and all its versions from the materials trash."}
         </p>
         {impact.isPending ? (
           <p>{zh ? "检查中…" : "Checking…"}</p>
@@ -1418,10 +1458,15 @@ export function ImpactDialog({
                     : `${mediaTime(r.start_ms)} — ${mediaTime(r.end_ms)}`}{" "}
                   {r.shot_deleted
                     ? zh
-                      ? "（镜头已删除，引用仍保留）"
+                      ? "（镜头已移除，引用仍保留）"
                       : "(shot deleted, reference retained)"
                     : ""}
                 </p>
+                {!r.shot_deleted && (
+                  <Link className="studio-link mr-4" to={mediaShotLink(projectId, r.shot_id, location.pathname + location.search)}>
+                    {zh ? "查看镜头参考" : "View shot references"}
+                  </Link>
+                )}
                 <button
                   disabled={remove.isPending}
                   className="studio-link"
@@ -1488,24 +1533,19 @@ export function ImpactDialog({
                 )}
               </div>
             )}
-            <Button
-              variant="outline"
-              disabled={
-                !impact.data.can_trash || trash.isPending || remove.isPending
-              }
-              onClick={async () => {
-                if (
-                  await confirm({
-                    message: zh
-                      ? "确认将此素材及其版本移入回收站？可稍后恢复。"
-                      : "Move this media and its versions to trash? You can restore them later.",
-                  })
-                )
-                  trash.mutate();
-              }}
-            >
-              {zh ? "移入回收站" : "Move to trash"}
-            </Button>
+            {!!impact.data.engineering_count && (
+              <p className="text-sm">{zh
+                ? `制作工程中有 ${impact.data.engineering_count} 处使用了这个文件，需保留原片。`
+                : `Production work uses this file in ${impact.data.engineering_count} places and needs the original.`}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={onClose}>{zh ? "取消" : "Cancel"}</Button>
+              <Button className="bg-danger text-white hover:bg-danger/90"
+                disabled={!impact.data.can_trash || trash.isPending || remove.isPending}
+                onClick={() => trash.mutate()}>
+                {zh ? "移入回收站" : "Move to trash"}
+              </Button>
+            </div>
           </>
         )}
         {(trash.error || remove.error) && (

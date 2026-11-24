@@ -32,7 +32,7 @@ class ShotOut(BaseModel):
 
 
 class ShotUpdate(BaseModel):
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=255)
     description: str | None = None
     prompt_override: str | None = None
     storyboard: dict | None = None  # 传入则按 key 合并到现有分镜规格
@@ -44,12 +44,29 @@ class SceneVisuals(BaseModel):
 
 
 class ShotCreate(BaseModel):
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=255)
     description: str = ""
 
 
 class ReorderIn(BaseModel):
     shot_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class ShotSelection(BaseModel):
+    shot_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class ShotChangeCount(BaseModel):
+    changed: int
+
+
+class RemovedShotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    code: str
+    title: str | None
+    ordinal: int
+    deleted_at: datetime
 
 
 class AssetUsage(BaseModel):
@@ -77,6 +94,8 @@ class AssetRefOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     asset_id: uuid.UUID
+    asset_name: str | None = None
+    asset_removed: bool = False
     role: str
     ref_mode: RefMode
     pinned_version_id: uuid.UUID | None

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
@@ -32,16 +31,17 @@ export function ShotBatchControl({
   projectId,
   sceneId,
   shots,
+  onClose,
 }: {
   projectId: string;
   sceneId: string;
   shots: Shot[];
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => suggestedShots("image"));
   const [media, setMedia] = useState("image");
   const [manualModel, setManualModel] = useState("");
-  const [requestKey, setRequestKey] = useState("");
+  const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
   const [history, setHistory] = useState(true);
   const [pickedShots, setPickedShots] = useState(false);
   const base = `/projects/${projectId}`;
@@ -49,9 +49,7 @@ export function ShotBatchControl({
   const runs = useQuery({
     queryKey: ["shot-batches", projectId, sceneId],
     queryFn: () => api.get<Batch[]>(path),
-    enabled: open,
     refetchInterval: (q) =>
-      open &&
       q.state.data?.some((b) =>
         b.items.some(
           (i) =>
@@ -65,7 +63,6 @@ export function ShotBatchControl({
   const models = useQuery({
     queryKey: ["providers", projectId],
     queryFn: () => api.get<ProviderConfig[]>(`${base}/providers`),
-    enabled: open,
   });
   const available = (models.data ?? []).filter(
     (p) =>
@@ -113,22 +110,9 @@ export function ShotBatchControl({
   }
   const showRuns = history && !!runs.data?.length;
   return (
-    <>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => {
-          setOpen(true);
-          newBatch();
-          setHistory(true);
-        }}
-      >
-        <Layers size={15} />
-        批量生成
-      </Button>
       <Modal
-        open={open}
-        onClose={() => setOpen(false)}
+        open
+        onClose={onClose}
         title="批量生成镜头"
         width={630}
       >
@@ -296,6 +280,5 @@ export function ShotBatchControl({
           </p>
         )}
       </Modal>
-    </>
   );
 }

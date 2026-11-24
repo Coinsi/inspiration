@@ -39,7 +39,7 @@
 }
 .search-field > input::placeholder {
   color: hsl(var(--muted));
-  opacity: 0.8;
+  opacity: 1;
 }
 .search-field > input[data-search-input]:focus-visible {
   outline: none;

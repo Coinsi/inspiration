@@ -34,6 +34,30 @@ def reorder_shots(
     return service.reorder_shots(db, ctx, scene_id, data.shot_ids)
 
 
+@router.get("/scenes/{scene_id}/shots/removed", response_model=list[schemas.RemovedShotOut])
+def removed_shots(
+    scene_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service.list_shots(db, ctx.project.id, scene_id, removed=True)
+
+
+@router.post("/scenes/{scene_id}/shots/remove", response_model=schemas.ShotChangeCount)
+def remove_shots(
+    scene_id: uuid.UUID, data: schemas.ShotSelection, ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return schemas.ShotChangeCount(changed=service.remove_shots(db, ctx, scene_id, data.shot_ids))
+
+
+@router.post("/scenes/{scene_id}/shots/restore", response_model=schemas.ShotChangeCount)
+def restore_shots(
+    scene_id: uuid.UUID, data: schemas.ShotSelection, ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return schemas.ShotChangeCount(changed=service.restore_shots(db, ctx, scene_id, data.shot_ids))
+
+
 @router.post("/scenes/{scene_id}/breakdown", response_model=list[schemas.ShotOut])
 def breakdown_scene(
     scene_id: uuid.UUID, strategy: str | None = None,

@@ -1,5 +1,6 @@
 """shot 业务:CRUD、引用、状态机、看板、提示词 BOM 组合。"""
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from app.models.asset import Asset
 from app.models.enums import ProductionStatus
 from app.models.narrative import Chapter, Novel, Scene
 from app.models.shot import Shot, ShotAssetRef
-from app.modules.shot import schemas
+from app.modules.shot import breakdown, schemas
 
 # 确保一致性策略注册
 import app.adapters.consistency  # noqa: E402,F401
@@ -28,21 +29,34 @@ TRANSITIONS: dict[ProductionStatus, set[ProductionStatus]] = {
 }
 
 
-def _get(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID) -> Shot:
-    s = db.get(Shot, shot_id)
-    if s is None or s.project_id != project_id or s.deleted_at is not None:
+def _get(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID, *, lock=False) -> Shot:
+    query = select(Shot).where(
+        Shot.id == shot_id, Shot.project_id == project_id, Shot.deleted_at.is_(None)
+    )
+    s = db.scalar(query.with_for_update() if lock else query)
+    if s is None:
         raise NotFound("镜头不存在")
     return s
 
 
-def list_shots(db: Session, project_id: uuid.UUID, scene_id: uuid.UUID) -> list[Shot]:
-    return list(
-        db.scalars(
-            select(Shot).where(
-                Shot.scene_id == scene_id, Shot.project_id == project_id, Shot.deleted_at.is_(None)
-            ).order_by(Shot.ordinal)
-        )
+def _scene(db: Session, project_id: uuid.UUID, scene_id: uuid.UUID, *, lock=False) -> Scene:
+    query = select(Scene).where(
+        Scene.id == scene_id, Scene.project_id == project_id, Scene.deleted_at.is_(None)
     )
+    scene = db.scalar(query.with_for_update() if lock else query)
+    if scene is None:
+        raise NotFound("场景不存在")
+    return scene
+
+
+def list_shots(db: Session, project_id: uuid.UUID, scene_id: uuid.UUID, *, removed=False) -> list[Shot]:
+    _scene(db, project_id, scene_id)
+    query = select(Shot).where(Shot.scene_id == scene_id, Shot.project_id == project_id)
+    if removed:
+        query = query.where(Shot.deleted_at.is_not(None)).order_by(Shot.deleted_at.desc())
+    else:
+        query = query.where(Shot.deleted_at.is_(None))
+    return list(db.scalars(query.order_by(Shot.ordinal, Shot.created_at, Shot.id)))
 
 
 def list_all_shots(
@@ -95,7 +109,7 @@ def get(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID) -> Shot:
 
 
 def update(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, data: schemas.ShotUpdate) -> Shot:
-    s = _get(db, ctx.project.id, shot_id)
+    s = _get(db, ctx.project.id, shot_id, lock=True)
     for f in ("title", "description", "prompt_override"):
         v = getattr(data, f)
         if v is not None:
@@ -115,21 +129,15 @@ def update(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, data: schemas.S
 
 def create_shot(db: Session, ctx: ProjectContext, scene_id: uuid.UUID, data: schemas.ShotCreate) -> Shot:
     """在某场景末尾新建一个镜头(分镜工作台手动加镜头)。"""
-    from app.models.narrative import Scene
-
-    scene = db.get(Scene, scene_id)
-    if scene is None or scene.project_id != ctx.project.id or scene.deleted_at is not None:
-        raise NotFound("场景不存在")
-    last = db.scalar(
-        select(func.max(Shot.ordinal)).where(Shot.scene_id == scene_id, Shot.deleted_at.is_(None))
-    )
-    ordinal = (last or 0) + 1
+    scene = _scene(db, ctx.project.id, scene_id, lock=True)
+    ordinal, code_number = breakdown.next_scene_shot_numbers(db, scene)
     shot = Shot(
         project_id=ctx.project.id, scene_id=scene_id, ordinal=ordinal,
-        code=f"{scene.code}-SH{ordinal:03d}", title=data.title or f"镜头 {ordinal}",
+        code=f"{scene.code}-SH{code_number:03d}", title=data.title or f"镜头 {ordinal}",
         description=data.description, created_by=ctx.user.id, storyboard={},
     )
     db.add(shot)
+    db.flush()
     audit.record(db, action="shot.create", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type="shot", target_id=shot.id, detail={"scene_id": str(scene_id)})
     db.flush()
@@ -142,15 +150,7 @@ def breakdown_scene(
     """Create a sequence, or enrich existing shots without replacing their identity."""
     from app.modules.narrative.service import _strategy
     from app.modules.asset.story_sources import AssetNames, scope_for
-    from app.modules.shot import breakdown
-
-    scene = db.scalar(
-        select(Scene)
-        .where(Scene.id == scene_id, Scene.project_id == ctx.project.id, Scene.deleted_at.is_(None))
-        .with_for_update()
-    )
-    if not scene:
-        raise NotFound("场景不存在")
+    scene = _scene(db, ctx.project.id, scene_id, lock=True)
     existing = list_shots(db, ctx.project.id, scene_id)
     missing = [
         s
@@ -220,48 +220,123 @@ def breakdown_scene(
     return list_shots(db, ctx.project.id, scene_id)
 
 
-def delete_shot(db: Session, ctx: ProjectContext, shot_id: uuid.UUID) -> None:
-    s = _get(db, ctx.project.id, shot_id)
-    s.deleted_at = func.now()
-    audit.record(db, action="shot.delete", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="shot", target_id=s.id)
+def _selected_shots(db: Session, scene: Scene, shot_ids: list[uuid.UUID]) -> list[Shot]:
+    ids = set(shot_ids)
+    shots = list(db.scalars(
+        select(Shot).where(
+            Shot.scene_id == scene.id, Shot.project_id == scene.project_id, Shot.id.in_(ids)
+        ).order_by(Shot.ordinal, Shot.created_at, Shot.id).with_for_update()
+    ))
+    if len(shots) != len(ids):
+        raise NotFound("所选镜头不在本场景中，请刷新")
+    return shots
+
+
+def remove_shots(
+    db: Session, ctx: ProjectContext, scene_id: uuid.UUID, shot_ids: list[uuid.UUID]
+) -> int:
+    scene = _scene(db, ctx.project.id, scene_id, lock=True)
+    shots = [s for s in _selected_shots(db, scene, shot_ids) if s.deleted_at is None]
+    removed_at = datetime.now(UTC)
+    for shot in shots:
+        shot.deleted_at = removed_at
+        audit.record(db, action="shot.delete", user_id=ctx.user.id, project_id=ctx.project.id,
+                     target_type="shot", target_id=shot.id, detail={"scene_id": str(scene.id)})
     db.flush()
+    return len(shots)
+
+
+def restore_shots(
+    db: Session, ctx: ProjectContext, scene_id: uuid.UUID, shot_ids: list[uuid.UUID]
+) -> int:
+    scene = _scene(db, ctx.project.id, scene_id, lock=True)
+    shots = [s for s in _selected_shots(db, scene, shot_ids) if s.deleted_at is not None]
+    if not shots:
+        return 0
+    history = db.execute(
+        select(Shot.ordinal, Shot.code, Shot.deleted_at).where(
+            Shot.project_id == scene.project_id, Shot.scene_id == scene.id
+        )
+    ).all()
+    occupied_ordinals = {r.ordinal for r in history if r.deleted_at is None}
+    occupied_codes = {r.code for r in history if r.deleted_at is None}
+    next_ordinal, next_code = breakdown.next_shot_numbers(
+        ((r.ordinal, r.code) for r in history), scene.code
+    )
+    for shot in shots:
+        # Older records can share a position or code with a current shot.
+        # Keep available originals; only append/renumber a genuine collision.
+        if shot.ordinal in occupied_ordinals:
+            shot.ordinal = next_ordinal
+            next_ordinal += 1
+        if shot.code in occupied_codes:
+            shot.code = f"{scene.code}-SH{next_code:03d}"
+            next_code += 1
+        occupied_ordinals.add(shot.ordinal)
+        occupied_codes.add(shot.code)
+        shot.deleted_at = None
+        audit.record(db, action="shot.restore", user_id=ctx.user.id, project_id=ctx.project.id,
+                     target_type="shot", target_id=shot.id, detail={"scene_id": str(scene.id)})
+    db.flush()
+    return len(shots)
+
+
+def delete_shot(db: Session, ctx: ProjectContext, shot_id: uuid.UUID) -> None:
+    scene_id = db.scalar(
+        select(Shot.scene_id).where(Shot.id == shot_id, Shot.project_id == ctx.project.id)
+    )
+    if scene_id is None:
+        raise NotFound("镜头不存在")
+    remove_shots(db, ctx, scene_id, [shot_id])
 
 
 def reorder_shots(db: Session, ctx: ProjectContext, scene_id: uuid.UUID, shot_ids: list[uuid.UUID]) -> list[Shot]:
     """按给定顺序重排某场景的镜头 ordinal。"""
+    _scene(db, ctx.project.id, scene_id, lock=True)
     shots = list_shots(db, ctx.project.id, scene_id)
     by_id = {s.id: s for s in shots}
-    ordinal = 1
-    for sid in shot_ids:
-        s = by_id.get(sid)
-        if s is not None:
-            s.ordinal = ordinal
-            ordinal += 1
-    # 未在列表中的镜头排到后面,保持稳定
-    for s in shots:
-        if s.id not in set(shot_ids):
-            s.ordinal = ordinal
-            ordinal += 1
+    if not set(shot_ids) <= by_id.keys():
+        raise NotFound("所选镜头不在当前分镜中，请刷新")
+    ordered = dict.fromkeys([*shot_ids, *by_id])
+    for ordinal, sid in enumerate(ordered, 1):
+        by_id[sid].ordinal = ordinal
     db.flush()
     return list_shots(db, ctx.project.id, scene_id)
 
 
 # ── 引用(浮动/钉死) ──
-def set_asset_refs(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, refs) -> list[ShotAssetRef]:
+def set_asset_refs(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, refs) -> list[schemas.AssetRefOut]:
     from app.modules.shot.inputs import pinned
-    s = _get(db, ctx.project.id, shot_id)
-    db.refresh(s, with_for_update=True)
-    previous = {(r.asset_id, r.role): r.usage for r in list_asset_refs(db, ctx.project.id, s.id)}
-    if len({(r.asset_id, r.role) for r in refs}) != len(refs):
+    s = _get(db, ctx.project.id, shot_id, lock=True)
+    previous = {
+        (r.asset_id, r.role): r
+        for r in db.scalars(select(ShotAssetRef).where(ShotAssetRef.shot_id == s.id))
+    }
+    requested = {(r.asset_id, r.role) for r in refs}
+    if len(requested) != len(refs):
         raise Conflict("同一项资产已在镜头中")
     board = s.storyboard or {}
     pending = list(board.get("unresolved_subjects") or [])
     resolved_usage = {}
+    retained = set()
     for r in refs:
+        key = (r.asset_id, r.role)
         asset = db.get(Asset, r.asset_id)
-        if not asset or asset.project_id != ctx.project.id or asset.deleted_at:
+        if not asset or asset.project_id != ctx.project.id:
             raise NotFound("参考的资产不存在")
+        if asset.deleted_at:
+            prior = previous.get(key)
+            if prior is None:
+                raise NotFound("参考的资产已移入回收站")
+            original = schemas.AssetUsage.model_validate(prior.usage or {})
+            if (
+                r.resolves_subject or r.ref_mode != prior.ref_mode
+                or r.pinned_version_id != prior.pinned_version_id
+                or (r.usage is not None and r.usage != original)
+            ):
+                raise Conflict("请先恢复资产，再修改这条引用")
+            retained.add(key)
+            continue
         if r.resolves_subject:
             subject = next(
                 (
@@ -279,7 +354,8 @@ def set_asset_refs(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, refs) -
             }
         if r.ref_mode == "pinned":
             pinned(db, ctx.project.id, asset.id, r.pinned_version_id)
-    db.query(ShotAssetRef).filter(ShotAssetRef.shot_id == s.id).delete()
+    for key in previous.keys() - requested:
+        db.delete(previous[key])
     added_ids = {str(r.asset_id) for r in refs}
     suppressed = (
         set(board.get("suppressed_asset_ids", [])) | {str(aid) for aid, _ in previous}
@@ -288,31 +364,39 @@ def set_asset_refs(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, refs) -
         board.get("suppressed_asset_ids", [])
     ):
         s.storyboard = {**board, "unresolved_subjects": pending, "suppressed_asset_ids": sorted(suppressed)}
-    created = []
     for i, r in enumerate(refs):
-        ref = ShotAssetRef(
-            shot_id=s.id, asset_id=r.asset_id, role=r.role,
-            ref_mode=r.ref_mode, pinned_version_id=r.pinned_version_id if r.ref_mode == "pinned" else None, ordinal=i,
-            usage=resolved_usage.get((r.asset_id, r.role)) or (r.usage.model_dump() if r.usage else previous.get((r.asset_id, r.role)) or {}),
-        )
-        db.add(ref)
-        created.append(ref)
+        key = (r.asset_id, r.role)
+        ref = previous.get(key)
+        if ref is None:
+            ref = ShotAssetRef(shot_id=s.id, asset_id=r.asset_id, role=r.role)
+            db.add(ref)
+        ref.ordinal = i
+        if key not in retained:
+            ref.ref_mode = r.ref_mode
+            ref.pinned_version_id = r.pinned_version_id if r.ref_mode == "pinned" else None
+            ref.usage = resolved_usage.get(key) or (r.usage.model_dump() if r.usage else ref.usage or {})
     db.flush()
-    return created
+    return list_asset_refs(db, ctx.project.id, s.id)
 
 
-def list_asset_refs(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID) -> list[ShotAssetRef]:
+def list_asset_refs(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID) -> list[schemas.AssetRefOut]:
     _get(db, project_id, shot_id)
-    return list(
-        db.scalars(
-            select(ShotAssetRef).where(ShotAssetRef.shot_id == shot_id).order_by(ShotAssetRef.ordinal)
-        )
+    rows = db.execute(
+        select(ShotAssetRef, Asset.name, Asset.deleted_at)
+        .outerjoin(Asset, (Asset.id == ShotAssetRef.asset_id) & (Asset.project_id == project_id))
+        .where(ShotAssetRef.shot_id == shot_id).order_by(ShotAssetRef.ordinal)
     )
+    return [
+        schemas.AssetRefOut.model_validate(ref).model_copy(
+            update={"asset_name": name, "asset_removed": deleted is not None}
+        )
+        for ref, name, deleted in rows
+    ]
 
 
 # ── 状态机 ──
 def transition(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, to: ProductionStatus) -> Shot:
-    s = _get(db, ctx.project.id, shot_id)
+    s = _get(db, ctx.project.id, shot_id, lock=True)
     cur = s.production_status if isinstance(s.production_status, ProductionStatus) else ProductionStatus(s.production_status)
     if to not in TRANSITIONS.get(cur, set()):
         raise Conflict(

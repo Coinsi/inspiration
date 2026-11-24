@@ -1,5 +1,7 @@
 import { ShotNameDialog } from "@/components/ShotNameDialog";
 import { ShotBatchControl } from "@/components/ShotBatchControl";
+import { RemovedShotsDialog } from "@/components/RemovedShotsDialog";
+import { ShotActions, ShotDestinations, shotLink, useCanEditShots, useRemoveShots } from "@/components/ShotActions";
 import { SceneVisuals } from "@/components/SceneVisuals";
 import { useShotContext } from "@/lib/useShotContext";
 import { SelectField } from "@/components/ui/select-field";
@@ -7,6 +9,8 @@ import { SearchField } from "@/components/ui/search-field";
 import { useWorkspaceScroll } from "@/lib/useWorkspaceScroll";
 import { ShotMedia } from "@/components/ShotMedia";
 import { Modal } from "@/components/ui/modal";
+import { Tabs } from "@/components/ui/tabs";
+import { ActionMenu, ActionMenuItem } from "@/components/ui/header-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -15,12 +19,13 @@ import {
   Clapperboard,
   ChevronDown,
   Film,
-  LayoutGrid,
+  ArchiveRestore,
+  Layers,
+  ListChecks,
   SlidersHorizontal,
   GripVertical,
   Loader2,
   Plus,
-  Pencil,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -161,7 +166,7 @@ function StoryboardContent() {
     `sb.scene.${projectId}`,
     null,
   );
-  const [view, setView] = usePersistentState<"gallery" | "editor">(
+  const [savedView, setView] = usePersistentState<"gallery" | "editor">(
     `sb.view.${projectId}`,
     "gallery",
   );
@@ -170,6 +175,13 @@ function StoryboardContent() {
     "",
   );
   const [preview, setPreview] = useState<Shot | null>(null);
+  const canEdit = useCanEditShots(projectId!);
+  const view = canEdit ? savedView : "gallery";
+  const [selection, setSelection] = useState<{ sceneId: string; ids: string[] } | null>(null);
+  const [sceneTool, setSceneTool] = useState<"visuals" | "batch" | "removed" | null>(null);
+  const removal = useRemoveShots(projectId!, sceneId => {
+    setSelection(current => current?.sceneId === sceneId ? null : current);
+  });
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [directoryOpen, setDirectoryOpen] = useState(false);
@@ -264,6 +276,12 @@ function StoryboardContent() {
     context.data,
   ]);
   const scene = scenes?.find((s) => s.id === sceneId) ?? null;
+  useEffect(() => {
+    setSelection(null);
+    setSceneTool(null);
+    setPreview(null);
+    setRenaming(null);
+  }, [sceneId]);
 
   const {
     data: shots,
@@ -299,14 +317,6 @@ function StoryboardContent() {
     onSuccess: () => {
       invalidate();
       toast.push(tr("sb.shotAdded"), "success");
-    },
-    onError: (e) => toast.push((e as Error).message, "error"),
-  });
-  const deleteShot = useMutation({
-    mutationFn: (id: string) => api.del(`${base}/shots/${id}`),
-    onSuccess: () => {
-      invalidate();
-      toast.push(tr("sb.shotDeleted"), "success");
     },
     onError: (e) => toast.push((e as Error).message, "error"),
   });
@@ -370,6 +380,23 @@ function StoryboardContent() {
     setDragId(null);
     setOverId(null);
   };
+
+  const selecting = !!scene && selection?.sceneId === scene.id;
+  const selectedShots = selecting ? (shots ?? []).filter(s => selection.ids.includes(s.id)) : [];
+  const sceneName = scene?.title || scene?.code || "";
+  const selectBox = (s: Shot) => selecting && (
+    <label className="storyboard-select-shot">
+      <input type="checkbox" aria-label={`${lang === "zh" ? "选择镜头" : "Select shot"} ${s.title || s.code}`}
+        checked={selection.ids.includes(s.id)} disabled={removal.busy}
+        onChange={e => {
+          const checked = e.currentTarget.checked;
+          setSelection(current => current?.sceneId === s.scene_id
+            ? { ...current, ids: checked ? [...current.ids, s.id] : current.ids.filter(id => id !== s.id) } : current);
+        }} />
+    </label>
+  );
+  const shotMenu = (s: Shot) => <ShotActions projectId={projectId!} shot={s} canEdit={canEdit}
+    onRename={() => setRenaming(s)} onRemove={() => void removal.remove([s], sceneName)} />;
 
   return (
     <div className="storyboard-workspace">
@@ -555,43 +582,52 @@ function StoryboardContent() {
                   ? lang === "zh" ? "已保存" : "Saved"
                   : ""}
             </span>
+            {scene && <Button variant="ghost" size="sm" onClick={() => setSceneTool("removed")}>
+              <ArchiveRestore size={15} />{lang === "zh" ? "已移除镜头" : "Removed shots"}
+            </Button>}
           </div>
 
           <div className="storyboard-sequence-toolbar">
-            <div className="storyboard-view-switch" role="group" aria-label={lang === "zh" ? "分镜视图" : "Storyboard view"}>
-              {(["gallery", "editor"] as const).map((v) => (
-                <button key={v} aria-pressed={view === v} onClick={() => setView(v)}>
-                  {v === "gallery" ? <LayoutGrid size={15} /> : <Pencil size={15} />}
-                  {v === "gallery" ? lang === "zh" ? "浏览" : "Browse" : lang === "zh" ? "编辑" : "Edit"}
-                </button>
-              ))}
+            <div className="storyboard-view-controls">
+              {canEdit && <Tabs value={view}
+                onChange={v => setView(v === "editor" ? "editor" : "gallery")}
+                tabs={[{ key: "gallery", label: lang === "zh" ? "浏览" : "Browse" }, { key: "editor", label: lang === "zh" ? "编辑" : "Edit" }]} />}
+              {canEdit && !!scene && !!shots?.length && <Button variant={selecting ? "outline" : "ghost"} size="sm"
+                aria-pressed={selecting} onClick={() => setSelection(selecting ? null : { sceneId: scene.id, ids: [] })}>
+                <ListChecks size={15} />{selecting ? lang === "zh" ? "取消选择" : "Cancel" : lang === "zh" ? "选择" : "Select"}
+              </Button>}
             </div>
             {scene && (
               <div className="storyboard-scene-actions">
-                <SceneVisuals
-                  key={`visuals-${scene.id}`}
-                  base={base}
-                  sceneId={scene.id}
-                />
-                {!!shots?.length && (
-                  <ShotBatchControl
-                    key={scene.id}
-                    projectId={projectId!}
-                    sceneId={scene.id}
-                    shots={shots}
-                  />
-                )}
-                <Button size="sm" variant="ghost" disabled={breaking || shotsLoading || shotsError} onClick={runBreakdown}>
-                  {breaking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                  {breaking ? `${tr("sb.breakingDown")} ${breakingSec}s` : tr("sb.aiBreakdown")}
-                </Button>
-                <Button size="sm" variant="outline" disabled={createShot.isPending} onClick={() => createShot.mutate()}>
+                {canEdit && <Button size="sm" disabled={createShot.isPending} onClick={() => createShot.mutate()}>
                   {createShot.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
                   {tr("sb.addShot")}
-                </Button>
+                </Button>}
+                <ActionMenu label={lang === "zh" ? "场景操作" : "Scene actions"}>
+                  <ActionMenuItem onSelect={() => setSceneTool("visuals")}><SlidersHorizontal />{lang === "zh" ? "本场设定" : "Scene settings"}</ActionMenuItem>
+                  {canEdit && <>
+                    <ActionMenuItem disabled={breaking || shotsLoading || shotsError} onSelect={() => void runBreakdown()}>
+                      <Sparkles />{tr("sb.aiBreakdown")}
+                    </ActionMenuItem>
+                    <ActionMenuItem disabled={!shots?.length || shotsError} onSelect={() => setSceneTool("batch")}>
+                      <Layers />{lang === "zh" ? "批量生成" : "Batch generation"}
+                    </ActionMenuItem>
+                  </>}
+                </ActionMenu>
               </div>
             )}
           </div>
+          {selecting && shots && <div className="storyboard-selection-bar">
+            <span role="status">{lang === "zh" ? `本场已选 ${selectedShots.length} / ${shots.length}` : `${selectedShots.length} / ${shots.length} selected in this scene`}</span>
+            <Button variant="ghost" size="sm" disabled={removal.busy}
+              onClick={() => setSelection({ sceneId: scene.id, ids: selectedShots.length === shots.length ? [] : shots.map(s => s.id) })}>
+              {selectedShots.length === shots.length ? lang === "zh" ? "清除选择" : "Clear selection" : lang === "zh" ? "选择本场" : "Select scene"}
+            </Button>
+            <Button variant="outline" size="sm" className="text-danger" disabled={!selectedShots.length || removal.busy}
+              onClick={() => void removal.remove(selectedShots, sceneName)}>
+              <Trash2 size={15} />{lang === "zh" ? "移除所选" : "Remove selected"}
+            </Button>
+          </div>}
 
           {breaking && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">
@@ -611,30 +647,27 @@ function StoryboardContent() {
           ) : !shots || shots.length === 0 ? (
             <div className="studio-empty">
               <Clapperboard size={30} strokeWidth={1.3} />
-              {tr("sb.noShots")}
-              <div className="flex flex-wrap justify-center gap-2">
+              <p>{tr("sb.noShots")}</p>
+              {canEdit && <div className="flex flex-wrap justify-center gap-2">
                 <Button size="sm" disabled={breaking} onClick={runBreakdown}>
                   {breaking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                   {breaking ? `${tr("sb.breakingDown")} ${breakingSec}s` : tr("sb.aiBreakdown")}
                 </Button>
-                <Button size="sm" variant="outline" disabled={createShot.isPending} onClick={() => createShot.mutate()}>
-                  <Plus size={16} /> {tr("sb.addShot")}
-                </Button>
-              </div>
+              </div>}
             </div>
           ) : view === "gallery" ? (
             <div className="storyboard-gallery">
               {shots.map((s, i) => (
-                <article key={s.id} className="storyboard-gallery-shot">
+                <article key={s.id} className="storyboard-gallery-shot" data-selected={selecting && selection.ids.includes(s.id)}>
                   <div className="storyboard-gallery-media">
                     <StoryboardFrame projectId={projectId!} shot={s} />
-                    <span className="storyboard-frame-number">{String(i + 1).padStart(2, "0")}</span>
+                    <div className="storyboard-frame-number">{selectBox(s)}{String(i + 1).padStart(2, "0")}</div>
                   </div>
                   <div className="storyboard-gallery-title">
-                    <h3>{s.title || (lang === "zh" ? "未命名镜头" : "Untitled shot")}</h3>
-                    <button className="storyboard-icon-button" aria-label={`${lang === "zh" ? "重命名镜头" : "Rename shot"} ${s.title || ""}`} onClick={() => setRenaming(s)}>
-                      <Pencil size={14} />
-                    </button>
+                    <h3><button onClick={() => setPreview(s)} aria-label={`${lang === "zh" ? "快速预览" : "Quick preview"} ${s.title || s.code}`}>
+                      {s.title || (lang === "zh" ? "未命名镜头" : "Untitled shot")}
+                    </button></h3>
+                    {shotMenu(s)}
                   </div>
                   <p className="storyboard-gallery-description">
                     {s.description || (lang === "zh" ? "尚未填写画面描述" : "No visual description yet")}
@@ -647,16 +680,7 @@ function StoryboardContent() {
                     })}
                   </div>
                   <div className="storyboard-gallery-actions">
-                    <button className="storyboard-text-link" onClick={() => setPreview(s)}>
-                      {s.selected_generation_id
-                        ? lang === "zh" ? "快速预览" : "Quick preview"
-                        : lang === "zh" ? "镜头详情" : "Shot details"}
-                    </button>
-                    <Link className="storyboard-text-link" to={`${base}/shots?shot=${s.id}&from=storyboard&tab=gen`}>
-                      {s.selected_generation_id
-                        ? lang === "zh" ? "生成与引用" : "Generate & references"
-                        : lang === "zh" ? "引用与审阅" : "References & review"} <span aria-hidden>↗</span>
-                    </Link>
+                    <ShotDestinations projectId={projectId!} shotId={s.id} showProduction={!!s.selected_generation_id} />
                   </div>
                 </article>
               ))}
@@ -666,6 +690,7 @@ function StoryboardContent() {
               {shots.map((s, i) => (
                 <article
                   key={s.id}
+                  data-selected={selecting && selection.ids.includes(s.id)}
                   onDragOver={(e) => { e.preventDefault(); if (overId !== s.id) setOverId(s.id); }}
                   onDrop={() => onDrop(s.id)}
                   className={cn(
@@ -675,6 +700,7 @@ function StoryboardContent() {
                   )}
                 >
                   <div className="storyboard-shot-header">
+                    {selectBox(s)}
                     <span
                       draggable={!reorder.isPending}
                       onDragStart={() => setDragId(s.id)}
@@ -684,6 +710,7 @@ function StoryboardContent() {
                     ><GripVertical size={16} /></span>
                     <span className="storyboard-shot-number" aria-label={lang === "zh" ? `第 ${i + 1} 个镜头` : `Shot ${i + 1}`}>{String(i + 1).padStart(2, "0")}</span>
                     <Input
+                      key={s.title}
                       aria-label={tr("sb.shotTitle")}
                       maxLength={255}
                       defaultValue={s.title ?? ""}
@@ -709,18 +736,7 @@ function StoryboardContent() {
                         title={lang === "zh" ? "下移镜头" : "Move shot down"}
                         className="storyboard-icon-button"
                       ><ArrowDown size={15} /></button>
-                      <button
-                        disabled={deleteShot.isPending}
-                        onClick={async () => {
-                          if (await confirm({
-                            title: tr("sb.deleteShot"), message: tr("sb.deleteShotConfirm"),
-                            confirmText: tr("common.delete"), danger: true,
-                          })) deleteShot.mutate(s.id);
-                        }}
-                        aria-label={tr("sb.deleteShot")}
-                        title={tr("sb.deleteShot")}
-                        className="storyboard-icon-button storyboard-delete"
-                      ><Trash2 size={15} /></button>
+                      {shotMenu(s)}
                     </div>
                   </div>
                   <div className="storyboard-shot-body">
@@ -747,11 +763,7 @@ function StoryboardContent() {
                             : lang === "zh" ? "详情" : "Details"}
                         </button>
                       </div>
-                      <Link className="storyboard-text-link storyboard-generation-link" to={`${base}/shots?shot=${s.id}&from=storyboard&tab=gen`}>
-                        {s.selected_generation_id
-                          ? lang === "zh" ? "生成画面 · 引用与审阅" : "Generate · references & review"
-                          : lang === "zh" ? "引用与审阅" : "References & review"} <span aria-hidden>↗</span>
-                      </Link>
+                      <ShotDestinations projectId={projectId!} shotId={s.id} showProduction={!!s.selected_generation_id} />
                     </div>
                     <label className="storyboard-description-field">
                       <span className="storyboard-field-label">{tr("sb.visual")}</span>
@@ -882,6 +894,12 @@ function StoryboardContent() {
           )}
         </section>
       </div>
+      {scene && sceneTool === "removed" && <RemovedShotsDialog key={scene.id} scene={scene}
+        projectId={projectId!} canEdit={canEdit} onClose={() => setSceneTool(null)} />}
+      {scene && sceneTool === "visuals" && <SceneVisuals key={scene.id} base={base} sceneId={scene.id}
+        canEdit={canEdit} onClose={() => setSceneTool(null)} />}
+      {canEdit && scene && shots && sceneTool === "batch" && <ShotBatchControl key={scene.id} projectId={projectId!}
+        sceneId={scene.id} shots={shots} onClose={() => setSceneTool(null)} />}
       {renaming && (
         <ShotNameDialog
           projectId={projectId!}
@@ -923,15 +941,7 @@ function StoryboardContent() {
                   </p>
                 ) : null,
               )}
-              <Link
-                className="studio-link inline-block text-sm"
-                to={`${base}/shots?shot=${preview.id}&from=storyboard&tab=gen`}
-              >
-                {lang === "zh"
-                  ? "打开镜头 · 生成、引用与审阅"
-                  : "Open shot · generate, reference & review"}{" "}
-                →
-              </Link>
+              <ShotDestinations projectId={projectId!} shotId={preview.id} />
             </div>
           </div>
         </Modal>
@@ -945,14 +955,14 @@ function StoryboardFrame({ projectId, shot }: { projectId: string; shot: Shot })
   if (shot.selected_generation_id) return <ShotMedia projectId={projectId} shot={shot} />;
   return (
     <Link
-      to={`/projects/${projectId}/shots?shot=${shot.id}&from=storyboard&tab=gen`}
+      to={shotLink(projectId, shot.id, "gen")}
       className="storyboard-empty-frame"
-      aria-label={`${lang === "zh" ? "生成或选择画面" : "Generate or select a frame"} · ${shot.title || shot.code}`}
+      aria-label={`${lang === "zh" ? "制作画面" : "Produce"} · ${shot.title || shot.code}`}
     >
       <Film size={23} strokeWidth={1.4} aria-hidden="true" />
       <span>{lang === "zh" ? "尚未选定画面" : "No selected output"}</span>
       <strong>
-        {lang === "zh" ? "生成 / 选择画面" : "Generate / select a frame"}
+        {lang === "zh" ? "制作画面" : "Produce"}
         <ArrowUpRight size={15} aria-hidden="true" />
       </strong>
     </Link>

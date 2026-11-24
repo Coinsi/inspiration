@@ -96,14 +96,15 @@ try {
   check(
     "Asset cards have compact no-artwork state; bounded pages, preview and reload preserve page",
   );
-  await page.getByLabel("素材排序", { exact: true }).selectOption("name.asc");
+  await page.getByRole("button", { name: "素材排序", exact: true }).click();
+  await page.getByRole("option", { name: "名称 A → Z", exact: true }).click();
   await page.locator("main article").filter({ hasText: "素材001" }).waitFor();
   assert.equal(await page.locator("main article").count(), 48);
   await page.reload();
   await page.locator("main article").first().waitFor();
   assert.equal(
-    await page.getByLabel("素材排序", { exact: true }).inputValue(),
-    "name.asc",
+    await page.getByRole("button", { name: "素材排序", exact: true }).innerText(),
+    "名称 A → Z",
   );
   const nav = page.getByRole("navigation", { name: "工作区功能", exact: true });
   assert.ok((await nav.getByRole("link").count()) <= 12);
@@ -159,35 +160,35 @@ try {
   );
   await page.goto(base + root + "/storyboard");
   await page
-    .getByRole("link", { name: /生成与引用/ })
+    .getByRole("link", { name: /^制作画面(?: ·|$)/ })
     .nth(30)
     .scrollIntoViewIfNeeded();
   const scroll = await page.locator("main").evaluate((e) => e.scrollTop);
   assert.ok(scroll > 300);
   await page
-    .getByRole("link", { name: /生成与引用/ })
+    .getByRole("link", { name: /^制作画面(?: ·|$)/ })
     .nth(30)
     .click();
   await page.getByLabel("本次生成指令", { exact: true }).waitFor();
   await page.getByRole("button", { name: "返回分镜", exact: true }).click();
   await page
-    .getByRole("link", { name: /生成与引用/ })
+    .getByRole("link", { name: /^制作画面(?: ·|$)/ })
     .nth(30)
     .waitFor();
   await page.waitForFunction(
     (n) => Math.abs(document.querySelector("main").scrollTop - n) < 5,
     scroll,
   );
-  await page.goto(base + root + "/shots");
+  await page.goto(base + root + "/shots?view=status");
   await page.getByLabel("制作状态看板").waitFor();
   assert.equal(
-    await page.getByLabel("制作状态看板").locator("button").count(),
-    41,
+    await page.getByLabel("制作状态看板").getByRole("button", { name: /^更多镜头操作/ }).count(),
+    40,
   );
   await page.getByRole("button", { name: /加载更多（40/ }).click();
   assert.equal(
-    await page.getByLabel("制作状态看板").locator("button").count(),
-    81,
+    await page.getByLabel("制作状态看板").getByRole("button", { name: /^更多镜头操作/ }).count(),
+    80,
   );
   check(
     "Returning to storyboard restores scroll; production board hides empty columns and bounds initial cards",

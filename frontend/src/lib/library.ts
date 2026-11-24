@@ -1,4 +1,13 @@
+import { blobUrl } from "./api";
+
 export type MediaType = "video" | "image" | "audio";
+
+export function libraryPreviewUrl(projectId: string, media: Pick<MediaVersion, "proxy_hash" | "original_hash" | "media_type">) {
+  if (media.proxy_hash) return blobUrl(projectId, media.proxy_hash);
+  if (!media.original_hash) return undefined;
+  const view = media.media_type === "image" ? "display" : media.media_type === "video" ? "playback" : undefined;
+  return blobUrl(projectId, media.original_hash, view);
+}
 export type SearchBBox = { x: number; y: number; w: number; h: number };
 export type RegionMatch = {
   id: string;
@@ -103,10 +112,12 @@ export interface MediaUsage {
   end_ms: number | null;
   purpose: string;
   note: string;
-  proxy_hash: string;
-  original_hash: string;
+  proxy_hash: string | null;
+  original_hash: string | null;
 }
 export interface DeletionImpact {
+  name?: string;
+  engineering_count?: number;
   shared_count?: number;
   reuses?: {
     project_id: string | null;

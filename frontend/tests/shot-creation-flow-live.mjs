@@ -98,7 +98,7 @@ try {
   assert.equal(version.status, "ready");
   await page.goto(base + root + "/storyboard");
   await page
-    .getByRole("link", { name: /生成与引用/ })
+    .getByRole("link", { name: /^制作画面(?: ·|$)/ })
     .first()
     .click();
   const currentId = new URL(page.url()).searchParams.get("shot");
@@ -106,7 +106,7 @@ try {
   const prompt = page.getByLabel("本次生成指令", { exact: true });
   await prompt.fill("保留这段尚未生成的创作草稿");
   assert.equal(await page.getByLabel("制作状态看板").isVisible(), false);
-  await page.getByRole("button", { name: "参考素材", exact: true }).click();
+  await page.getByRole("tab", { name: "参考素材", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const card = dialog.getByRole("button", {
     name: `参考资产 ${asset.name} ${asset.code}`,
@@ -142,7 +142,7 @@ try {
     animations: "disabled",
     path: out + "/reference-assets-dark.png",
   });
-  await dialog.getByRole("tab", { name: "视频片段", exact: true }).click();
+  await dialog.getByRole("tab", { name: "素材库", exact: true }).click();
   await dialog
     .getByRole("button", { name: /选择视频 街道参考.*版本 1/ })
     .click();
@@ -155,10 +155,11 @@ try {
   );
   await dialog.getByLabel("引用起点秒").fill("0.2");
   await dialog.getByLabel("引用终点秒").fill("1.2");
-  await dialog.getByLabel("片段引用用途").selectOption("editing_source");
+  await dialog.getByLabel("片段引用用途").click();
+  await page.getByRole("option", { name: "剪辑备选" }).click();
   await dialog.getByRole("button", { name: "添加到当前镜头" }).click();
   await dialog
-    .getByText("片段已加入当前镜头，原片版本与时间范围已保留。")
+    .getByText("素材已加入当前镜头，原版本与所选内容已保留。")
     .waitFor();
   const usages = await call(
     "get",
@@ -180,7 +181,7 @@ try {
   check(
     "Actual uploaded video previews; invalid range blocked; exact source version and range persisted",
   );
-  await dialog.getByRole("button", { name: "完成，继续创作" }).click();
+  await dialog.getByRole("button", { name: "完成", exact: true }).click();
   assert.equal(await prompt.inputValue(), "保留这段尚未生成的创作草稿");
   await page.reload();
   await prompt.waitFor();
@@ -198,17 +199,17 @@ try {
   assert.ok(
     await page.locator("main").evaluate((e) => e.scrollWidth <= e.clientWidth),
   );
-  await page.getByRole("button", { name: "参考素材", exact: true }).click();
+  await page.getByRole("tab", { name: "参考素材", exact: true }).click();
   await dialog.getByRole("tab", { name: "角色与场景", exact: true }).click();
   assert.ok(await dialog.evaluate((e) => e.scrollWidth <= e.clientWidth));
   await page.screenshot({
     animations: "disabled",
     path: out + "/reference-mobile.png",
   });
-  await dialog.getByRole("button", { name: "完成，继续创作" }).click();
+  await dialog.getByRole("button", { name: "完成", exact: true }).click();
   await page.getByRole("button", { name: "返回分镜", exact: true }).click();
   await page
-    .getByRole("link", { name: /生成与引用/ })
+    .getByRole("link", { name: /^制作画面(?: ·|$)/ })
     .first()
     .waitFor();
   assert.ok(new URL(page.url()).pathname.endsWith("/storyboard"));

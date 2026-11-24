@@ -2,8 +2,9 @@ import { StudioSelect } from "@/components/ui/studio-select";
 import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { X, Check } from "lucide-react";
+import { X, Check, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCanEditShots } from "@/components/ShotActions";
 import { MediaImage } from "@/components/MediaImage";
 import { aspectLabels, visualMetadata } from "@/components/AssetContinuity";
 import {
@@ -14,6 +15,8 @@ import {
   type ShotAssetRef,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+
+type NamedReference = ShotAssetRef & { asset_name?: string | null; asset_removed?: boolean };
 
 export default function ShotAssetRefs({
   projectId,
@@ -29,6 +32,7 @@ export default function ShotAssetRefs({
     { t: tr } = useI18n();
   const [query, setQuery] = useState(""),
     [type, setType] = useState("");
+  const canEdit = useCanEditShots(projectId);
   const shot = useQuery({
     queryKey: ["shot-reference-subjects", projectId, shotId],
     queryFn: () => api.get<Shot>(base + "/shots/" + shotId),
@@ -40,7 +44,7 @@ export default function ShotAssetRefs({
   const refs = useQuery({
     queryKey: ["shot-refs", shotId],
     queryFn: () =>
-      api.get<ShotAssetRef[]>(`${base}/shots/${shotId}/asset-refs`),
+      api.get<NamedReference[]>(`${base}/shots/${shotId}/asset-refs`),
   });
   const assets = useQuery({
     queryKey: ["assets-pick", projectId],
@@ -59,35 +63,30 @@ export default function ShotAssetRefs({
         })),
       }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["shot-refs", shotId] });
-      await shot.refetch();
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["shot-refs", shotId] }),
+        qc.invalidateQueries({ queryKey: ["shot-prompt", projectId, shotId] }),
+        qc.invalidateQueries({ queryKey: ["assets", projectId] }),
+        qc.invalidateQueries({ queryKey: ["asset-usages", projectId] }),
+        qc.invalidateQueries({ queryKey: ["materials", projectId] }),
+        shot.refetch(),
+      ]);
       onChange?.();
     },
   });
   const disabled =
-    save.isPending ||
+    !canEdit || save.isPending ||
     refs.isFetching ||
     refs.isError ||
     assets.isPending ||
     assets.isError;
-  function toggle(a: Asset) {
-    if (disabled) return;
+  function addAsset(a: Asset) {
     const current = refs.data ?? [];
-    save.mutate(
-      current.some((r) => r.asset_id === a.id)
-        ? current.filter((r) => r.asset_id !== a.id)
-        : [
-            ...current,
-            {
-              id: "",
-              asset_id: a.id,
-              role: a.type,
-              ref_mode: "floating",
-              pinned_version_id: null,
-              ordinal: current.length,
-            },
-          ],
-    );
+    if (disabled || current.some(r => r.asset_id === a.id)) return;
+    save.mutate([...current, {
+      id: "", asset_id: a.id, role: a.type, ref_mode: "floating",
+      pinned_version_id: null, ordinal: current.length,
+    }]);
   }
   const filtered = (assets.data ?? []).filter(
     (a) =>
@@ -99,21 +98,19 @@ export default function ShotAssetRefs({
   return (
     <div>
       <div className="reference-selected" aria-label="已选角色与场景">
-        {refs.data?.map((r) => (
-          <button
-            key={r.asset_id}
-            disabled={disabled}
-            aria-label={`移除参考 ${assets.data?.find((a) => a.id === r.asset_id)?.name ?? r.asset_id}`}
-            onClick={() =>
-              save.mutate(
-                (refs.data ?? []).filter((x) => x.asset_id !== r.asset_id),
-              )
-            }
-          >
-            {assets.data?.find((a) => a.id === r.asset_id)?.name ?? "读取参考…"}
-            <X size={13} />
-          </button>
-        ))}
+        {refs.data?.map(ref => {
+          const asset = assets.data?.find(a => a.id === ref.asset_id);
+          const name = asset?.name || ref.asset_name || (assets.isLoading ? "读取参考…" : "不可用的参考资产");
+          const shared = refs.data?.some(r => r.asset_id === ref.asset_id && r.id !== ref.id);
+          const label = shared ? `${name} · ${tr(`asset.${ref.role}`)}` : name;
+          return <span key={ref.id} className="reference-chip">
+            <span>{label}{ref.asset_removed && <small className="ml-1 text-muted-foreground">已移入回收站</small>}</span>
+            {canEdit && <button type="button" disabled={disabled} aria-label={`移除引用 ${label}`}
+              title={`移除引用 ${label}`} onClick={() => save.mutate((refs.data ?? []).filter(r => r.id !== ref.id))}>
+              <X size={14} aria-hidden />
+            </button>}
+          </span>;
+        })}
       </div>
       {!!refs.data?.length && (
         <details className="mb-3 rounded-lg border p-3 text-sm">
@@ -298,8 +295,8 @@ export default function ShotAssetRefs({
                 className="reference-card"
                 aria-label={`参考资产 ${a.name} ${a.code}`}
                 aria-pressed={!!selected}
-                disabled={disabled}
-                onClick={() => toggle(a)}
+                disabled={disabled || !!selected}
+                onClick={() => addAsset(a)}
               >
                 <div>
                   <MediaImage
@@ -312,12 +309,14 @@ export default function ShotAssetRefs({
                   />
                 </div>
                 <strong>
-                  {selected && <Check size={13} className="inline mr-1" />}
                   {a.name}
                 </strong>
                 <small>
                   {tr(`asset.${a.type}`)} · {a.code}
                 </small>
+                <span className="reference-card-choice">
+                  {selected ? <><Check size={14} />已引用</> : canEdit ? <><Plus size={14} />添加引用</> : null}
+                </span>
               </button>
             );
           })}
@@ -333,7 +332,7 @@ export default function ShotAssetRefs({
       <p role="status" className="mt-3 text-xs text-muted-foreground">
         {save.isPending
           ? "正在保存参考…"
-          : `已选择 ${refs.data?.length ?? 0} 项 · 点击卡片添加或移除，自动保存`}
+          : `已引用 ${refs.data?.length ?? 0} 项`}
       </p>
     </div>
   );

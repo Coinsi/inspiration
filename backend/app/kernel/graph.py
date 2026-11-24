@@ -10,9 +10,28 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.asset import Asset
 from app.models.enums import RefMode, RelationType
+from app.models.narrative import Scene
 from app.models.shot import Shot, ShotAssetRef
-from app.models.versioning import Relation
+from app.models.versioning import Relation, Version
+
+
+def active_asset_shot_refs(*columns):
+    """Use the same live, project-scoped references for counts and drill-down."""
+    return (
+        select(*columns)
+        .select_from(ShotAssetRef)
+        .join(Asset, Asset.id == ShotAssetRef.asset_id)
+        .join(Shot, Shot.id == ShotAssetRef.shot_id)
+        .join(Scene, Scene.id == Shot.scene_id)
+        .where(
+            Shot.project_id == Asset.project_id,
+            Scene.project_id == Shot.project_id,
+            Shot.deleted_at.is_(None),
+            Scene.deleted_at.is_(None),
+        )
+    )
 
 
 class GraphService:
@@ -55,19 +74,34 @@ class GraphService:
     def asset_usages(self, asset_id: uuid.UUID) -> list[dict]:
         """该资产被哪些镜头引用。"""
         rows = self.db.execute(
-            select(ShotAssetRef, Shot)
-            .join(Shot, Shot.id == ShotAssetRef.shot_id)
-            .where(ShotAssetRef.asset_id == asset_id, Shot.deleted_at.is_(None))
-        ).all()
+            active_asset_shot_refs(
+                Shot.id.label("shot_id"), Shot.code.label("shot_code"),
+                Shot.title.label("shot_title"), Shot.ordinal.label("shot_ordinal"),
+                Scene.id.label("scene_id"), Scene.code.label("scene_code"),
+                Scene.title.label("scene_title"), Scene.ordinal.label("scene_ordinal"),
+                ShotAssetRef.role, ShotAssetRef.ref_mode, ShotAssetRef.pinned_version_id,
+                Version.version_no.label("pinned_version_no"),
+            )
+            .outerjoin(
+                Version,
+                (Version.id == ShotAssetRef.pinned_version_id)
+                & (Version.project_id == Asset.project_id)
+                & (Version.entity_type == "asset") & (Version.entity_id == asset_id),
+            )
+            .where(ShotAssetRef.asset_id == asset_id)
+            .order_by(
+                Scene.ordinal, Scene.id, Shot.ordinal, Shot.id,
+                ShotAssetRef.ordinal, ShotAssetRef.id,
+            )
+        ).mappings()
         return [
             {
-                "shot_id": str(shot.id),
-                "shot_code": shot.code,
-                "role": ref.role,
-                "ref_mode": ref.ref_mode if isinstance(ref.ref_mode, str) else ref.ref_mode.value,
-                "pinned_version_id": str(ref.pinned_version_id) if ref.pinned_version_id else None,
+                **row,
+                "shot_id": str(row.shot_id),
+                "scene_id": str(row.scene_id),
+                "pinned_version_id": str(row.pinned_version_id) if row.pinned_version_id else None,
             }
-            for ref, shot in rows
+            for row in rows
         ]
 
     # ── 影响分析 ──
