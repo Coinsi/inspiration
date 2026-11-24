@@ -24,6 +24,7 @@ import {
   taskLabel,
   taskSource,
   taskError,
+  generationCreditNotice,
   type TaskCatalog,
   type TaskWorkspace,
 } from "@/lib/task-center";
@@ -536,6 +537,7 @@ function TaskDetail({
     { summary: s, job: j } = data,
     [index, setIndex] = useState(0),
     toast = useToast();
+  const creditNotice = generationCreditNotice(j, zh);
   const [originParams] = useSearchParams();
   const conversationOrigin = originParams.get("return");
   const materialReturn = conversationOrigin?.startsWith(
@@ -746,6 +748,7 @@ function TaskDetail({
           {taskError(j.error, zh)}
         </p>
       )}
+      {creditNotice && <p className="text-sm text-muted-foreground">{creditNotice}</p>}
       {j.cost_raw?.warnings?.map((w, i) => (
         <p key={i} className="task-warning">
           {w}

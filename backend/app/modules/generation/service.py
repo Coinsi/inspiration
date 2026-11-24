@@ -678,6 +678,15 @@ def get_job(db: Session, project_id: uuid.UUID, job_id: uuid.UUID) -> Generation
     return j
 
 
+def describe_job(db: Session, job: GenerationJob) -> schemas.JobOut:
+    from app.modules.generation.billing import credits_for_job
+
+    result = schemas.JobOut.model_validate(job)
+    if job.status in ("failed", "canceled"):
+        result.credit_reservation = credits_for_job(db, job)
+    return result
+
+
 def patch_generation(
     db: Session, project_id: uuid.UUID, gen_id: uuid.UUID, data: schemas.RatePatch
 ) -> Generation:

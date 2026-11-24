@@ -9,6 +9,30 @@ from app.core.errors import CapabilityUnsupported, ProviderError
 from app.modules.generation.minimax_models import H3_PROTOCOL, video_profile
 
 
+def _failed_task(task):
+    if task["status"] == "cancelled":
+        return GenerationResult.confirmed_failure(
+            "MiniMax 已取消这次生成", kind="provider_canceled"
+        )
+    error = task.get("error")
+    code = str(error.get("code", "")) if isinstance(error, dict) else ""
+    # Only expose the documented numeric code; gateway messages can echo private inputs.
+    if not (code.isascii() and code.isdecimal() and 1 <= len(code) <= 8):
+        code = None
+    reasons = {
+        "1026": ("input_moderation", "输入未通过内容审核，请调整提示词或更换参考素材"),
+        "1027": ("output_moderation", "生成结果未通过内容审核，请调整创作描述后再试"),
+        "1002": ("provider_capacity", "供应商请求过于频繁，请稍后再试"),
+        "1004": ("provider_configuration", "模型服务鉴权失败，请检查渠道密钥"),
+        "1008": ("provider_configuration", "供应商账户余额不足，请检查渠道账户"),
+        "2013": ("invalid_parameters", "供应商拒绝了生成参数，请检查模型、时长和分辨率"),
+        "2022": ("provider_configuration", "模型不存在或渠道无权使用，请检查模型配置"),
+    }
+    kind, message = reasons.get(code, ("provider_failure", "供应商确认生成失败"))
+    suffix = f"（MiniMax {code}）" if code else "（MiniMax）"
+    return GenerationResult.confirmed_failure(message + suffix, kind=kind, code=code)
+
+
 @generation_registry.register(H3_PROTOCOL)
 class MiniMaxH3VideoProvider(NativeMedia):
     name = H3_PROTOCOL
@@ -91,10 +115,9 @@ class MiniMaxH3VideoProvider(NativeMedia):
         if status in ("queued", "running"):
             return GenerationResult(status="running")
         if status in ("failed", "cancelled"):
-            message = "已取消" if status == "cancelled" else "生成失败"
-            return GenerationResult(
-                status="failed", error=f"MiniMax H3 任务{message}，可在供应商任务记录查看详情"
-            )
+            if isinstance(task.get("content"), dict) and task["content"].get("url"):
+                raise ProviderError("MiniMax 返回的任务状态与结果不一致，请核对原任务")
+            return _failed_task(task)
         if status != "succeeded":
             raise ProviderError("MiniMax H3 任务状态暂不可用，请继续查询原任务")
         content = task.get("content")

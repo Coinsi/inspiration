@@ -374,7 +374,7 @@ def test_personal_poll_failure_is_explicit_and_old_ambiguous_records_remain_bloc
 
         def poll(self, handle):
             assert handle.external_job_id == "original-remote-123"
-            return GenerationResult(status="failed", error="fixture upstream failure")
+            return GenerationResult.confirmed_failure("fixture upstream failure")
 
     monkeypatch.setattr(generation_registry, "create", lambda *a, **kw: FailedVideo())
     with sessions() as db:

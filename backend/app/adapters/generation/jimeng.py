@@ -106,4 +106,8 @@ class JimengProvider(GenerationProvider):
                 Output(url=u, type=data.get("type", "image")) for u in data.get("outputs", [])
             ]
             return GenerationResult(status="succeeded", outputs=outputs, cost_raw=data.get("usage"))
-        return GenerationResult(status="failed", error=data.get("error", "unknown"))
+        if status in ("canceled", "cancelled"):
+            return GenerationResult.confirmed_failure("供应商已取消生成", kind="provider_canceled")
+        if status == "failed" and not data.get("outputs"):
+            return GenerationResult.confirmed_failure("供应商确认生成失败，请查看供应商任务记录")
+        raise ProviderError("供应商返回了无法确认的任务状态，请继续查询原任务")

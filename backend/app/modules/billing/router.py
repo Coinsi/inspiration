@@ -886,15 +886,9 @@ def resolve_points(job_id: uuid.UUID, data: ResolveReservationIn, db: DB, user: 
         return _reservation_view(row, job)
     if job.status not in {"failed", "canceled"}:
         raise Conflict("任务仍在处理，不能人工结算")
-    linked = db.scalar(
-        select(GenerationJob.id)
-        .where(
-            GenerationJob.input_snapshot["billing"]["reservation_job_id"].astext == str(job_id),
-            GenerationJob.status.in_(("pending", "submitted", "running", "succeeded")),
-        )
-        .limit(1)
-    )
-    if linked:
+    from app.modules.generation.billing import has_active_receiver
+
+    if has_active_receiver(db, job_id):
         raise Conflict("已有任务正在恢复或已完成，请刷新状态")
     if data.action == "release":
         if data.units is not None:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from app.adapters.contracts import GenerationResult, Output
 from app.adapters.generation.mock import MockProvider
 from app.models.billing import BillingSettings, CreditAccount, CreditEntry, CreditReservation
 from app.models.generation import GenerationJob
@@ -188,6 +189,99 @@ def test_resume_chain_never_resubmits_or_double_reserves(studio, monkeypatch):
         assert db.get(CreditReservation, uuid.UUID(job_id)).status == "settled"
 
 
+@pytest.mark.parametrize("direct", [False, True])
+def test_confirmed_terminal_receipt_returns_original_hold_once(studio, monkeypatch, direct):
+    model = configure(studio, direct=direct)
+    failed = GenerationResult.confirmed_failure(
+        "输入未通过内容审核（MiniMax 1026）", kind="input_moderation", code="1026"
+    )
+    original_poll = MockProvider.poll
+    monkeypatch.setattr(MockProvider, "poll", lambda *_: failed)
+    response = submit(studio, model)
+    assert response.status_code == 200, response.text
+    job = response.json()
+    assert job["status"] == "failed" and "1026" in job["error"]
+    assert job["routing_state"]["failure"] == {"kind": "input_moderation", "code": "1026"}
+    assert job["credit_reservation"] == {"status": "released", "points": "1.25"}
+    assert account(studio) == (1000, 0)
+    job_id = uuid.UUID(job["id"])
+    with studio[1]() as db:
+        jobs.execute(db, job_id)
+        entries = db.scalars(select(CreditEntry.kind).where(CreditEntry.reference_id == job_id))
+        assert sorted(entries) == ["generation_release", "generation_reserve"]
+    monkeypatch.setattr(MockProvider, "poll", original_poll)
+    response = retry(studio, job_id)
+    assert response.status_code == 200 and response.json()["status"] == "succeeded", response.text
+    assert account(studio) == (875, 0)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        GenerationResult(status="failed", error="图片数据不可读"),
+        GenerationResult(status="succeeded", outputs=[Output(data=b"")]),
+        GenerationResult(
+            status="failed",
+            error="回执矛盾",
+            failure_kind="provider_failure",
+            outputs=[Output(data=b"partial")],
+        ),
+    ],
+)
+def test_unverified_outcome_keeps_hold_and_displays_current_ledger(studio, monkeypatch, result):
+    model = configure(studio)
+    monkeypatch.setattr(MockProvider, "poll", lambda *_: result)
+    job = submit(studio, model).json()
+    assert job["status"] == "failed"
+    assert job["routing_state"]["phase"] in ("accepted", "generated")
+    assert job["credit_reservation"] == {"status": "reserved", "points": "1.25"}
+    assert account(studio) == (875, 125)
+    with studio[1]() as db:
+        wallet.release_generation(db, uuid.UUID(job["id"]))
+        db.commit()
+    current = studio[0].get(f"/api/v1/projects/{studio[2]['project']}/jobs/{job['id']}").json()
+    assert current["credit_reservation"] == {"status": "released", "points": "1.25"}
+
+
+def test_confirmed_failure_during_receipt_recovery_releases_shared_hold(studio, monkeypatch):
+    model = configure(studio)
+    monkeypatch.setattr(
+        model_routing, "RESUMABLE_PROTOCOLS", model_routing.RESUMABLE_PROTOCOLS | {"mock"}
+    )
+    original_poll = MockProvider.poll
+    original_submit = MockProvider.submit
+
+    def interrupted(*_):
+        raise TimeoutError("receipt temporarily unavailable")
+
+    monkeypatch.setattr(MockProvider, "poll", interrupted)
+    first = submit(studio, model).json()
+    assert first["credit_reservation"]["status"] == "reserved"
+    monkeypatch.setattr(
+        MockProvider, "submit", lambda *_: pytest.fail("must only query the original receipt")
+    )
+    monkeypatch.setattr(
+        MockProvider,
+        "poll",
+        lambda *_: GenerationResult.confirmed_failure("供应商已取消生成", kind="provider_canceled"),
+    )
+    recovered = retry(studio, first["id"]).json()
+    assert recovered["status"] == "failed"
+    assert account(studio) == (1000, 0)
+    with studio[1]() as db:
+        reservations = list(db.scalars(select(CreditReservation)))
+        assert [(r.job_id, r.status) for r in reservations] == [
+            (uuid.UUID(first["id"]), "released")
+        ]
+    monkeypatch.setattr(MockProvider, "submit", original_submit)
+    monkeypatch.setattr(MockProvider, "poll", original_poll)
+    replacement = retry(studio, recovered["id"])
+    assert replacement.status_code == 200 and replacement.json()["status"] == "succeeded", (
+        replacement.text
+    )
+    assert account(studio) == (875, 0)
+
+
 def test_enabling_payment_checks_old_pending_job_before_network(studio, monkeypatch):
     model = configure(studio, credits=0, enabled=False)
     monkeypatch.setattr(jobs, "dispatch", lambda db, job: job)
@@ -202,7 +296,8 @@ def test_enabling_payment_checks_old_pending_job_before_network(studio, monkeypa
     assert account(studio) == (0, 0)
 
 
-def test_cancel_while_submit_is_in_flight_keeps_hold(studio, monkeypatch):
+@pytest.mark.parametrize("accepted", [True, False])
+def test_cancel_during_submit_waits_for_the_upstream_outcome(studio, monkeypatch, accepted):
     model = configure(studio)
     original = MockProvider.submit
     _, sessions, ids = studio
@@ -218,16 +313,18 @@ def test_cancel_while_submit_is_in_flight_keeps_hold(studio, monkeypatch):
             jobs.cancel(db, ctx, job.id)
             db.commit()
         assert account(studio) == (875, 125)
+        if not accepted:
+            raise SubmissionRejected("供应商已拒绝这次提交")
         return original(provider, request)
 
     monkeypatch.setattr(MockProvider, "submit", cancel_before_receipt)
     response = submit(studio, model)
     assert response.status_code == 200 and response.json()["status"] == "canceled", response.text
-    assert account(studio) == (875, 125)
+    assert account(studio) == ((875, 125) if accepted else (1000, 0))
     with sessions() as db:
         row = db.get(GenerationJob, uuid.UUID(response.json()["id"]))
-        assert row.cost_raw["billing"]["phase"] == "held"
-        assert db.get(CreditReservation, row.id).status == "reserved"
+        assert row.cost_raw["billing"]["phase"] == ("held" if accepted else "released")
+        assert db.get(CreditReservation, row.id).status == ("reserved" if accepted else "released")
 
 
 def test_settles_actual_cheaper_route_and_returns_unused_hold(studio, monkeypatch):

@@ -4,7 +4,7 @@ M0 仅定义契约与注册中心;具体实现(即梦/解析/拆解/一致性)�
 """
 
 from abc import ABC, abstractmethod
-from typing import BinaryIO, Literal
+from typing import BinaryIO, Literal, Self
 
 from pydantic import BaseModel, Field
 
@@ -94,11 +94,37 @@ class Output(BaseModel):
     meta: dict = Field(default_factory=dict)
 
 
+ProviderFailureKind = Literal[
+    "provider_failure",
+    "provider_canceled",
+    "content_moderation",
+    "input_moderation",
+    "output_moderation",
+    "provider_configuration",
+    "invalid_parameters",
+    "provider_capacity",
+]
+
+
 class GenerationResult(BaseModel):
     status: Literal["running", "succeeded", "failed"]
     outputs: list[Output] = Field(default_factory=list)
     cost_raw: dict | None = None
     error: str | None = None
+    # Only a terminal status from a query for the accepted task can release its hold.
+    # Transport errors, unreadable outputs and missing results leave this unset.
+    failure_kind: ProviderFailureKind | None = None
+    failure_code: str | None = None
+
+    @classmethod
+    def confirmed_failure(
+        cls,
+        message: str,
+        *,
+        kind: ProviderFailureKind = "provider_failure",
+        code: str | None = None,
+    ) -> Self:
+        return cls(status="failed", error=message, failure_kind=kind, failure_code=code)
 
 
 # ── 策略接口 ──

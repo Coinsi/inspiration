@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type GenJob } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { ACTIVE_JOBS, JOB_LABEL, taskLabel } from "@/lib/task-center";
+import { ACTIVE_JOBS, JOB_LABEL, generationCreditNotice, taskLabel } from "@/lib/task-center";
 export { ACTIVE_JOBS, JOB_LABEL } from "@/lib/task-center";
 
 export function JobStatus({
@@ -37,6 +37,7 @@ export function JobStatus({
         void qc.invalidateQueries({ queryKey: [key] });
     }
   }, [job, qc]);
+  const creditNotice = job && generationCreditNotice(job, lang === "zh");
   return (
     <div
       className="rounded-lg border border-border bg-elevated px-3 py-2 text-xs"
@@ -89,6 +90,7 @@ export function JobStatus({
       {job?.error && (
         <p className="mt-2 break-words text-danger">{job.error}</p>
       )}
+      {creditNotice && <p className="mt-1 text-muted-foreground">{creditNotice}</p>}
       {job?.cost_raw?.warnings?.map((warning, i) => (
         <p key={i} className="mt-2 break-words text-muted-foreground">
           {warning}

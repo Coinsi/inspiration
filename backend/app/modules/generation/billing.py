@@ -11,8 +11,10 @@ from sqlalchemy import select
 
 from app.adapters.contracts import GenerationRequest
 from app.core.errors import CapabilityUnsupported, Conflict
+from app.models.billing import CreditReservation
 from app.models.generation import GenerationJob, ProviderConfig
 from app.modules.billing import wallet
+from app.modules.generation.schemas import JobCredits
 
 KEY = "billing"
 
@@ -25,11 +27,32 @@ def _root(job):
     return uuid.UUID(_info(job)["reservation_job_id"])
 
 
+def credits_for_job(db, job):
+    """Read the shared reservation, including later recovery or an operator's resolution."""
+    if not _info(job):
+        return None
+    row = db.get(CreditReservation, _root(job))
+    if row is None:
+        return None
+    units = row.settled_units if row.status == "settled" else row.units
+    return JobCredits(status=row.status, points=wallet.units_to_points(units))
+
+
 def _mark(job, phase, **detail):
     job.cost_raw = {
         **(job.cost_raw or {}),
         KEY: {**(job.cost_raw or {}).get(KEY, {}), "phase": phase, **detail},
     }
+
+
+def has_active_receiver(db, root_id, *, exclude_job_id=None):
+    query = select(GenerationJob.id).where(
+        GenerationJob.input_snapshot[KEY]["reservation_job_id"].astext == str(root_id),
+        GenerationJob.status.in_(("pending", "submitted", "running", "succeeded")),
+    )
+    if exclude_job_id is not None:
+        query = query.where(GenerationJob.id != exclude_job_id)
+    return db.scalar(query.limit(1)) is not None
 
 
 def platform_funded(db, job):
@@ -113,26 +136,25 @@ def prepare(db, job):
 def retry_snapshot(db, old, snapshot, *, resuming):
     info = _info(old)
     if not info:
-        if wallet.payment_required(db) and old.external_job_id and not resuming:
+        if (
+            wallet.payment_required(db)
+            and old.external_job_id
+            and not resuming
+            and not (old.routing_state or {}).get("failure")
+        ):
             raise Conflict("上游任务可能已经计费，请先核对结果，不能直接重新生成")
         return
     root_id = _root(old)
     db.scalar(select(GenerationJob).where(GenerationJob.id == root_id).with_for_update())
+    status = wallet.generation_reservation_status(db, root_id)
     if resuming:
-        if wallet.generation_reservation_status(db, root_id) != "reserved":
-            raise Conflict("原生成积分预留记录缺失")
-        active = db.scalar(
-            select(GenerationJob.id).where(
-                GenerationJob.project_id == old.project_id,
-                GenerationJob.input_snapshot[KEY]["reservation_job_id"].astext == str(root_id),
-                GenerationJob.status.in_(("pending", "submitted", "running", "succeeded")),
-            )
-        )
-        if active:
+        if status != "reserved":
+            raise Conflict("原任务没有可继续使用的预留积分，请查看任务记录")
+        if has_active_receiver(db, root_id):
             raise Conflict("原上游任务已有恢复任务或已完成，不会重复接收与计费")
         snapshot[KEY] = {**info, "resume": True}
     else:
-        if (old.cost_raw or {}).get(KEY, {}).get("phase") != "released":
+        if status != "released":
             raise Conflict("原任务积分仍在核对中，请先恢复原任务或联系管理员")
         snapshot.pop(KEY, None)
 
@@ -152,7 +174,7 @@ def accepted(job):
         )
 
 
-def unsuccessful(db, job, *, explicitly_rejected=False):
+def unsuccessful(db, job, *, explicitly_rejected=False, confirmed_failure=False):
     if not _info(job):
         return
     phase = (job.cost_raw or {}).get(KEY, {}).get("phase")
@@ -161,16 +183,28 @@ def unsuccessful(db, job, *, explicitly_rejected=False):
     all_rejected = routing.get("phase") in ("skipped", "rejected") and all(
         attempt.get("phase") in ("dispatching", "rejected", "skipped") for attempt in attempts
     )
-    safe = (
+    never_accepted = (
         not _info(job).get("resume")
         and not job.external_job_id
         and (phase in (None, "reserved", "released") or explicitly_rejected or all_rejected)
     )
-    if safe:
-        wallet.release_generation(db, _root(job))
-        _mark(job, "released", reason="definitely_not_accepted")
-    else:
-        _mark(job, "held", reason="upstream_acceptance_or_charge_uncertain")
+    root_id = _root(job)
+    if confirmed_failure or never_accepted:
+        # Receipt recovery and manual resolution serialize on the original job.
+        db.scalar(select(GenerationJob.id).where(GenerationJob.id == root_id).with_for_update())
+        if not confirmed_failure or not has_active_receiver(db, root_id, exclude_job_id=job.id):
+            wallet.release_generation(db, root_id)
+        status = wallet.generation_reservation_status(db, root_id)
+        if status == "released":
+            reason = (
+                "provider_confirmed_failure" if confirmed_failure else "definitely_not_accepted"
+            )
+            _mark(job, "released", reason=reason)
+            return
+        if status == "settled":
+            _mark(job, "settled")
+            return
+    _mark(job, "held", reason="upstream_acceptance_or_charge_uncertain")
 
 
 def settle(db, job, points):

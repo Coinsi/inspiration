@@ -68,21 +68,28 @@ class JsonMedia(NativeMedia):
             "rendering",
         }:
             return GenerationResult(status="running")
+        if state in {"expired", "timeout", "deleted"}:
+            raise ProviderError("供应商的任务记录已过期、超时或被删除，请核对原任务的结果")
         if state in {
             "failed",
             "fail",
             "error",
-            "expired",
             "canceled",
             "cancelled",
-            "timeout",
-            "deleted",
             "request moderated",
             "content moderated",
         }:
-            return GenerationResult(
-                status="failed", error="供应商未能完成生成，请查看供应商任务记录"
-            )
+            if url:
+                raise ProviderError("供应商返回的失败状态与结果不一致，请核对原任务")
+            if state in {"canceled", "cancelled"}:
+                return GenerationResult.confirmed_failure(
+                    "供应商已取消生成", kind="provider_canceled"
+                )
+            if state in {"request moderated", "content moderated"}:
+                return GenerationResult.confirmed_failure(
+                    "本次生成未通过供应商的内容审核", kind="content_moderation"
+                )
+            return GenerationResult.confirmed_failure("供应商确认生成失败，请查看供应商任务记录")
         if state in {"completed", "success", "succeeded", "succeed", "done", "ready"}:
             return GenerationResult(status="succeeded", outputs=[self._output(url)])
         raise ProviderError("供应商返回了未识别的任务状态，可继续查询原任务")

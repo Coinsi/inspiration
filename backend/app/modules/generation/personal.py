@@ -471,9 +471,7 @@ class PersonalProvider:
     def poll(self, handle):
         validate_endpoint(self.db, self.row.endpoint, self.row, resolve=True)
         result = self.adapter.poll(handle)
-        if result.status == "failed":
-            self.phase("upstream_failed")
-        elif result.status == "succeeded":
+        if result.status == "succeeded":
             self.phase("generated")
         return result
 

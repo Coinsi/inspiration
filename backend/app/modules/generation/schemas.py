@@ -79,6 +79,11 @@ class EstimateOut(BaseModel):
     detail: dict
 
 
+class JobCredits(BaseModel):
+    status: Literal["reserved", "released", "settled"]
+    points: str
+
+
 class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -95,6 +100,7 @@ class JobOut(BaseModel):
     input_snapshot: dict = Field(default_factory=dict)
     routing_state: dict = Field(default_factory=dict)
     cost_raw: dict | None = None
+    credit_reservation: JobCredits | None = None
 
 
 class RefineIn(BaseModel):

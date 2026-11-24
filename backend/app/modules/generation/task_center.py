@@ -182,7 +182,7 @@ def workspace(db, ctx, job_id):
 
     return {
         "summary": item,
-        "job": schemas.JobOut.model_validate(job),
+        "job": service.describe_job(db, job),
         "can_cancel": permitted and job.status in ACTIVE,
         "can_retry": permitted
         and (not job.provider.startswith("personal_") or job.created_by == ctx.user.id)

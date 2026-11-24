@@ -244,12 +244,27 @@ class ArkVideoProvider(NativeMedia):
         data = self._request(
             "GET", "/contents/generations/tasks/" + quote(handle.external_job_id, safe="")
         )
+        if data.get("id") and data["id"] != handle.external_job_id:
+            raise ProviderError("视频服务返回了其他任务的回执，请核对原任务")
         status = data.get("status")
         if status in ("queued", "running"):
             return GenerationResult(status="running")
-        if status in ("failed", "cancelled", "expired"):
-            return GenerationResult(
-                status="failed", error="视频生成未完成，请到供应商任务记录查看原因"
+        if status == "expired":
+            raise ProviderError("视频任务已过期，请核对原任务的结果")
+        content = data.get("content")
+        if (
+            status in ("failed", "cancelled")
+            and isinstance(content, dict)
+            and content.get("video_url")
+        ):
+            raise ProviderError("视频服务返回的失败状态与结果不一致，请核对原任务")
+        if status == "cancelled":
+            return GenerationResult.confirmed_failure(
+                "供应商已取消视频生成", kind="provider_canceled"
+            )
+        if status == "failed":
+            return GenerationResult.confirmed_failure(
+                "供应商确认视频生成失败，请查看供应商任务记录"
             )
         if status != "succeeded":
             raise ProviderError("服务返回未知任务状态，请继续查询原任务")
@@ -302,12 +317,14 @@ class MiniMaxVideoProvider(NativeMedia):
         data = self._checked(
             "GET", "/query/video_generation", params={"task_id": handle.external_job_id}
         )
+        if data.get("task_id") and str(data["task_id"]) != handle.external_job_id:
+            raise ProviderError("海螺返回了其他任务的回执，请核对原任务")
         if data.get("status") in ("Preparing", "Queueing", "Processing"):
             return GenerationResult(status="running")
         if data.get("status") == "Fail":
-            return GenerationResult(
-                status="failed", error="海螺视频生成失败，请到供应商任务记录查看原因"
-            )
+            if data.get("file_id"):
+                raise ProviderError("海螺返回的失败状态与结果文件不一致，请核对原任务")
+            return GenerationResult.confirmed_failure("海螺确认视频生成失败，请查看供应商任务记录")
         if data.get("status") != "Success" or not data.get("file_id"):
             raise ProviderError("海螺任务状态或结果暂不可用，请继续查询原任务")
         file = self._checked("GET", "/files/retrieve", params={"file_id": data["file_id"]})

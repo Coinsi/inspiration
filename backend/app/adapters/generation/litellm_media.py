@@ -172,9 +172,13 @@ class LiteLLMMediaProvider(GenerationProvider):
             result = sdk().video_status(video_id=handle.external_job_id, **params)
             if result.status in ("queued", "in_progress", "processing"):
                 return GenerationResult(status="running")
-            if result.status in ("failed", "cancelled"):
-                return GenerationResult(
-                    status="failed", error="上游视频任务失败，请检查渠道任务记录"
+            if result.status in ("canceled", "cancelled"):
+                return GenerationResult.confirmed_failure(
+                    "供应商已取消视频生成", kind="provider_canceled"
+                )
+            if result.status == "failed":
+                return GenerationResult.confirmed_failure(
+                    "供应商确认视频生成失败，请查看渠道任务记录"
                 )
             if result.status != "completed":
                 raise ProviderError("视频服务返回未知状态，保留任务标识以便恢复")

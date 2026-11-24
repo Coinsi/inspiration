@@ -461,6 +461,7 @@ export interface GenJob {
   status: string;
   estimated_cost: number | null;
   actual_cost: number | null;
+  credit_reservation?: { status: "reserved" | "released" | "settled"; points: string } | null;
   error: string | null;
   target_type: string;
   target_id: string;

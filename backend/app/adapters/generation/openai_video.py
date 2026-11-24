@@ -115,13 +115,17 @@ class OpenAIVideoProvider(GenerationProvider):
     def poll(self, handle):
         path = "/videos/" + quote(handle.external_job_id, safe="")
         data = self._request("GET", path)
+        if data.get("id") and data["id"] != handle.external_job_id:
+            raise ProviderError("视频服务返回了其他任务的回执，请核对原任务")
         status = data.get("status")
         if status in ("queued", "pending", "in_progress", "running", "processing"):
             return GenerationResult(status="running")
         if status in ("failed", "canceled", "cancelled"):
-            return GenerationResult(
-                status="failed",
-                error=self._error_message(data) or "上游视频任务失败或已取消，请查看服务商任务记录",
+            canceled = status != "failed"
+            return GenerationResult.confirmed_failure(
+                self._error_message(data)
+                or ("供应商已取消视频生成" if canceled else "供应商确认视频生成失败"),
+                kind="provider_canceled" if canceled else "provider_failure",
             )
         if status not in ("completed", "succeeded"):
             # Unknown state is a protocol/query problem, not proof of a failed generation.

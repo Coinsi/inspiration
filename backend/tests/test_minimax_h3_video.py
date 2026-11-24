@@ -13,7 +13,9 @@ import pytest
 from app.adapters.contracts import GenerationRequest, JobHandle, ReferenceImage
 from app.adapters.generation.minimax_h3 import MiniMaxH3VideoProvider
 from app.core.errors import CapabilityUnsupported, ProviderError
+from app.models.billing import BillingSettings, CreditAccount
 from app.models.generation import GenerationJob, ProviderConfig
+from app.modules.billing import wallet
 from app.modules.generation import media_engine, service
 from app.modules.generation.minimax_models import H3_PROTOCOL, video_profile
 from app.modules.generation.model_routing import SubmissionRejected
@@ -244,6 +246,100 @@ def test_h3_receipts_only_poll(status, monkeypatch):
         assert provider.poll(handle).status == (
             "failed" if status in ("failed", "cancelled") else "running"
         )
+
+
+@pytest.mark.parametrize(
+    ("code", "kind"),
+    [
+        (1026, "input_moderation"),
+        ("1027", "output_moderation"),
+        ("9999", "provider_failure"),
+        ("bad/private", "provider_failure"),
+    ],
+)
+def test_h3_explains_verified_failure_without_echoing_raw_upstream_content(monkeypatch, code, kind):
+    task = {"id": "original", "status": "failed", "error": {"code": code, "message": "PRIVATE"}}
+    transport(monkeypatch, lambda _: httpx.Response(200, json={"task": task}))
+    provider = adapter(MiniMaxH3VideoProvider, "minimax", "minimax-h3")
+    handle = JobHandle(external_job_id="original")
+    result = provider.poll(handle)
+    assert result.status == "failed" and result.failure_kind == kind
+    assert result.failure_code == (str(code) if str(code).isdigit() else None)
+    assert "PRIVATE" not in result.error and "bad/private" not in result.error
+    task["content"] = {"url": "https://cdn.example.test/video"}
+    with pytest.raises(ProviderError, match="不一致"):
+        provider.poll(handle)
+    task["id"] = "different-task"
+    with pytest.raises(ProviderError, match="不符"):
+        provider.poll(handle)
+
+
+def test_workbench_h3_moderation_releases_grant_credits(studio, monkeypatch):
+    client, sessions, ids = studio
+    admin(sessions, ids)
+    root = f"/api/v1/projects/{ids['project']}"
+    channel = client.post(
+        ROOT + "/model-channels",
+        json={"name": "MiniMax", "endpoint": "https://api.minimax.cn/v1", "token": "fixture"},
+    ).json()["id"]
+    profile = add(
+        client,
+        ROOT,
+        channel,
+        modality="video",
+        protocol=H3_PROTOCOL,
+        model="MiniMax-H3",
+        max_video_seconds=12,
+        price={"mode": "per_second", "amount": "10"},
+    )
+    model = group(client, ROOT, [profile], modality="video")
+    with sessions.begin() as db:
+        db.add(BillingSettings(id=1, payment_required=True))
+        wallet.change(
+            db, ids["user"], "test_funding", uuid.uuid4(), available=12000, grant_available=12000
+        )
+    requests = []
+
+    def upstream(request):
+        requests.append((request.method, request.url.path))
+        if request.method == "POST":
+            return httpx.Response(200, json={"task_id": "h3-original"})
+        return httpx.Response(
+            200,
+            json={
+                "task": {
+                    "id": "h3-original",
+                    "status": "failed",
+                    "error": {"code": "1026", "message": "content blocked by moderation"},
+                }
+            },
+        )
+
+    transport(monkeypatch, upstream)
+    data = body(
+        provider=model["provider_name"],
+        request_type="video",
+        provider_params={"duration": 12, "resolution": "768P"},
+    )
+    response = client.post(root + "/workbench/generate", json=data)
+    assert response.status_code == 200, response.text
+    job_id = response.json()["id"]
+    detail = client.get(root + "/jobs/" + job_id).json()
+    assert detail["status"] == "failed" and "输入未通过内容审核" in detail["error"]
+    assert detail["credit_reservation"] == {"status": "released", "points": "120"}
+    assert client.post(root + "/workbench/generate", json=data).json()["id"] == job_id
+    assert requests == [
+        ("POST", "/v2/video_generation"),
+        ("GET", "/v2/query/video_generation/h3-original"),
+    ]
+    with sessions() as db:
+        account = db.get(CreditAccount, ids["user"])
+        assert (
+            account.available,
+            account.grant_available,
+            account.reserved,
+            account.grant_reserved,
+        ) == (12000, 12000, 0, 0)
 
 
 def test_h3_frames_and_model_specific_parameters(monkeypatch):

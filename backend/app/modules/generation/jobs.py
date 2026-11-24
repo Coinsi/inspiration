@@ -36,6 +36,47 @@ def event(job, status, message):
     job.cost_raw = raw
 
 
+def _finish_failed_receipt(db, job_id, handle, result):
+    """Persist the original task's terminal receipt and its wallet outcome together."""
+    from app.modules.engineering import delivery
+    from app.modules.generation import billing
+    from app.modules.generation.personal import record_result
+
+    job = db.scalar(
+        select(GenerationJob)
+        .where(GenerationJob.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    delivery.fence(db, job_id)
+    if job.external_job_id != handle.external_job_id or result.outputs:
+        raise ValueError("供应商回执与原任务或结果不一致，请核对原任务")
+    if job.status not in (*ACTIVE, "canceled"):
+        return
+    message = result.error or "供应商确认生成失败"
+    failure = {"kind": result.failure_kind}
+    if result.failure_code:
+        failure["code"] = result.failure_code
+    state = {**(job.routing_state or {}), "phase": "upstream_failed", "failure": failure}
+    if "attempts" in state:
+        state["attempts"] = [
+            *state["attempts"],
+            {
+                "phase": "upstream_failed",
+                "at": datetime.now(UTC).isoformat(),
+                "provider_name": state.get("provider_name"),
+                "channel_name": state.get("channel_name"),
+                "message": message,
+            },
+        ]
+    job.routing_state = state
+    billing.unsuccessful(db, job, confirmed_failure=True)
+    job.error = message[:2000]
+    event(job, "canceled" if job.status == "canceled" else "failed", job.error)
+    record_result(db, job)
+    db.commit()
+
+
 def validate_target(db, project_id, target_type, target_id):
     from app.models.asset import Asset
     from app.models.creation import Creation
@@ -393,7 +434,9 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
     state = job.routing_state or {}
     from app.modules.generation.model_routing import resumable_profile
 
-    if state.get("resume") or state.get("phase") in ("accepted", "generated"):
+    if state.get("phase") != "upstream_failed" and (
+        state.get("resume") or state.get("phase") in ("accepted", "generated")
+    ):
         resume = state.get("resume") or state
         route = next(
             (
@@ -709,6 +752,9 @@ def execute(db, job_id):
                 if result.status != "running":
                     break
                 time.sleep(2)
+            if result and result.status == "failed" and result.failure_kind:
+                _finish_failed_receipt(db, job_id, handle, result)
+                return
             if not result or result.status != "succeeded" or not result.outputs:
                 raise ValueError(
                     (result.error if result else None) or "供应商未返回有效结果或任务超时"
@@ -925,11 +971,18 @@ def execute(db, job_id):
     except Exception as exc:
         db.rollback()
         job = db.scalar(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update())
-        if job and job.status != "canceled" and delivery.owned(db, job_id, lease_token):
+        if job and job.status in (*ACTIVE, "canceled") and delivery.owned(db, job_id, lease_token):
             from app.modules.generation.billing import unsuccessful
             from app.modules.generation.model_routing import SubmissionRejected
 
-            unsuccessful(db, job, explicitly_rejected=isinstance(exc, SubmissionRejected))
+            rejected = isinstance(exc, SubmissionRejected)
+            if job.status == "canceled":
+                # A definite rejection may arrive after the user canceled during submit.
+                if rejected or (job.routing_state or {}).get("phase") in ("rejected", "skipped"):
+                    unsuccessful(db, job, explicitly_rejected=rejected)
+                    db.commit()
+                return
+            unsuccessful(db, job, explicitly_rejected=rejected)
             job.error = str(exc)[:2000]
             event(job, "failed", job.error)
             from app.modules.generation.personal import record_result

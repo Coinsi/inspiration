@@ -378,7 +378,7 @@ def generate(
     ctx: ProjectContext = Depends(TRIGGER),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return schemas.JobOut.model_validate(service.submit(db, ctx, "shot", shot_id, data))
+    return service.describe_job(db, service.submit(db, ctx, "shot", shot_id, data))
 
 
 @router.post("/assets/{asset_id}/estimate", response_model=schemas.EstimateOut)
@@ -398,7 +398,7 @@ def generate_asset(
     ctx: ProjectContext = Depends(TRIGGER),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return schemas.JobOut.model_validate(service.submit(db, ctx, "asset", asset_id, data))
+    return service.describe_job(db, service.submit(db, ctx, "asset", asset_id, data))
 
 
 @router.get("/jobs/{job_id}", response_model=schemas.JobOut)
@@ -407,7 +407,7 @@ def get_job(
     ctx: ProjectContext = Depends(get_project_context),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return schemas.JobOut.model_validate(service.get_job(db, ctx.project.id, job_id))
+    return service.describe_job(db, service.get_job(db, ctx.project.id, job_id))
 
 
 @router.get("/generations", response_model=list[schemas.GenerationOut])

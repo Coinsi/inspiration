@@ -11,6 +11,31 @@ export const JOB_LABEL: Record<string, string> = {
   paused: "已暂停",
   needs_review: "待确认",
 };
+export function generationCreditNotice(job: GenJob, zh: boolean) {
+  const credit = job.credit_reservation;
+  if (!credit || !["failed", "canceled"].includes(job.status)) return null;
+  switch (credit.status) {
+    case "released":
+      return zh ? `预留的 ${credit.points} 积分已退回。` : `Released ${credit.points} reserved credits.`;
+    case "reserved":
+      if (job.routing_state?.phase === "generated") {
+        return zh
+          ? `供应商已生成结果，等待取回原文件。暂时保留 ${credit.points} 积分。`
+          : `The result is ready upstream. ${credit.points} credits are held until it is retrieved.`;
+      }
+      if (["dispatching", "submission_unknown"].includes(job.routing_state?.phase || "")) {
+        return zh
+          ? `尚未确认供应商是否接单，${credit.points} 积分暂时预留。`
+          : `Waiting to confirm whether the provider received the request. ${credit.points} credits are held.`;
+      }
+      return zh
+        ? `${credit.points} 积分仍在预留中，等待核对任务结果。`
+        : `${credit.points} credits remain on hold while the task outcome is checked.`;
+    case "settled":
+      return zh ? `这笔任务已结算 ${credit.points} 积分。` : `This task was settled for ${credit.points} credits.`;
+  }
+}
+
 export function taskError(error: string, zh = true) {
   if (/504|502|Gateway|timed?\s*out/i.test(error))
     return zh

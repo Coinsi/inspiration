@@ -201,9 +201,7 @@ class RoutedProvider(GenerationProvider):
 
     def poll(self, handle):
         result = self.active.poll(handle)
-        if result.status == "failed":
-            self._record("upstream_failed", self.actual_route, "上游任务失败；不会自动换渠道重做")
-        elif result.status == "succeeded":
+        if result.status == "succeeded":
             self._record("generated", self.actual_route, "上游已完成，正在保存结果")
         return result
 
