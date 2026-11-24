@@ -26,6 +26,7 @@ class SettingOut(BaseModel):
     name: str
     content: str
     source_chapters: list
+    source_notes: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -44,5 +45,6 @@ class ExtractionOut(BaseModel):
     status: str
     total_chapters: int
     done_chapters: int
+    chapter_progress: dict = Field(default_factory=dict)
     error: str | None
     created_at: datetime

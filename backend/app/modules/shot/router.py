@@ -97,6 +97,29 @@ def transition(
     return service.transition(db, ctx, shot_id, data.to)
 
 
+@router.get("/scenes/{scene_id}/visuals")
+def scene_visuals(
+    scene_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.shot.impact import scene_impact
+
+    return scene_impact(db, ctx.project.id, scene_id)
+
+
+@router.put("/scenes/{scene_id}/visuals")
+def save_scene_visuals(
+    scene_id: uuid.UUID,
+    data: schemas.SceneVisuals,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.shot.impact import scene_impact
+
+    return scene_impact(db, ctx.project.id, scene_id, data)
+
+
 @router.get("/shots/{shot_id}/compose-prompt", response_model=schemas.ComposeOut)
-def compose_prompt(shot_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
-    return service.compose_prompt(db, ctx.project.id, shot_id)
+def compose_prompt(shot_id: uuid.UUID, media_type: str = "image", ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
+    return service.compose_prompt(db, ctx.project.id, shot_id, media_type)

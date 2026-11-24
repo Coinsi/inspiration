@@ -1,4 +1,6 @@
 import { ShotNameDialog } from "@/components/ShotNameDialog";
+import { ShotBatchControl } from "@/components/ShotBatchControl";
+import { SceneVisuals } from "@/components/SceneVisuals";
 import { useShotContext } from "@/lib/useShotContext";
 import { SelectField } from "@/components/ui/select-field";
 import { SearchField } from "@/components/ui/search-field";
@@ -328,7 +330,6 @@ function StoryboardContent() {
         String(shots?.length ?? 0),
       ),
       confirmText: tr("sb.aiBreakdown"),
-      danger: (shots?.length ?? 0) > 0,
     });
     if (ok)
       startBreakdown({
@@ -567,6 +568,19 @@ function StoryboardContent() {
             </div>
             {scene && (
               <div className="storyboard-scene-actions">
+                <SceneVisuals
+                  key={`visuals-${scene.id}`}
+                  base={base}
+                  sceneId={scene.id}
+                />
+                {!!shots?.length && (
+                  <ShotBatchControl
+                    key={scene.id}
+                    projectId={projectId!}
+                    sceneId={scene.id}
+                    shots={shots}
+                  />
+                )}
                 <Button size="sm" variant="ghost" disabled={breaking || shotsLoading || shotsError} onClick={runBreakdown}>
                   {breaking ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                   {breaking ? `${tr("sb.breakingDown")} ${breakingSec}s` : tr("sb.aiBreakdown")}
@@ -758,7 +772,11 @@ function StoryboardContent() {
                   <details className="storyboard-shot-details">
                     <summary>
                       <SlidersHorizontal size={15} />
-                      <span>{lang === "zh" ? "镜头参数与声音" : "Camera & sound"}</span>
+                      <span>
+                        {lang === "zh"
+                          ? "生成提示词、镜头参数与声音"
+                          : "Prompts, camera & sound"}
+                      </span>
                       <span className="storyboard-parameter-summary">
                         {SELECTS.slice(0, 3).map((f) => {
                           const option = f.options.find((o) => o.v === sbVal(s, f.key));
@@ -768,6 +786,47 @@ function StoryboardContent() {
                       <ChevronDown size={15} className="storyboard-disclosure-icon" />
                     </summary>
                     <div className="storyboard-details-content">
+                      {!!sbVal(s, "breakdown_error") && (
+                        <p role="alert">
+                          {sbVal(s, "breakdown_error")}
+                          。再次拆镜会继续补全未完成的镜头。
+                        </p>
+                      )}
+                      {(
+                        [
+                          ["still_prompt", "定格画面提示词"],
+                          ["motion_prompt", "视频动作与运镜"],
+                        ] as const
+                      ).map(([field, label]) => (
+                        <label
+                          key={field}
+                          className="storyboard-description-field"
+                        >
+                          <span className="storyboard-field-label">
+                            {label}
+                          </span>
+                          <Textarea
+                            defaultValue={sbVal(s, field)}
+                            rows={3}
+                            onBlur={(e) => setSb(s, field, e.target.value)}
+                          />
+                        </label>
+                      ))}
+                      <label className="text-sm">
+                        <input
+                          type="checkbox"
+                          checked={s.storyboard?.inherit_scene !== false}
+                          onChange={(e) =>
+                            patchShot.mutate({
+                              id: s.id,
+                              body: {
+                                storyboard: { inherit_scene: e.target.checked },
+                              },
+                            })
+                          }
+                        />{" "}
+                        沿用本场光线与环境设定
+                      </label>
                       <div className="storyboard-spec-fields">
                         {SELECTS.map((f) => (
                           <label key={f.key} className="storyboard-labelled-field">

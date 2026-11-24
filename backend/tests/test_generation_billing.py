@@ -140,7 +140,9 @@ def test_local_failure_releases_and_network_uncertainty_holds(studio, monkeypatc
         raise TimeoutError("upstream may have accepted")
 
     monkeypatch.setattr(MockProvider, "submit", timeout)
-    second = submit(studio, model)
+    repeated = submit(studio, model)
+    assert repeated.json()["id"] == first.json()["id"]
+    second = retry(studio, first.json()["id"])
     assert second.json()["status"] == "failed", second.text
     assert account(studio) == (875, 125)
     assert retry(studio, second.json()["id"]).status_code == 409

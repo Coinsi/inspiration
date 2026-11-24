@@ -13,7 +13,7 @@ export function clearToken() {
 
 export class ApiError extends Error {
   code: string;
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, readonly detail?: unknown) {
     super(message);
     this.code = code;
   }
@@ -41,9 +41,11 @@ async function request<T>(
   if (!res.ok) {
     let code = "ERROR";
     let message = res.statusText;
+    let detail: unknown;
     try {
       const data = await res.json();
       code = data?.error?.code ?? code;
+      detail = data?.error?.detail;
       message =
         data?.error?.message ??
         (Array.isArray(data?.detail)
@@ -57,7 +59,7 @@ async function request<T>(
     }
     // An older request must not erase a session that just replaced its token.
     if (res.status === 401 && getToken() === token) clearToken();
-    throw new ApiError(code, message);
+    throw new ApiError(code, message, detail);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -119,14 +121,16 @@ export async function apiUpload<T>(path: string, form: FormData, options?: Uploa
   if (!res.ok) {
     let code = "ERROR";
     let message = res.statusText;
+    let detail: unknown;
     try {
       const data = await res.json();
       code = data?.error?.code ?? code;
+      detail = data?.error?.detail;
       message = data?.error?.message ?? message;
     } catch {
       /* ignore */
     }
-    throw new ApiError(code, message);
+    throw new ApiError(code, message, detail);
   }
   return (await res.json()) as T;
 }
@@ -330,6 +334,7 @@ export interface EntityDraft {
   type: string;
   name: string;
   summary: string;
+  evidence?: string;
 }
 
 // ── 设定(故事圣经)──
@@ -350,10 +355,12 @@ export interface Setting {
   name: string;
   content: string;
   source_chapters: number[];
+  source_notes?: Record<string, {fact:string; quote:string; chapter_id:string} | boolean>;
   created_at: string;
   updated_at: string;
 }
 export interface SettingExtraction {
+  chapter_progress?: { stop_requested?: boolean; requested?: number[]; done?: number[]; failed?: Record<string, string> };
   id: string;
   novel_id: string;
   status: string;
@@ -367,6 +374,7 @@ export interface ShotBrief {
   description: string;
 }
 export interface SceneSuggestion {
+  error?: string | null;
   title: string;
   summary: string;
   body: string;
@@ -404,7 +412,7 @@ export interface Shot {
   chapter_title?: string | null;
   novel_id?: string | null;
   novel_title?: string | null;
-  storyboard?: Record<string, string | number> | null;
+  storyboard?: Record<string, unknown> | null;
 }
 
 export interface SceneListItem {
@@ -426,6 +434,7 @@ export interface ComposeResult {
   overridden: boolean;
 }
 export interface ShotAssetRef {
+  usage?: { aspects: string[]; look: string; evidence: string };
   id: string;
   asset_id: string;
   role: string;

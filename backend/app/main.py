@@ -71,7 +71,12 @@ async def lifespan(app):
 
     background_workers.clear()
     script_stop = None
+    shot_batch_stop = None
     if not settings.celery_eager:
+        from app.modules.generation.shot_batches import start as start_batches
+
+        shot_batch_stop = start_batches()
+        background_workers["shot_batches"] = shot_batch_stop.is_alive
         from app.modules.narrative.tasks import start as start_scripts
         script_stop = start_scripts()
         background_workers["script_generation"] = script_stop.is_alive
@@ -139,6 +144,8 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if shot_batch_stop:
+            await to_thread(shot_batch_stop)
         if script_stop:
             await to_thread(script_stop)
         if attachment_stop:

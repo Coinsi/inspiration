@@ -306,10 +306,23 @@ function GenerationPanelContent({
     },
     onError: (e) => toast.push((e as Error).message, "error"),
   });
+  const variation = useRef<{ key: string; signature: string } | null>(null);
   const generate = useMutation({
-    mutationFn: () =>
-      api.post<GenJob>(`${base}/${t}/${targetId}/generate`, payload),
+    mutationFn: (another: boolean) => {
+      if (another && variation.current?.signature !== payloadSignature.current)
+        variation.current = {
+          signature: payloadSignature.current,
+          key: crypto.randomUUID(),
+        };
+      return api.post<GenJob>(
+        base + "/" + t + "/" + targetId + "/generate",
+        another
+          ? { ...payload, variation_key: variation.current!.key }
+          : payload,
+      );
+    },
     onSuccess: (j) => {
+      variation.current = null;
       rememberJob(j.id);
       refresh();
     },
@@ -566,7 +579,10 @@ function GenerationPanelContent({
                     label: `${n} ${tr("gen.count")}`,
                   }))}
                 />
-                {targetType === "asset" && (
+                {(targetType === "asset" ||
+                  caps?.features.includes("reference") ||
+                  (type === "video" &&
+                    caps?.features.includes("first_frame"))) && (
                   <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
@@ -574,7 +590,13 @@ function GenerationPanelContent({
                       onChange={(e) => setUseRefs(e.target.checked)}
                       className="accent-[var(--primary)]"
                     />
-                    {tr("gen.useRefs")}
+                    {targetType === "shot" &&
+                    type === "video" &&
+                    caps?.features.includes("first_frame")
+                      ? zh
+                        ? "沿用已采用的镜头画面作为首帧"
+                        : "Use the adopted still as the first frame"
+                      : tr("gen.useRefs")}
                   </label>
                 )}
               </div>
@@ -921,7 +943,7 @@ function GenerationPanelContent({
               </div>
               <Button
                 className="w-full !h-11"
-                onClick={() => generate.mutate()}
+                onClick={() => generate.mutate(false)}
                 disabled={
                   generate.isPending ||
                   !caps ||
@@ -939,6 +961,20 @@ function GenerationPanelContent({
                     : "Submitting…"
                   : tr("gen.gen")}
               </Button>
+              {targetType === "shot" &&
+                !!gens?.some((g) => g.output_type === type) && (
+                  <Button
+                    variant="outline"
+                    disabled={
+                      generate.isPending ||
+                      !caps ||
+                      !providerOptions.includes(provider)
+                    }
+                    onClick={() => generate.mutate(true)}
+                  >
+                    {zh ? "另生成一个版本" : "Generate another version"}
+                  </Button>
+                )}
             </div>
           </fieldset>
           {lastJob && (

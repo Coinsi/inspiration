@@ -13,9 +13,8 @@ from app.core.errors import NotFound, Conflict, Locked
 from app.models.enums import AssetType
 from app.models.narrative import Chapter, Novel, Script, Scene
 from app.models.shot import Shot
-from app.modules.asset import schemas as asset_schemas
-from app.modules.asset import service as asset_service
 from app.modules.narrative import schemas
+from app.modules.shot import breakdown
 from app.platform import coding
 from app.storage import cas
 
@@ -345,10 +344,23 @@ def generate_script_from_chapter(
     S3:自动注入设定库上下文(该章出现的设定 + 全局世界观/体系),改编遵守既定人设。
     """
     ch = _get_chapter(db, ctx.project.id, data.chapter_id)
+    db.scalar(select(Chapter.id).where(Chapter.id == ch.id).with_for_update())
+    existing = db.scalar(
+        select(Script)
+        .where(
+            Script.project_id == ctx.project.id,
+            Script.source_chapter_id == ch.id,
+            Script.deleted_at.is_(None),
+        )
+        .order_by(Script.created_at, Script.id)
+        .limit(1)
+    )
+    if existing:
+        return existing
     strat = _strategy(db, ctx.project.id, data.strategy)
     from app.modules.setting.service import settings_context  # 局部导入避免循环依赖
 
-    context = settings_context(db, ctx.project.id, ch.novel_id, ch.ordinal)
+    context = settings_context(db, ctx.project.id, ch.novel_id, ch.ordinal, subject_text=ch.content or "")
     blocks = _normalize_blocks(strat.adapt_chapter_to_script(ch.content, context))
     title = (data.title or ch.title or "未命名剧本").strip() or "未命名剧本"
     script = Script(
@@ -477,30 +489,60 @@ def _script_to_plain_text(blocks: list[dict]) -> str:
     return "\n".join(parts).strip()
 
 
-def decompose_script(
-    db: Session, project_id: uuid.UUID, script_id: uuid.UUID, strategy_name: str | None
-) -> schemas.DecomposeOut:
-    """从剧本正文派生场次/镜头:按剧本自身的场景头切分(而非盲拆章节文本)。"""
-    script = _get_script(db, project_id, script_id)
-    strat = _strategy(db, project_id, strategy_name)
-    src_ord = None
-    if script.source_chapter_id:
-        ch = db.get(Chapter, script.source_chapter_id)
-        src_ord = ch.ordinal if ch else None
-    grouped = _group_blocks_into_scenes(script.content_blocks or [])
-    scenes = []
-    for i, (title, body) in enumerate(grouped, 1):
-        shots = strat.suggest_shots(body or title or "")
-        scenes.append(
-            schemas.SceneSuggestionOut(
-                title=title or f"场景 {i}",
-                summary=(body[:30].replace("\n", " ") if body else ""),
-                body=body,
-                source_chapter_ordinal=src_ord,
-                shots=[schemas.ShotBrief(title=s.title, description=s.description) for s in shots],
+def _break_down_scenes(
+    db, project_id, strategy, chapter_id, scenes, previous=None, checkpoint=None
+):
+    from app.core.errors import AppError, ProviderError
+
+    saved = (previous or {}).get("scenes", [])
+    for index, scene in enumerate(scenes):
+        if index < len(saved) and not saved[index].get("error") and saved[index].get("shots"):
+            scenes[index] = schemas.SceneSuggestionOut.model_validate(saved[index])
+        else:
+            scene.error = "尚未完成拆镜"
+    result = schemas.DecomposeOut(strategy=strategy.name, scenes=scenes)
+    if checkpoint:
+        checkpoint(result)
+    for scene in result.scenes:
+        if not scene.error:
+            continue
+        try:
+            drafts = breakdown.suggest(
+                db, strategy, project_id, scene.body or scene.summary or scene.title, chapter_id
             )
+            if not drafts:
+                raise ProviderError("模型没有返回镜头，请重试此场")
+            scene.shots = [schemas.ShotBrief(**draft.model_dump()) for draft in drafts]
+            scene.error = None
+        except Exception as exc:
+            scene.error = exc.message if isinstance(exc, AppError) else "未取得有效分镜，请重试此场"
+        if checkpoint:
+            checkpoint(result)
+    return result
+
+
+def decompose_script(
+    db: Session,
+    project_id: uuid.UUID,
+    script_id: uuid.UUID,
+    strategy_name: str | None,
+    *,
+    previous=None,
+    checkpoint=None,
+) -> schemas.DecomposeOut:
+    script = _get_script(db, project_id, script_id)
+    strategy = _strategy(db, project_id, strategy_name)
+    chapter = db.get(Chapter, script.source_chapter_id) if script.source_chapter_id else None
+    scenes = [
+        schemas.SceneSuggestionOut(
+            title=title or f"场景 {i}",
+            body=body,
+            summary=body[:30].replace("\n", " "),
+            source_chapter_ordinal=chapter.ordinal if chapter else None,
         )
-    return schemas.DecomposeOut(strategy=strat.name, scenes=scenes)
+        for i, (title, body) in enumerate(_group_blocks_into_scenes(script.content_blocks or []), 1)
+    ]
+    return _break_down_scenes(db, project_id, strategy, script.source_chapter_id, scenes, previous, checkpoint)
 
 
 def _to_fountain(title: str, blocks: list[dict]) -> str:
@@ -553,24 +595,20 @@ def _strategy(db: Session, project_id: uuid.UUID, name: str | None):
     return decomposition_registry.create(chosen, **kwargs)
 
 
-def decompose_chapter(
-    db: Session, project_id: uuid.UUID, chapter_id: uuid.UUID, strategy_name: str | None
-) -> schemas.DecomposeOut:
+def decompose_chapter(db: Session, project_id: uuid.UUID, chapter_id: uuid.UUID, strategy_name: str | None,
+                      *, previous=None, checkpoint=None) -> schemas.DecomposeOut:
     ch = _get_chapter(db, project_id, chapter_id)
-    strat = _strategy(db, project_id, strategy_name)
-    scenes = []
-    for sc in strat.suggest_scenes(ch.content):
-        shots = strat.suggest_shots(sc.body or sc.summary)
-        scenes.append(
+    strategy = _strategy(db, project_id, strategy_name)
+    if previous and previous.get("scenes"):
+        scenes = [schemas.SceneSuggestionOut.model_validate(scene) for scene in previous["scenes"]]
+    else:
+        scenes = [
             schemas.SceneSuggestionOut(
-                title=sc.title,
-                summary=sc.summary,
-                body=sc.body,
-                source_chapter_ordinal=ch.ordinal,
-                shots=[schemas.ShotBrief(title=s.title, description=s.description) for s in shots],
+                title=s.title, summary=s.summary, body=s.body, source_chapter_ordinal=ch.ordinal
             )
-        )
-    return schemas.DecomposeOut(strategy=strat.name, scenes=scenes)
+            for s in strategy.suggest_scenes(ch.content)
+        ]
+    return _break_down_scenes(db, project_id, strategy, ch.id, scenes, previous, checkpoint)
 
 
 def apply_scenes(
@@ -578,13 +616,51 @@ def apply_scenes(
 ) -> list[Scene]:
     script = _get_script(db, ctx.project.id, script_id)
     chapter_id = data.chapter_id or script.source_chapter_id
+    db.refresh(script, with_for_update=True)
     if chapter_id:
         _get_chapter(db, ctx.project.id, chapter_id, allow_archived=data.chapter_id is None)
     base_ord = db.scalar(
         select(func.coalesce(func.max(Scene.ordinal), 0)).where(Scene.script_id == script.id)
     )
     created = []
+    from app.modules.narrative.tool_tasks import fingerprint
+
+    occurrences = {}
+    previous = list_scenes(db, ctx.project.id, script.id)
+    # Reserve failed slots too, so a recovered scene keeps its script position.
+    known_ordinal = {}
+    for old in previous:
+        if old.source_key:
+            known_ordinal[old.source_key] = old.ordinal
+    keys = []
     for i, sc in enumerate(data.scenes, 1):
+        identity = (str(chapter_id or ""), sc.title.strip(), sc.body.strip() or sc.summary.strip())
+        index = occurrences.get(identity, 0)
+        occurrences[identity] = index + 1
+        key = fingerprint([*identity, index])
+        keys.append((sc, identity, key))
+        if key in known_ordinal:
+            base_ord = min(base_ord, known_ordinal[key] - i)
+    for i, (sc, identity, key) in enumerate(keys, 1):
+        if sc.error:
+            continue
+        existing = next((s for s in previous if s.source_key == key), None)
+        if existing is None:
+            existing = next(
+                (
+                    s
+                    for s in previous
+                    if not s.source_key
+                    and s.adapted_from_chapter_id == chapter_id
+                    and (s.title or "").strip() == identity[1]
+                    and ((s.body or s.summary or "").strip() == identity[2])
+                ),
+                None,
+            )
+        if existing:
+            existing.source_key = key
+            created.append(existing)
+            continue
         scene = Scene(
             project_id=ctx.project.id,
             script_id=script.id,
@@ -594,22 +670,12 @@ def apply_scenes(
             summary=sc.summary,
             body=sc.body,
             adapted_from_chapter_id=chapter_id,
+            source_key=key,
             created_by=ctx.user.id,
         )
         db.add(scene)
         db.flush()
-        for j, shot in enumerate(sc.shots, 1):
-            db.add(
-                Shot(
-                    project_id=ctx.project.id,
-                    scene_id=scene.id,
-                    code=f"{scene.code}-SH{j:03d}",
-                    ordinal=j,
-                    title=shot.title,
-                    description=shot.description,
-                    created_by=ctx.user.id,
-                )
-            )
+        breakdown.create_drafts(db, ctx, scene, sc.shots)
         created.append(scene)
     audit.record(
         db,
@@ -629,22 +695,62 @@ def extract_entities(
 ) -> list[schemas.EntityDraftOut]:
     text = data.text
     if text is None and data.script_id:
-        text = _script_to_plain_text(
-            _get_script(db, project_id, data.script_id).content_blocks or []
-        )
+        script = _get_script(db, project_id, data.script_id)
+        text = _script_to_plain_text(script.content_blocks or [])
+        if script.source_chapter_id:
+            chapter = _get_chapter(db, project_id, script.source_chapter_id, allow_archived=True)
+            text = f"仅抽取本剧本涉及的资产。原章用于核实身份和外观。\n【剧本】\n{text}\n【原章】\n{chapter.content}"
     if text is None and data.chapter_id:
         text = _get_chapter(db, project_id, data.chapter_id).content
     if not text:
         raise NotFound("需提供 text、script_id 或 chapter_id")
     drafts = _strategy(db, project_id, strategy_name).extract_entities(text)
-    return [schemas.EntityDraftOut(type=d.type, name=d.name, summary=d.summary) for d in drafts]
+    return [schemas.EntityDraftOut(type=d.type, name=d.name, summary=d.summary, evidence=d.evidence) for d in drafts]
 
 
 def apply_entities(db: Session, ctx: ProjectContext, data: schemas.ApplyEntitiesIn) -> list:
+    from app.core.errors import AppError
+    from app.modules.asset.story_sources import resolve, scope_for
+
+    if data.script_id:
+        _get_script(db, ctx.project.id, data.script_id)
+    if data.chapter_id:
+        _get_chapter(db, ctx.project.id, data.chapter_id)
+    scope = scope_for(db, data.script_id, data.chapter_id)
     created = []
-    for e in data.entities:
-        a = asset_service.create(
-            db, ctx, asset_schemas.AssetIn(type=AssetType(e.type), name=e.name, summary=e.summary)
-        )
-        created.append(a)
+    first_issue = None
+    for index, e in enumerate(data.entities):
+        try:
+            with db.begin_nested():
+                try:
+                    kind = AssetType(e.type)
+                except ValueError as exc:
+                    raise Conflict("未识别的资产类型") from exc
+                a = resolve(
+                    db,
+                    ctx,
+                    kind,
+                    e.name,
+                    e.summary,
+                    source_type="script" if data.script_id else "chapter",
+                    source_id=data.script_id or data.chapter_id,
+                    scope=scope,
+                    chosen=e.asset_id,
+                    separate=e.separate,
+                    evidence=e.evidence,
+                )
+        except AppError as exc:
+            if first_issue is None:
+                first_issue = exc
+                exc.detail["index"] = index
+            continue
+        if a not in created:
+            created.append(a)
+    if first_issue:
+        if created:
+            # A suggested match may point to an asset created by a sibling in this request.
+            # Persist it and its source link before returning it for human confirmation.
+            db.commit()
+        first_issue.detail["saved_assets"] = len(created)
+        raise first_issue
     return created

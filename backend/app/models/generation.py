@@ -114,6 +114,7 @@ class GenerationJob(Base, TimestampMixin):
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     input_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
     routing_state: Mapped[dict] = mapped_column(JSONB, default=dict)
+    shot_input_key: Mapped[str | None] = mapped_column(String(64), index=True)
     estimated_cost: Mapped[float | None] = mapped_column(Numeric(14, 2))
     actual_cost: Mapped[float | None] = mapped_column(Numeric(14, 2))
     cost_raw: Mapped[dict | None] = mapped_column(JSONB)

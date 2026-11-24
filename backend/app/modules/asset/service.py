@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core import audit
 from app.core.deps import ProjectContext
-from app.core.errors import Locked, NotFound
+from app.core.errors import Conflict, Locked, NotFound
 from app.kernel.graph import GraphService
 from app.kernel.versioning import VersioningService
 from app.models.asset import Asset, AssetReferenceImage
@@ -21,6 +21,8 @@ ENTITY = "asset"
 
 
 def _snapshot(a: Asset) -> dict:
+    from sqlalchemy.orm import object_session
+    from app.modules.shot.inputs import appearance
     return {
         "name": a.name,
         "summary": a.summary,
@@ -28,6 +30,7 @@ def _snapshot(a: Asset) -> dict:
         "metadata": a.meta or {},
         "tags": list(a.tags or []),
         "representative_blob_hash": a.representative_blob_hash,
+        **appearance(object_session(a), a),
     }
 
 
@@ -66,8 +69,12 @@ def create(db: Session, ctx: ProjectContext, data: schemas.AssetIn) -> Asset:
 
 def update(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, data: schemas.AssetUpdate) -> Asset:
     a = _get(db, ctx.project.id, asset_id)
+    db.refresh(a, with_for_update=True)
     if a.status == VersionStatus.locked:
         raise Locked("资产已锁定,不可修改")
+    if data.expected_version_id and data.expected_version_id != a.current_version_id:
+        raise Conflict("资产已更新，请重新查看影响范围再保存")
+    previous = (a.name, a.summary, a.meta)
     if data.name is not None:
         a.name = data.name
     if data.summary is not None:
@@ -76,6 +83,11 @@ def update(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, data: schemas.
         a.meta = data.metadata
     if data.tags is not None:
         a.tags = data.tags
+    if previous != (a.name, a.summary, a.meta):
+        commit_version(db, ctx, a.id, "更新资产设定")
+        from app.modules.asset.story_sources import attach_pending
+
+        attach_pending(db, a, None)
     audit.record(db, action="asset.update", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type=ENTITY, target_id=a.id)
     db.flush()
@@ -196,12 +208,14 @@ def add_reference_image(
     role: str = "ref", note: str | None = None,
 ) -> AssetReferenceImage:
     a = _get(db, ctx.project.id, asset_id)
+    db.refresh(a, with_for_update=True)
     blob = cas.put_bytes(db, data, mime)
     ref = AssetReferenceImage(asset_id=a.id, blob_hash=blob.hash, role=role, note=note)
     db.add(ref)
     if a.representative_blob_hash is None:  # 首张设为代表图
         a.representative_blob_hash = blob.hash
     db.flush()
+    commit_version(db, ctx, a.id, "添加参考图")
     return ref
 
 
@@ -219,6 +233,8 @@ def list_reference_images(db: Session, project_id: uuid.UUID, asset_id: uuid.UUI
 # ── 版本 ──
 def commit_version(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, label: str | None) -> Version:
     a = _get(db, ctx.project.id, asset_id)
+    db.flush()
+    db.refresh(a, with_for_update=True)
     v = VersioningService(db).commit(
         project_id=ctx.project.id, entity_type=ENTITY, entity_id=a.id,
         content=_snapshot(a), created_by=ctx.user.id, label=label,
@@ -240,7 +256,8 @@ def rollback(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, version_id: 
     if a.status == VersionStatus.locked:
         raise Locked("资产已锁定,不可回滚")
     vs = VersioningService(db)
-    content = vs.content_of(version_id)
+    from app.modules.shot.inputs import pinned
+    content = pinned(db, ctx.project.id, a.id, version_id).content
     # 写回 Live 行
     a.name = content.get("name", a.name)
     a.summary = content.get("summary")
@@ -284,6 +301,7 @@ def impact(db: Session, project_id: uuid.UUID, asset_id: uuid.UUID) -> dict:
 # ── 视觉身份(一致性配置) ──
 def set_visual_identity(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, data) -> VisualIdentity:
     a = _get(db, ctx.project.id, asset_id)
+    db.refresh(a, with_for_update=True)
     vi = db.scalar(select(VisualIdentity).where(VisualIdentity.asset_id == a.id))
     if vi is None:
         vi = VisualIdentity(asset_id=a.id)
@@ -296,6 +314,7 @@ def set_visual_identity(db: Session, ctx: ProjectContext, asset_id: uuid.UUID, d
     audit.record(db, action="asset.visual_identity.set", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type=ENTITY, target_id=a.id, detail={"strategy": data.strategy})
     db.flush()
+    commit_version(db, ctx, a.id, "更新视觉身份")
     return vi
 
 

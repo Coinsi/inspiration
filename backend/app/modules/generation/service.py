@@ -335,7 +335,8 @@ def _provider_instance(db: Session, project_id: uuid.UUID, name: str, snapshot=N
 
 
 def _final_prompt(
-    db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID, override: str | None
+    db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID, override: str | None,
+    media_type="image", inputs=None,
 ) -> str:
     from app.modules.generation.jobs import validate_target
 
@@ -343,7 +344,7 @@ def _final_prompt(
     if override:
         return override
     if target_type == "shot":
-        return shot_service.compose_prompt(db, project_id, target_id).final_prompt
+        return shot_service.compose_prompt(db, project_id, target_id, media_type, inputs=inputs).final_prompt
     if target_type == "asset":
         # 资产概念图:名字 + 视觉身份提示词片段
         from app.models.asset import Asset
@@ -357,7 +358,7 @@ def _final_prompt(
         vi = db.scalar(select(VisualIdentity).where(VisualIdentity.asset_id == target_id))
         if vi is not None and vi.prompt_fragment_id:
             frag = db.get(PromptFragment, vi.prompt_fragment_id)
-            if frag:
+            if frag and frag.project_id == project_id and not frag.deleted_at:
                 parts.append(frag.text)
         return ", ".join(p for p in parts if p and p.strip())
     return ""
@@ -471,6 +472,59 @@ def _explicit_references(db, project_id, data, caps):
     return refs
 
 
+def _shot_inputs(db, project_id, target_type, target_id):
+    if target_type != "shot":
+        return []
+    from app.modules.shot.inputs import resolved
+
+    return resolved(db, shot_service.get(db, project_id, target_id))
+
+
+def _adopted_first_frame(db, project_id, target_type, target_id, data, caps, extra=()):
+    if (
+        target_type != "shot"
+        or data.request_type != "video"
+        or not data.use_references
+        or "first_frame" not in caps.features
+        or data.first_frame_id
+        or data.source_generation_id
+        or any(ref.kind == "image" for ref in extra)
+    ):
+        return data
+    shot = shot_service.get(db, project_id, target_id)
+    if not shot.selected_generation_id:
+        return data
+    frame = db.get(Generation, shot.selected_generation_id)
+    if (
+        frame
+        and frame.project_id == project_id
+        and frame.output_type == "image"
+        and frame.output_blob_hash
+    ):
+        return data.model_copy(update={"first_frame_id": frame.id})
+    return data
+
+
+def _references(db, project_id, target_type, target_id, data, caps, inputs, extra=()):
+    explicit = [*extra, *_explicit_references(db, project_id, data, caps)]
+    automatic = []
+    if data.use_references and "reference" in caps.features:
+        if target_type == "shot":
+            # Give each visible asset one representative before using spare slots.
+            hashes = [h for item in inputs for h in item["hashes"][:1] if h]
+            automatic = [ReferenceImage(blob_hash=h, role="ref") for h in dict.fromkeys(hashes)]
+        else:
+            automatic = _collect_references(db, project_id, target_type, target_id)
+    explicit_hashes = {r.blob_hash for r in explicit}
+    slots = max(0, caps.max_reference_images - sum(r.kind == "image" for r in explicit))
+    refs = [r for r in automatic if r.blob_hash not in explicit_hashes][:slots] + explicit
+    from app.adapters.contracts import reference_error
+
+    if problem := reference_error(refs, caps):
+        raise CapabilityUnsupported(problem)
+    return refs
+
+
 def estimate(
     db: Session,
     ctx: ProjectContext,
@@ -481,7 +535,8 @@ def estimate(
     # Serialize connection removal with new generation submissions.
     db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
     provider = _provider_instance(db, ctx.project.id, gen_in.provider, user_id=ctx.user.id)
-    prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
+    inputs = _shot_inputs(db, ctx.project.id, target_type, target_id)
+    prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override, gen_in.request_type, inputs)
     from app.modules.identity.preferences import guide
 
     prompt = guide(db, ctx.project.id, prompt, "generation")
@@ -489,13 +544,41 @@ def estimate(
 
     prompt, used_skills = compose_skills(db, ctx.project.id, gen_in.skills, prompt)
     caps = provider.capabilities()
-    refs = _explicit_references(db, ctx.project.id, gen_in, caps)
+    gen_in = _adopted_first_frame(db, ctx.project.id, target_type, target_id, gen_in, caps)
+    refs = _references(db, ctx.project.id, target_type, target_id, gen_in, caps, inputs)
     gen_in = _validated_input(gen_in, caps, refs)
     est = provider.estimate_cost(_build_request(prompt, gen_in, refs))
     return schemas.EstimateOut(points=est.points, detail=est.detail)
 
 
 # ── 提交生成 ──
+def _shot_request_key(ctx, shot_id, data, snapshot):
+    from app.modules.narrative.tool_tasks import fingerprint
+
+    # Route ordering is sampled for load balancing. Freeze the chosen plan on
+    # the original job, but compare the eligible models independently of order.
+    content = {
+        k: v
+        for k, v in snapshot.items()
+        if k not in {"reference_origin", "shot_dependencies", "routing"}
+    }
+    if route := snapshot.get("routing"):
+        content["routing"] = {
+            "model_id": route["model_id"],
+            "revision": route["revision"],
+            "profiles": sorted(
+                (
+                    (r["profile_id"], r["channel_revision"], r["model_profile"])
+                    for r in route["candidates"]
+                ),
+                key=lambda p: p[0],
+            ),
+        }
+    return fingerprint(
+        [ctx.project.id, ctx.user.id, shot_id, data.provider, data.variation_key, content]
+    )
+
+
 def submit(
     db: Session,
     ctx: ProjectContext,
@@ -510,6 +593,7 @@ def submit(
     execution_origin: dict | None = None,
     skill_snapshot: list | None = None,
     project_guidance: str | None = None,
+    reuse_shot: bool = False,
 ) -> GenerationJob:
     # Serialize connection removal with new generation submissions.
     db.scalar(select(Project).where(Project.id == ctx.project.id).with_for_update())
@@ -522,7 +606,8 @@ def submit(
             f"供应商 {gen_in.provider} 不支持 {gen_in.request_type.value}",
             {"modalities": list(caps.modalities)},
         )
-    prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override)
+    inputs = _shot_inputs(db, ctx.project.id, target_type, target_id)
+    prompt = _final_prompt(db, ctx.project.id, target_type, target_id, gen_in.prompt_override, gen_in.request_type, inputs)
     original_prompt = prompt
     from app.modules.identity.preferences import guide
 
@@ -539,19 +624,8 @@ def submit(
 
         prompt, used_skills = compose_documents(skill_snapshot, prompt)
 
-    # 收集参考图(资产生图):按供应商能力上限截断
-    refs: list[ReferenceImage] = []
-    if gen_in.use_references and "reference" in caps.features:
-        refs = _collect_references(db, ctx.project.id, target_type, target_id)
-        if caps.max_reference_images:
-            refs = refs[: caps.max_reference_images]
-    if extra_references:
-        refs.extend(extra_references)
-    refs.extend(_explicit_references(db, ctx.project.id, gen_in, caps))
-    from app.adapters.contracts import reference_error
-
-    if problem := reference_error(refs, caps):
-        raise CapabilityUnsupported(problem)
+    gen_in = _adopted_first_frame(db, ctx.project.id, target_type, target_id, gen_in, caps, extra_references or [])
+    refs = _references(db, ctx.project.id, target_type, target_id, gen_in, caps, inputs, extra_references or [])
     gen_in = _validated_input(gen_in, caps, refs)
     req = _build_request(prompt, gen_in, refs)
     req.mask = mask
@@ -559,8 +633,6 @@ def submit(
 
     from app.modules.generation.jobs import reserve_check
     from app.modules.media.generation_reference import public_base
-
-    reserve_check(db, ctx.project.id, est.points, user_id=ctx.user.id)
 
     job = GenerationJob(
         project_id=ctx.project.id,
@@ -627,6 +699,30 @@ def submit(
             ),
         },
     )
+    if target_type == "shot":
+        from app.modules.shot.inputs import dependencies
+
+        shot = shot_service.get(db, ctx.project.id, target_id)
+        job.input_snapshot["shot_dependencies"] = dependencies(
+            inputs, refs, not (gen_in.prompt_override or shot.prompt_override)
+        )
+        job.input_snapshot["scene_id"] = str(shot.scene_id)
+        if not (gen_in.prompt_override or shot.prompt_override) and (shot.storyboard or {}).get(
+            "inherit_scene", True
+        ):
+            job.input_snapshot["scene_visual_source"] = str(shot.scene_id)
+    if reuse_shot:
+        key = _shot_request_key(ctx, target_id, gen_in, job.input_snapshot)
+        previous = db.scalar(
+            select(GenerationJob)
+            .where(GenerationJob.shot_input_key == key)
+            .order_by(GenerationJob.created_at.desc(), GenerationJob.id)
+            .limit(1)
+        )
+        if previous:
+            return previous
+        job.shot_input_key = key
+    reserve_check(db, ctx.project.id, est.points, user_id=ctx.user.id)
     db.add(job)
     db.flush()
     from app.modules.generation.billing import prepare as prepare_billing

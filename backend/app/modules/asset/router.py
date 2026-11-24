@@ -157,6 +157,18 @@ def asset_impact(asset_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_
     return service.impact(db, ctx.project.id, asset_id)
 
 
+@router.post("/assets/{asset_id}/impact-preview")
+def preview_impact(
+    asset_id: uuid.UUID,
+    data: schemas.AssetUpdate | None = None,
+    ctx: ProjectContext = Depends(get_project_context),
+    db: Session = Depends(get_db, scope="function"),
+):
+    from app.modules.shot.impact import preview
+
+    return preview(db, service.get(db, ctx.project.id, asset_id), data)
+
+
 # ── 视觉身份(一致性) ──
 @router.put("/assets/{asset_id}/visual-identity", response_model=schemas.VisualIdentityOut)
 def set_visual_identity(

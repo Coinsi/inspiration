@@ -3,6 +3,12 @@ import { ArrowLeft, Lock, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AssistPanel from "@/components/AssistPanel";
+import {
+  AssetVisualFields,
+  ImpactDialog,
+  type ImpactResult,
+  type VisualMetadata,
+} from "@/components/AssetContinuity";
 import GenerationPanel from "@/components/GenerationPanel";
 import { ZoomableImage } from "@/components/ImageViewer";
 import { Avatar } from "@/components/ui/avatar";
@@ -44,12 +50,18 @@ export default function AssetDetail() {
 
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
+  const [metadata, setMetadata] = useState<VisualMetadata>({});
+  const [impact, setImpact] = useState<{
+    result: ImpactResult;
+    editing: boolean;
+  } | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   useEffect(() => {
     if (asset) {
       setName(asset.name);
       setSummary(asset.summary ?? "");
+      setMetadata(asset.metadata || {});
       setTags(asset.tags ?? []);
     }
   }, [asset]);
@@ -62,8 +74,32 @@ export default function AssetDetail() {
   };
 
   const save = useMutation({
-    mutationFn: () => api.patch(`${base}/assets/${assetId}`, { name, summary }),
-    onSuccess: () => { invalidate(); toast.push(tr("toast.saved"), "success"); },
+    mutationFn: () =>
+      api.patch(`${base}/assets/${assetId}`, {
+        name,
+        summary,
+        metadata,
+        expected_version_id: asset?.current_version_id,
+      }),
+    onSuccess: () => {
+      setImpact(null);
+      invalidate();
+      toast.push(tr("toast.saved"), "success");
+    },
+    onError: (e) => toast.push(e.message, "error"),
+  });
+  const previewImpact = useMutation({
+    mutationFn: (editing: boolean) =>
+      api.post<ImpactResult>(
+        `${base}/assets/${assetId}/impact-preview`,
+        editing ? { name, summary, metadata } : undefined,
+      ),
+    onSuccess: (result, editing) => {
+      if (editing && !result.shots.length && !result.outputs.length)
+        save.mutate();
+      else setImpact({ result, editing });
+    },
+    onError: (e) => toast.push(e.message, "error"),
   });
   const saveTags = useMutation({
     mutationFn: (next: string[]) => api.patch(`${base}/assets/${assetId}`, { tags: next }),
@@ -185,9 +221,43 @@ export default function AssetDetail() {
                   )}
                 </div>
               </div>
+              <AssetVisualFields
+                images={refImages || []}
+                type={asset.type}
+                value={metadata}
+                onChange={setMetadata}
+                disabled={locked}
+              />
+              {impact && (
+                <ImpactDialog
+                  base={base}
+                  result={impact.result}
+                  saving={save.isPending}
+                  onSave={impact.editing ? () => save.mutate() : undefined}
+                  onClose={() => setImpact(null)}
+                />
+              )}
               <div className="flex flex-wrap gap-2 pt-1">
-                <Button onClick={() => save.mutate()} disabled={locked}>{tr("detail.save")}</Button>
-                <Button variant="outline" onClick={() => commit.mutate()} disabled={locked}>{tr("detail.commit")}</Button>
+                <Button
+                  onClick={() => previewImpact.mutate(true)}
+                  disabled={locked || previewImpact.isPending || save.isPending}
+                >
+                  {tr("detail.save")}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={previewImpact.isPending}
+                  onClick={() => previewImpact.mutate(false)}
+                >
+                  查看影响范围
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => commit.mutate()}
+                  disabled={locked}
+                >
+                  {tr("detail.commit")}
+                </Button>
                 <Button
                   variant="outline"
                   disabled={locked}

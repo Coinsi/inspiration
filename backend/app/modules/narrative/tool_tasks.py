@@ -143,6 +143,31 @@ def submit(
             raise Conflict("同一提交标识不能用于不同内容")
         return previous
     active = latest(db, ctx.project.id, data.operation, data.target_id)
+    if (
+        active
+        and active.status == "failed"
+        and active.source_revision == revision
+        and data.operation in {"script_decompose", "chapter_decompose"}
+        and (active.result or {}).get("output", {}).get("scenes")
+    ):
+        active.status, active.error = "queued", None
+        return active
+    incomplete_shots = (
+        active
+        and data.operation == "scene_breakdown"
+        and any(
+            (row.get("storyboard") or {}).get("breakdown_error")
+            for row in (active.result or {}).get("output", [])
+        )
+    )
+    if (
+        active
+        and not incomplete_shots
+        and data.operation != "assist_message"
+        and active.source_revision == revision
+        and active.status in {"queued", "running", "succeeded", "applied"}
+    ):
+        return active
     if active and active.status in {"queued", "running"}:
         raise Conflict("该对象已有任务执行中，请等待完成后再提交")
     task = CreativeToolTask(
@@ -162,21 +187,44 @@ def submit(
 def execute(db, ctx, task):
     if source(db, ctx, task.operation, task.target_id) != task.source_revision:
         raise Conflict("内容已变化，请根据最新内容重新发起")
-    if task.operation == "script_decompose":
-        result = service.decompose_script(db, ctx.project.id, task.target_id, None)
+    if task.operation in {"script_decompose", "chapter_decompose"}:
+
+        def checkpoint(result):
+            task.result = {**(task.result or {}), "output": result.model_dump(mode="json")}
+            db.commit()
+            db.refresh(task, with_for_update=True)
+            if task.status != "running":
+                raise Conflict("场次任务状态已更新")
+
+        previous = (task.result or {}).get("output")
+        decompose = (
+            service.decompose_script
+            if task.operation == "script_decompose"
+            else service.decompose_chapter
+        )
+        result = decompose(db, ctx.project.id, task.target_id, None, previous=previous, checkpoint=checkpoint)
     elif task.operation == "script_entities":
         result = service.extract_entities(
             db, ctx.project.id, schemas.ExtractEntitiesIn(script_id=task.target_id), None
         )
-    elif task.operation == "chapter_decompose":
-        result = service.decompose_chapter(db, ctx.project.id, task.target_id, None)
     elif task.operation == "scene_breakdown":
         from app.modules.shot.service import breakdown_scene
         from app.modules.shot.schemas import ShotOut
 
         if source(db, ctx, task.operation, task.target_id, lock=True) != task.source_revision:
             raise Conflict("场景已修改，请重新生成分镜")
-        result = [ShotOut.model_validate(item) for item in breakdown_scene(db, ctx, task.target_id)]
+
+        def save_shot():
+            db.commit()
+            db.refresh(task, with_for_update=True)
+            if (
+                task.status != "running"
+                or source(db, ctx, task.operation, task.target_id, lock=True)
+                != task.source_revision
+            ):
+                raise Conflict("场景已变化，已保留完成的镜头")
+
+        result = [ShotOut.model_validate(item) for item in breakdown_scene(db, ctx, task.target_id, checkpoint=save_shot)]
     else:
         from app.modules.assist import service as assist, schemas as assist_schemas
 
@@ -189,8 +237,33 @@ def execute(db, ctx, task):
     return receipt
 
 
+@router.post("/{task_id}/retry-scenes", status_code=202)
+def retry_scenes(
+    task_id: uuid.UUID,
+    ctx: ProjectContext = Depends(get_project_context),
+    db=Depends(get_db, scope="function"),
+):
+    task = db.scalar(
+        select(CreativeToolTask)
+        .where(CreativeToolTask.id == task_id, CreativeToolTask.project_id == ctx.project.id)
+        .with_for_update()
+    )
+    if not task or task.operation not in {"script_decompose", "chapter_decompose"}:
+        raise NotFound("找不到这次拆镜任务")
+    if source(db, ctx, task.operation, task.target_id) != task.source_revision:
+        raise Conflict("原文已修改，请从最新内容重新拆解")
+    if task.status in {"queued", "running"}:
+        return task
+    scenes = (task.result or {}).get("output", {}).get("scenes", [])
+    if not any(row.get("error") for row in scenes):
+        return task
+    task.status, task.error = "queued", None
+    return task
+
+
 class Adopt(BaseModel):
     selected: list[int] | None = None
+    matches: dict[int, uuid.UUID | None] = Field(default_factory=dict)
 
 
 @router.post("/{task_id}/apply")
@@ -223,10 +296,24 @@ def apply(
         selected = data.selected if data.selected is not None else list(range(len(output)))
         if len(set(selected)) != len(selected) or any(i < 0 or i >= len(output) for i in selected):
             raise Conflict("选择的条目无效")
-        service.apply_entities(
-            db, ctx, schemas.ApplyEntitiesIn(entities=[output[i] for i in selected])
-        )
-    task.status = "applied"
+        entities = []
+        for i in selected:
+            item = dict(output[i])
+            if i in data.matches:
+                item.update(asset_id=data.matches[i], separate=data.matches[i] is None)
+            entities.append(item)
+        try:
+            service.apply_entities(
+                db, ctx, schemas.ApplyEntitiesIn(script_id=task.target_id, entities=entities)
+            )
+        except AppError as exc:
+            if "index" in exc.detail:
+                exc.detail["index"] = selected[exc.detail["index"]]
+            raise
+    if task.operation != "script_decompose" or not any(
+        row.get("error") for row in output["scenes"]
+    ):
+        task.status = "applied"
     return {"applied": True}
 
 

@@ -34,6 +34,30 @@ class Asset(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (Index("ix_asset_project_type", "project_id", "type"),)
 
 
+class AssetStorySource(Base, TimestampMixin):
+    __tablename__ = "asset_story_source"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("asset.id"), index=True)
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    source_type: Mapped[str] = mapped_column(String(16))
+    source_id: Mapped[uuid.UUID] = mapped_column(UUID)
+    source_key: Mapped[str] = mapped_column(String(300))
+    source_name: Mapped[str] = mapped_column(String(255))
+    evidence: Mapped[str] = mapped_column(Text, default="")
+
+    __table_args__ = (
+        Index(
+            "uq_asset_story_source",
+            "project_id",
+            "source_type",
+            "source_id",
+            "source_key",
+            unique=True,
+        ),
+    )
+
+
 class AssetReferenceImage(Base, TimestampMixin):
     __tablename__ = "asset_reference_image"
 

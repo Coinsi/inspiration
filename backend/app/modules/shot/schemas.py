@@ -1,5 +1,6 @@
 """shot DTO。"""
 import uuid
+from typing import Literal
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +38,11 @@ class ShotUpdate(BaseModel):
     storyboard: dict | None = None  # 传入则按 key 合并到现有分镜规格
 
 
+class SceneVisuals(BaseModel):
+    brief: str = Field(max_length=4000)
+    previous: str = Field(max_length=4000)
+
+
 class ShotCreate(BaseModel):
     title: str | None = None
     description: str = ""
@@ -46,11 +52,21 @@ class ReorderIn(BaseModel):
     shot_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
+class AssetUsage(BaseModel):
+    aspects: list[Literal["face", "wardrobe", "layout", "light", "appearance"]] = Field(
+        default_factory=list
+    )
+    look: str = Field(default="", max_length=120)
+    evidence: str = Field(default="", max_length=500)
+
+
 class AssetRefIn(BaseModel):
+    resolves_subject: str | None = Field(default=None, max_length=255)
     asset_id: uuid.UUID
     role: str = "character"
     ref_mode: RefMode = RefMode.floating
     pinned_version_id: uuid.UUID | None = None
+    usage: AssetUsage | None = None
 
 
 class SetAssetRefsIn(BaseModel):
@@ -65,6 +81,7 @@ class AssetRefOut(BaseModel):
     ref_mode: RefMode
     pinned_version_id: uuid.UUID | None
     ordinal: int
+    usage: AssetUsage = Field(default_factory=AssetUsage)
 
 
 class TransitionIn(BaseModel):

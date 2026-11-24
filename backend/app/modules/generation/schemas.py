@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.enums import JobStatus, RequestType
 
 
+from app.modules.skill.schemas import SkillUse
+
+
 class ProviderConfigIn(BaseModel):
     provider_name: str
     kind: str = "generation"
@@ -57,10 +60,8 @@ class QuotaOverview(BaseModel):
     member: QuotaOut | None
 
 
-from app.modules.skill.schemas import SkillUse
-
-
 class GenerateIn(BaseModel):
+    variation_key: uuid.UUID | None = None
     skills: list[SkillUse] = Field(default_factory=list, max_length=4)
     provider: str = "mock"
     request_type: RequestType = RequestType.image

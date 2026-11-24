@@ -279,7 +279,7 @@ function NarrativeWorkspace() {
       task.status === "done" &&
       task.chapterId === chapter?.id &&
       task.result &&
-      !dec
+      task.result !== dec
     ) {
       setDec(task.result);
     }
@@ -849,6 +849,7 @@ function NarrativeWorkspace() {
                             className="rounded-md border border-border p-2.5"
                           >
                             <div className="text-sm font-medium">{s.title}</div>
+                            {s.error && <p className="text-sm text-danger">{s.error}</p>}
                             {s.shots.length > 0 && (
                               <div className="mt-1.5 flex flex-wrap gap-1">
                                 {s.shots.map((sh, j) => (
@@ -906,7 +907,7 @@ function NarrativeWorkspace() {
                         </div>
                         <Button
                           className="w-full"
-                          disabled={!scriptId || applyScenes.isPending}
+                          disabled={!scriptId || applyScenes.isPending || !dec.scenes.some(s => !s.error)}
                           onClick={async () => {
                             if (
                               await confirm({

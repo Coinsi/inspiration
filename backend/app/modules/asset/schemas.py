@@ -16,6 +16,7 @@ class AssetIn(BaseModel):
 
 
 class AssetUpdate(BaseModel):
+    expected_version_id: uuid.UUID | None = None
     name: str | None = None
     summary: str | None = None
     metadata: dict | None = None

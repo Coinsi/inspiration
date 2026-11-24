@@ -7,6 +7,16 @@ import pytest
 from app.core import health
 
 
+def test_shot_batches_report_dispatcher_liveness(monkeypatch):
+    monkeypatch.setattr(health.settings, "celery_eager", False)
+    monkeypatch.setattr(health, "background_workers", {"shot_batches": lambda: True})
+    assert health.background_status()["shot_batches"] == "ok"
+    monkeypatch.setattr(health, "background_workers", {})
+    assert health.background_status()["shot_batches"] == "unavailable"
+    monkeypatch.setattr(health.settings, "celery_eager", True)
+    assert health.background_status()["shot_batches"] == "disabled"
+
+
 def test_disabled_worker_is_not_reported_as_broken(monkeypatch):
     monkeypatch.setattr(health.settings, "library_worker_enabled", False)
     monkeypatch.setattr(health, "background_workers", {})

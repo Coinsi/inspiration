@@ -66,9 +66,8 @@ class OpenAIVideoProvider(GenerationProvider):
                 if method == "POST" and response.status_code in (401, 403, 404, 429):
                     from app.modules.generation.model_routing import SubmissionRejected
 
-                    raise SubmissionRejected(
-                        f"视频服务拒绝提交（HTTP {response.status_code}），未创建任务{suffix}"
-                    )
+                    raise SubmissionRejected.for_status(
+                        f"视频服务拒绝提交（HTTP {response.status_code}），未创建任务{suffix}", response.status_code)
                 raise ProviderError(f"视频服务请求失败（HTTP {response.status_code}）{suffix}")
             return response.json()
         except ProviderError:

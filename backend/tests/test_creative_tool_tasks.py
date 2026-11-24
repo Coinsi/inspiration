@@ -44,8 +44,8 @@ def test_tool_dedup_and_atomic_adoption(studio, monkeypatch):
     assert (
         client.post(
             root + "/creative-tool-tasks", json={**payload, "request_key": str(uuid.uuid4())}
-        ).status_code
-        == 409
+        ).json()["id"]
+        == task["id"]
     )
     assert tool_tasks.run_once()
     restored = client.get(

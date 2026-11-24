@@ -28,6 +28,19 @@ def resumable_profile(profile):
 class SubmissionRejected(ProviderError):
     """Only raised by adapters for an explicit rejection before any upstream job exists."""
 
+    @classmethod
+    def for_status(cls, message, status):
+        kind = {
+            400: "invalid_parameters",
+            401: "provider_configuration",
+            402: "provider_configuration",
+            403: "provider_configuration",
+            404: "provider_configuration",
+            422: "invalid_parameters",
+            429: "provider_capacity",
+        }.get(status)
+        return cls(message, {"kind": kind} if kind else None)
+
 
 def retry_allowed(job):
     if (job.input_snapshot or {}).get("harness_origin"):
@@ -38,6 +51,8 @@ def retry_allowed(job):
     if state.get("phase") in ("dispatching", "submission_unknown"):
         return False
     if state.get("phase") in ("accepted", "generated"):
+        if job.provider == "mock":
+            return bool(state.get("external_job_id"))
         if job.provider.startswith("personal_"):
             return bool(
                 resumable_profile(job.input_snapshot.get("model_profile", {}))
@@ -172,6 +187,7 @@ class RoutedProvider(GenerationProvider):
         if not self.row.enabled:
             raise CapabilityUnsupported("创作模型已停用，请重新选择模型")
         last_error = "没有可继续提交的线路，请检查渠道状态或参数"
+        rejections = []
         for route in self.plan["candidates"]:
             try:
                 self.active = self._instance(route)
@@ -187,6 +203,7 @@ class RoutedProvider(GenerationProvider):
             except SubmissionRejected as exc:
                 self._record("rejected", route, exc.message)
                 last_error = exc.message
+                rejections.append(exc)
                 continue
             except Exception:
                 self._record(
@@ -197,6 +214,13 @@ class RoutedProvider(GenerationProvider):
                 ) from None
             self._record("accepted", route, "上游已接受，后续只查询此任务", handle.external_job_id)
             return handle
+        if rejections:
+            details = (
+                rejections[-1].detail
+                if all(e.detail == rejections[-1].detail for e in rejections)
+                else None
+            )
+            raise SubmissionRejected(last_error, details)
         raise ProviderError(last_error)
 
     def poll(self, handle):

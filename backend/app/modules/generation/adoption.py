@@ -110,6 +110,8 @@ def select_output(db, ctx, g, expected=None, check_expected=False):
         target.selected_generation_id = g.id
     else:
         target.representative_blob_hash = g.output_blob_hash
+        from app.modules.asset.service import commit_version
+        commit_version(db, ctx, target.id, "采用新的代表图")
     for variant in db.scalars(
         select(Generation).where(
             Generation.project_id == ctx.project.id,

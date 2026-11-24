@@ -12,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import and_, func, or_, select
 
-from app.adapters.contracts import GenerationRequest, ReferenceImage
+from app.adapters.contracts import GenerationRequest, JobHandle, ReferenceImage
 from app.core import audit
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -384,6 +384,10 @@ def cancel(db, ctx, job_id):
 
 
 def retry(db, ctx, job_id, *, defer_dispatch=False):
+    from app.models.identity import Project
+
+    # The batch dispatcher and manual retry must acquire the same locks in the same order.
+    db.scalar(select(Project.id).where(Project.id == ctx.project.id).with_for_update())
     job = db.scalar(
         select(GenerationJob)
         .where(GenerationJob.id == job_id, GenerationJob.project_id == ctx.project.id)
@@ -403,14 +407,13 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
 
     if not retry_allowed(job):
         raise Conflict("上游提交状态不确定，禁止自动重发；请核对上游记录后再创建新的生成任务")
-    existing = db.scalar(
-        select(GenerationJob).where(
-            GenerationJob.project_id == ctx.project.id,
-            GenerationJob.input_snapshot["retry_of"].astext == str(job.id),
-            GenerationJob.status.in_((*ACTIVE, "succeeded")),
-        )
+    children = select(GenerationJob.id).where(
+        GenerationJob.project_id == ctx.project.id,
+        GenerationJob.input_snapshot["retry_of"].astext == str(job.id),
     )
-    if existing:
+    if not job.shot_input_key:
+        children = children.where(GenerationJob.status.in_((*ACTIVE, "succeeded")))
+    if db.scalar(children.limit(1)):
         raise Conflict("该任务已经重试，请查看新任务")
     validate_target(db, ctx.project.id, job.target_type, job.target_id)
     reserve_check(db, ctx.project.id, float(job.estimated_cost or 0), user_id=ctx.user.id)
@@ -448,17 +451,14 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
         )
         if snapshot.get("personal_service"):
             route = {"model_profile": snapshot.get("model_profile", {})}
-        if (
-            not route
-            or not resumable_profile(route["model_profile"])
-            or not resume.get("external_job_id")
-        ):
+        can_receive = job.provider == "mock" or (route and resumable_profile(route["model_profile"]))
+        if not can_receive or not resume.get("external_job_id"):
             raise Conflict(
                 "上游可能已经生成结果，此协议暂不支持恢复下载；请核对上游结果，不会重新生成"
             )
         routing_state = {
             "resume": {
-                "provider_name": resume["provider_name"],
+                "provider_name": resume.get("provider_name", job.provider),
                 "external_job_id": resume["external_job_id"],
             }
         }
@@ -477,6 +477,7 @@ def retry(db, ctx, job_id, *, defer_dispatch=False):
         params=copy.deepcopy(job.params),
         input_snapshot=snapshot,
         routing_state=routing_state,
+        shot_input_key=job.shot_input_key,
     )
     db.add(new)
     db.flush()
@@ -708,11 +709,23 @@ def execute(db, job_id):
             if job.status == "canceled":
                 raise media_engine.Canceled()
             billing.dispatching(db, job)
+            if job.shot_input_key and not hasattr(provider, "bind_job"):
+                job.routing_state = {**(job.routing_state or {}), "phase": "dispatching"}
             if delivery.policy(job) == "remote_receipt" and submission_phase != "resume":
                 delivery.remote_phase(db, job_id, "dispatching")
             delivery.fence(db, job_id)
             db.commit()
-            handle = provider.submit(req)
+            if provider_name == "mock" and (resume := (job.routing_state or {}).get("resume")):
+                handle = JobHandle(
+                    external_job_id=resume["external_job_id"],
+                    raw={
+                        "count": req.count,
+                        "type": req.request_type,
+                        "params": req.provider_params,
+                    },
+                )
+            else:
+                handle = provider.submit(req)
             if getattr(provider, "actual_route", None):
                 snap["model_profile"] = provider.actual_route["model_profile"]
             # Do not overwrite a concurrent cancellation while recording the remote handle.
@@ -726,6 +739,8 @@ def execute(db, job_id):
             if delivery.policy(job) == "remote_receipt":
                 delivery.remote_phase(db, job_id, "accepted", handle.external_job_id)
             job.external_job_id = handle.external_job_id
+            if job.shot_input_key and not hasattr(provider, "bind_job"):
+                job.routing_state = {**(job.routing_state or {}), "phase": "accepted", "external_job_id": handle.external_job_id}
             billing.accepted(job)
             db.commit()
             result = None
@@ -904,6 +919,8 @@ def execute(db, job_id):
                             else {}
                         ),
                         "operation": operation,
+                        **({"shot_dependencies": snap["shot_dependencies"]} if "shot_dependencies" in snap else {}),
+                        **({"scene_visual_source": snap["scene_visual_source"]} if snap.get("scene_visual_source") else {}),
                         **(
                             {
                                 "engineering_plan": {
@@ -976,6 +993,14 @@ def execute(db, job_id):
             from app.modules.generation.model_routing import SubmissionRejected
 
             rejected = isinstance(exc, SubmissionRejected)
+            if (
+                rejected
+                and job.shot_input_key
+                and (job.routing_state or {}).get("phase") == "dispatching"
+            ):
+                job.routing_state = {**job.routing_state, "phase": "rejected"}
+            if rejected and exc.detail.get("kind"):
+                job.routing_state = {**(job.routing_state or {}), "failure": {"kind": exc.detail["kind"]}}
             if job.status == "canceled":
                 # A definite rejection may arrive after the user canceled during submit.
                 if rejected or (job.routing_state or {}).get("phase") in ("rejected", "skipped"):

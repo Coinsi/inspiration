@@ -219,7 +219,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "sb.aiBreakdown": "AI 拆分镜",
     "sb.breakingDown": "拆分镜中…",
     "sb.aiBreakdownConfirm":
-      "AI 将基于本场景剧情(及来源章节)重新拆分镜,并清空该场景现有的 {n} 个镜头(可在镜头看板回收/不影响别处)。继续?",
+        "根据本场剧情与来源章节制作分镜。已有的 {n} 个镜头将保留，只补全缺少的画面描述。",
     "sb.breakdownDone": "已生成 {n} 个镜头",
     "sb.breakingDownBanner":
       "AI 正在拆分镜…… 已用时 {n}s(通常 10–40 秒,完成后镜头会自动出现)",
@@ -704,7 +704,7 @@ const DICT: Record<Lang, Record<string, string>> = {
     "sb.aiBreakdown": "AI breakdown",
     "sb.breakingDown": "Breaking down…",
     "sb.aiBreakdownConfirm":
-      "AI will re-break this scene (using its source chapter) into shots, replacing the {n} existing shots in this scene. Continue?",
+        "Create a sequence from this scene and its source chapter. Keep the {n} existing shots and fill in missing frame descriptions.",
     "sb.breakdownDone": "Generated {n} shots",
     "sb.breakingDownBanner":
       "AI is breaking down the scene… {n}s elapsed (usually 10–40s; shots appear when done)",

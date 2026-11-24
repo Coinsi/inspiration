@@ -151,7 +151,7 @@ class LiteLLMMediaProvider(GenerationProvider):
             if getattr(exc, "status_code", None) in (401, 403, 404, 429):
                 from app.modules.generation.model_routing import SubmissionRejected
 
-                raise SubmissionRejected(failure(exc, "生成服务拒绝提交").message) from None
+                raise SubmissionRejected.for_status(failure(exc, "生成服务拒绝提交").message, exc.status_code) from None
             raise failure(exc, "生成提交") from None
 
     def poll(self, handle):

@@ -1,3 +1,8 @@
+import {
+  StoryAssetMatch,
+  assetMatch,
+  type AssetMatch,
+} from "@/components/StoryAssetMatch";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +19,7 @@ import {
   Layers3,
   SlidersHorizontal,
   ImagePlus,
+  Link2,
   Loader2,
   Pencil,
   Plus,
@@ -102,6 +108,11 @@ function StoryBibleWorkspace() {
   });
   const job = latest.data,
     running = job?.status === "running";
+  const retryExtract = useMutation({
+    mutationFn: () => api.post(`${base}/setting-extractions/${job!.id}/retry`),
+    onSuccess: () => latest.refetch(),
+    onError: (e) => toast.push(e.message, "error"),
+  });
   useEffect(() => {
     void qc.invalidateQueries({ queryKey: ["settings", projectId] });
   }, [job?.done_chapters, job?.status, qc, projectId]);
@@ -134,13 +145,30 @@ function StoryBibleWorkspace() {
     onSuccess: invalidate,
     onError: (e) => toast.push(e.message, "error"),
   });
+  const [matching, setMatching] = useState<{
+    id: string;
+    detail: AssetMatch;
+  } | null>(null);
   const toAsset = useMutation({
-    mutationFn: (id: string) => api.post(`${base}/settings/${id}/to-asset`),
+    mutationFn: ({ id, choice }: { id: string; choice?: string | null }) => {
+      const query =
+        choice === undefined
+          ? ""
+          : choice === null
+            ? "?separate=true"
+            : "?asset_id=" + choice;
+      return api.post(base + "/settings/" + id + "/to-asset" + query);
+    },
     onSuccess: () => {
-      toast.push(tr("bible.assetCreated"), "success");
+      setMatching(null);
+      toast.push("已关联到资产库", "success");
       void qc.invalidateQueries({ queryKey: ["assets", projectId] });
     },
-    onError: (e) => toast.push(e.message, "error"),
+    onError: (e, { id }) => {
+      const detail = assetMatch(e);
+      if (detail) setMatching({ id, detail });
+      else toast.push(e.message, "error");
+    },
   });
   const categories = useMemo(
     () => [
@@ -343,17 +371,46 @@ function StoryBibleWorkspace() {
       )}
       {job && (
         <div className="story-extraction-status" role="status">
+          {job.status !== "running" &&
+            job.status !== "succeeded" &&
+            !!job.chapter_progress?.requested?.length &&
+            canEdit && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={retryExtract.isPending}
+                onClick={() => retryExtract.mutate()}
+              >
+                仅重试未完成章节
+              </Button>
+            )}
+          {!!Object.keys(job.chapter_progress?.failed || {}).length && (
+            <details>
+              <summary>查看失败章节</summary>
+              {Object.entries(job.chapter_progress!.failed!).map(
+                ([n, reason]) => (
+                  <p key={n}>
+                    第 {n} 章 · {reason}
+                  </p>
+                ),
+              )}
+            </details>
+          )}
           {running && <Loader2 size={16} className="animate-spin" />}
           <span>
             {running
-              ? "正在提取"
+              ? job.chapter_progress?.stop_requested
+                ? "正在保存本批结果后停止"
+                : "正在提取"
               : job.status === "done" || job.status === "succeeded"
                 ? "提取完成"
-                : job.status === "failed"
-                  ? "提取失败"
-                  : job.status === "cancelled"
-                    ? "已取消提取"
-                    : job.status}{" "}
+                : job.status === "partial"
+                  ? "部分章节已完成"
+                  : job.status === "failed"
+                    ? "提取失败"
+                    : job.status === "cancelled"
+                      ? "已取消提取"
+                      : job.status}{" "}
             · {job.done_chapters} / {job.total_chapters} 章
           </span>
           {job.error && <span className="text-danger">{job.error}</span>}
@@ -361,7 +418,9 @@ function StoryBibleWorkspace() {
             <Button
               size="sm"
               variant="outline"
-              disabled={cancelExtract.isPending}
+              disabled={
+                cancelExtract.isPending || job.chapter_progress?.stop_requested
+              }
               onClick={() => cancelExtract.mutate()}
             >
               停止提取
@@ -475,6 +534,22 @@ function StoryBibleWorkspace() {
                       {expanded.includes(s.id) ? "收起正文" : "阅读全文"}
                     </button>
                   )}
+                  {expanded.includes(s.id) &&
+                    s.source_chapters?.map((n) => {
+                      const note = s.source_notes?.[n];
+                      return (
+                        note &&
+                        typeof note === "object" &&
+                        note.quote && (
+                          <blockquote
+                            key={n}
+                            className="my-2 border-l-2 pl-3 text-sm"
+                          >
+                            第 {n} 章原文 · {note.quote}
+                          </blockquote>
+                        )
+                      );
+                    })}
                   {s.source_chapters?.length > 0 && (
                     <p className="story-setting-source">
                       {tr("bible.sourceCh")}{" "}
@@ -489,9 +564,29 @@ function StoryBibleWorkspace() {
                       {canAsset && TO_ASSET_CATEGORIES.has(s.category) && (
                         <button
                           disabled={toAsset.isPending}
+                          title="关联已有资产"
+                          aria-label={`为${s.name}选择已有资产`}
+                          onClick={() =>
+                            setMatching({
+                              id: s.id,
+                              detail: {
+                                name: s.name,
+                                kind:
+                                  s.category === "item" ? "prop" : s.category,
+                                candidates: [],
+                              },
+                            })
+                          }
+                        >
+                          <Link2 size={15} />
+                        </button>
+                      )}
+                      {canAsset && TO_ASSET_CATEGORIES.has(s.category) && (
+                        <button
+                          disabled={toAsset.isPending}
                           title={tr("bible.toAsset")}
                           aria-label={`转为资产：${s.name}`}
-                          onClick={() => toAsset.mutate(s.id)}
+                          onClick={() => toAsset.mutate({ id: s.id })}
                         >
                           <ImagePlus size={15} />
                         </button>
@@ -534,6 +629,15 @@ function StoryBibleWorkspace() {
           )}
         </section>
       </div>
+      {matching && (
+        <StoryAssetMatch
+          base={base}
+          match={matching.detail}
+          busy={toAsset.isPending}
+          close={() => setMatching(null)}
+          choose={(choice) => toAsset.mutate({ id: matching.id, choice })}
+        />
+      )}
       {editor && (
         <SettingEditor
           key={editor === "new" ? "new" : editor.id}

@@ -8,18 +8,17 @@
 
 import threading
 import uuid
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core import audit
 from app.core.deps import ProjectContext
-from app.core.errors import Conflict, NotFound
+from app.core.errors import AppError, Conflict, NotFound
 from app.models.enums import AssetType
 from app.models.narrative import Chapter, Novel
 from app.models.setting import Setting, SettingExtraction
-from app.modules.asset import schemas as asset_schemas
-from app.modules.asset import service as asset_service
 from app.modules.narrative.service import _strategy
 from app.modules.setting import schemas
 
@@ -85,6 +84,7 @@ def update_setting(
         s.name = data.name.strip()
     if data.content is not None:
         s.content = data.content
+        s.source_notes = {**(s.source_notes or {}), "edited": True}
     db.flush()
     return s
 
@@ -95,14 +95,25 @@ def delete_setting(db: Session, ctx: ProjectContext, setting_id: uuid.UUID) -> N
     db.flush()
 
 
-def to_asset(db: Session, ctx: ProjectContext, setting_id: uuid.UUID):
+def to_asset(db: Session, ctx: ProjectContext, setting_id: uuid.UUID, asset_id=None, separate=False):
     """人物/地点/物品类设定 → 落为资产(接通既有资产链路)。"""
     s = _get(db, ctx.project.id, setting_id)
     asset_type = _CATEGORY_TO_ASSET.get(s.category)
     if asset_type is None:
         raise Conflict(f"该分类({s.category})不支持转为资产(支持:{','.join(_CATEGORY_TO_ASSET)})")
-    a = asset_service.create(
-        db, ctx, asset_schemas.AssetIn(type=asset_type, name=s.name, summary=s.content[:2000])
+    from app.modules.asset.story_sources import resolve
+
+    a = resolve(
+        db,
+        ctx,
+        asset_type,
+        s.name,
+        s.content,
+        source_type="setting",
+        source_id=s.id,
+        scope=s.novel_id,
+        chosen=asset_id,
+        separate=separate,
     )
     audit.record(
         db,
@@ -131,41 +142,49 @@ _CATEGORY_LABEL = {
 }
 
 
+def _known_content(setting, ordinal):
+    if ordinal is None or (setting.source_notes or {}).get("edited"):
+        return setting.content
+    chapters = setting.source_chapters or []
+    if not chapters or max(chapters) <= ordinal:
+        return setting.content
+    notes = setting.source_notes or {}
+    return "\n".join(
+        notes[str(n)]["fact"]
+        for n in sorted(chapters)
+        if n <= ordinal and str(n) in notes and notes[str(n)].get("fact")
+    )
+
+
 def settings_context(
     db: Session,
     project_id: uuid.UUID,
     novel_id: uuid.UUID,
     chapter_ordinal: int | None = None,
     max_chars: int = 3500,
+    *,
+    subject_text="",
 ) -> str:
-    """组装某章相关的设定上下文文本:出现在该章的设定 + 全局规则类设定。
-
-    chapter_ordinal 为空时返回全书设定摘要。按分类分组,单条与总量均截断。
-    """
     rows = list_settings(db, project_id, novel_id=novel_id)
-    picked = [
-        s
-        for s in rows
-        if s.category in _GLOBAL_CATEGORIES
-        or chapter_ordinal is None
-        or chapter_ordinal in (s.source_chapters or [])
-    ]
-    if not picked:
-        return ""
-    by_cat: dict[str, list] = {}
-    for s in picked:
-        by_cat.setdefault(s.category, []).append(s)
-    parts: list[str] = []
-    total = 0
-    for cat, items in by_cat.items():
-        label = _CATEGORY_LABEL.get(cat, cat)
-        for s in items:
-            line = f"【{label}】{s.name}:{(s.content or '').strip()[:240]}"
-            if total + len(line) > max_chars:
-                return "\n".join(parts)
-            parts.append(line)
-            total += len(line)
-    return "\n".join(parts)
+
+    def relevant(s):
+        if s.name and s.name in subject_text:
+            return 0
+        if chapter_ordinal is None or chapter_ordinal in (s.source_chapters or []):
+            return 1
+        return 2 if s.category in _GLOBAL_CATEGORIES else 3
+
+    lines, total = [], 0
+    for s in sorted(rows, key=relevant):
+        content = _known_content(s, chapter_ordinal)
+        if relevant(s) == 3 or not content:
+            continue
+        line = f"【{_CATEGORY_LABEL.get(s.category, s.category)}】{s.name}：{content[:240]}"
+        if total + len(line) > max_chars:
+            break
+        lines.append(line)
+        total += len(line)
+    return "\n".join(lines)
 
 
 # ── 设定合并 upsert(提取线程使用;ordinals 为该条设定本次涉及的章节序号) ──
@@ -176,6 +195,7 @@ def _upsert_draft(
     draft,
     ordinals: list[int],
     user_id: uuid.UUID | None,
+    notes: dict | None = None,
 ) -> None:
     name = (draft.name or "").strip()
     if not name:
@@ -198,8 +218,17 @@ def _upsert_draft(
             created_by=user_id,
         )
         db.add(row)
-    else:
-        row.content = draft.content  # AI 已给出合并后的完整版,整条覆盖
+    elif not (row.source_notes or {}).get("edited"):
+        latest = max(ordinals, default=0)
+        later = [n for n in (row.source_chapters or []) if n > latest]
+        # A recovered earlier chapter must preserve facts already learned downstream.
+        later_facts = [(row.source_notes or {}).get(str(n), {}).get("fact") for n in sorted(later)]
+        if later and not all(later_facts):
+            later_facts.append(row.content)
+        row.content = "\n".join(
+            dict.fromkeys(part for part in (draft.content, *later_facts) if part)
+        )
+    row.source_notes = {**(row.source_notes or {}), **(notes or {})}
     chapters = list(row.source_chapters or [])
     changed = False
     for o in ordinals:
@@ -212,6 +241,35 @@ def _upsert_draft(
 
 
 # ── 一键提取(后台线程;可选章节范围,默认全书) ──
+def _chapter_revisions(db, novel_id, from_chapter=None, to_chapter=None):
+    stmt = select(Chapter.ordinal, Chapter.id, Chapter.updated_at).where(
+        Chapter.novel_id == novel_id
+    )
+    if from_chapter is not None:
+        stmt = stmt.where(Chapter.ordinal >= from_chapter)
+    if to_chapter is not None:
+        stmt = stmt.where(Chapter.ordinal <= to_chapter)
+    return {
+        str(n): f"{chapter_id}/{updated.isoformat()}"
+        for n, chapter_id, updated in db.execute(stmt.order_by(Chapter.ordinal))
+    }
+
+
+def _completed_chapters(db, novel_id, revisions):
+    done = set()
+    records = db.scalars(
+        select(SettingExtraction.chapter_progress).where(SettingExtraction.novel_id == novel_id)
+    )
+    for record in records:
+        saved = (record or {}).get("revisions", {})
+        done.update(
+            n
+            for n in (record or {}).get("done", [])
+            if str(n) in revisions and saved.get(str(n)) == revisions[str(n)]
+        )
+    return sorted(done)
+
+
 def start_extraction(
     db: Session,
     ctx: ProjectContext,
@@ -223,28 +281,40 @@ def start_extraction(
     novel = db.get(Novel, novel_id)
     if novel is None or novel.project_id != ctx.project.id or novel.deleted_at is not None:
         raise NotFound("小说不存在")
+    db.refresh(novel, with_for_update=True)
     running = db.scalar(
         select(SettingExtraction).where(
             SettingExtraction.novel_id == novel_id, SettingExtraction.status == "running"
         )
     )
-    if running is not None:
-        raise Conflict("该小说已有提取任务在进行中")
     # 范围裁剪:按章节序号(ordinal,1 起),默认全书
-    stmt = select(Chapter.id).where(Chapter.novel_id == novel_id)
-    if from_chapter is not None:
-        stmt = stmt.where(Chapter.ordinal >= from_chapter)
-    if to_chapter is not None:
-        stmt = stmt.where(Chapter.ordinal <= to_chapter)
-    chapters = list(db.scalars(stmt))
+    revisions = _chapter_revisions(db, novel_id, from_chapter, to_chapter)
+    chapters = [int(n) for n in revisions]
     if not chapters:
         raise Conflict("所选范围内没有章节")
+    if running:
+        _recover_interrupted(db, running)
+    if running and running.status == "running":
+        if (running.chapter_progress or {}).get("requested") == chapters:
+            return running
+        raise Conflict("该小说已有提取任务在进行中")
+    previous = latest_extraction(db, ctx.project.id, novel_id)
+    done = _completed_chapters(db, novel_id, revisions)
+    if (
+        previous
+        and previous.status in {"succeeded", "partial", "failed"}
+        and (previous.chapter_progress or {}).get("requested") == chapters
+        and previous.chapter_progress.get("revisions") == revisions
+        and previous.chapter_progress.get("done") == done
+    ):
+        return previous
     job = SettingExtraction(
         project_id=ctx.project.id,
         novel_id=novel_id,
-        status="running",
+        status="succeeded" if done == chapters else "running",
         total_chapters=len(chapters),
-        done_chapters=0,
+        chapter_progress={"requested": chapters, "done": done, "failed": {}, "revisions": revisions},
+        done_chapters=len(done),
         created_by=ctx.user.id,
     )
     db.add(job)
@@ -264,6 +334,8 @@ def start_extraction(
         },
     )
     db.commit()  # 先落库,线程才能读到任务行
+    if job.status == "succeeded":
+        return job
 
     concurrency = max(1, min(int(concurrency or 1), 8))
     t = threading.Thread(
@@ -273,72 +345,105 @@ def start_extraction(
     return job
 
 
-def _run_extraction(
-    job_id: uuid.UUID,
-    from_chapter: int | None = None,
-    to_chapter: int | None = None,
-    concurrency: int = 4,
-) -> None:
-    """后台线程:波次并发提取 —— 每波并发 N 章(同一份已有名录快照),
-    波内同名冲突交给策略 merge_setting_versions 融合,波结束统一落库;
-    下一波拿到合并后的最新名录,保持"逐步补全"语义。进度逐章提交,随时可取消。
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+def _worker_key(job_id):
+    return int.from_bytes(job_id.bytes[:8], byteorder="big", signed=True)
 
+
+def _run_extraction(job_id, from_chapter=None, to_chapter=None, concurrency=4):
+    # Keep one connection for both the worker lease and the wave transactions.
     from app.core.database import SessionLocal
 
-    db = SessionLocal()
+    with (
+        SessionLocal() as factory,
+        factory.get_bind().connect() as connection,
+        Session(bind=connection, autoflush=False) as db,
+    ):
+        key = _worker_key(job_id)
+        db.execute(select(func.pg_advisory_lock(key)))
+        db.commit()
+        try:
+            _extract_waves(db, job_id, from_chapter, to_chapter, concurrency)
+        finally:
+            db.rollback()
+            db.execute(select(func.pg_advisory_unlock(key)))
+            db.commit()
+
+
+def _extract_waves(db, job_id, from_chapter, to_chapter, concurrency):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     try:
         job = db.get(SettingExtraction, job_id)
-        if job is None:
+        if job is None or job.status != "running":
             return
         strat = _strategy(db, job.project_id, None)  # 配了云 LLM 自动用,否则 mock
-        stmt = (
-            select(Chapter)
-            .join(Novel, Chapter.novel_id == Novel.id)
-            .where(Chapter.novel_id == job.novel_id)
+        progress = job.chapter_progress or {}
+        revisions = progress.get("revisions") or _chapter_revisions(
+            db, job.novel_id, from_chapter, to_chapter
         )
-        if from_chapter is not None:
-            stmt = stmt.where(Chapter.ordinal >= from_chapter)
-        if to_chapter is not None:
-            stmt = stmt.where(Chapter.ordinal <= to_chapter)
-        chapters = list(db.scalars(stmt.order_by(Chapter.ordinal)))
+        requested = set(progress.get("requested", (int(n) for n in revisions)))
+        done = set(progress.get("done", []))
+        failed = dict(progress.get("failed", {}))
+        remaining = sorted(requested - done)
 
-        for wave_start in range(0, len(chapters), concurrency):
+        for wave_start in range(0, len(remaining), concurrency):
             db.refresh(job)
-            if job.status == "cancelled":
+            if (job.chapter_progress or {}).get("stop_requested"):
+                job.status = "cancelled"
                 db.commit()
                 return
-            wave = chapters[wave_start : wave_start + concurrency]
-            existing = [
-                {"category": s.category, "name": s.name, "content": s.content}
-                for s in list_settings(db, job.project_id, novel_id=job.novel_id)
+            ordinals = remaining[wave_start : wave_start + concurrency]
+            current = db.scalars(
+                select(Chapter)
+                .where(Chapter.novel_id == job.novel_id, Chapter.ordinal.in_(ordinals))
+                .order_by(Chapter.ordinal)
+            )
+            wave = [
+                ch
+                for ch in current
+                if revisions.get(str(ch.ordinal)) == f"{ch.id}/{ch.updated_at.isoformat()}"
             ]
+            for ordinal in set(ordinals) - {ch.ordinal for ch in wave}:
+                failed[str(ordinal)] = "本章已变更，请按当前章节重新提取"
+            known = list_settings(db, job.project_id, novel_id=job.novel_id)
 
+            def catalog(ordinal):
+                return [
+                    {"category": row.category, "name": row.name, "content": content}
+                    for row in known
+                    if (content := _known_content(row, ordinal))
+                ]
             # 并发提取(工作线程只调 LLM,不碰数据库)
             results: list[tuple[int, list]] = []  # (章节序号, drafts)
             with ThreadPoolExecutor(max_workers=concurrency) as ex:
                 futures = {
-                    ex.submit(strat.extract_settings, ch.content or "", existing): ch for ch in wave
+                    ex.submit(strat.extract_settings, ch.content or "", catalog(ch.ordinal)): ch for ch in wave
                 }
                 for fut in as_completed(futures):
                     ch = futures[fut]
                     try:
                         drafts = fut.result()
                     except Exception as exc:  # noqa: BLE001  单章失败不终止,记录后继续
-                        job.error = f"第 {ch.ordinal} 章提取失败:{exc}"
-                        drafts = []
+                        failed[str(ch.ordinal)] = exc.message if isinstance(exc, AppError) else "提取未完成，请重试此章"
+                        continue
                     results.append((ch.ordinal, drafts))
-                    job.done_chapters += 1
-                    db.commit()  # 进度逐章可见
 
             # 波内按 (category, name) 分组;多版本(含与已有设定并发更新)交给策略融合
             groups: dict[tuple[str, str], dict] = {}
+            notes = {}
+            chapter_by_ordinal = {c.ordinal: c for c in wave}
             for ordinal, drafts in results:
                 for d in drafts:
                     key = (d.category, (d.name or "").strip())
                     if not key[1]:
                         continue
+                    chapter = chapter_by_ordinal[ordinal]
+                    note = {
+                        "fact": d.chapter_fact or d.content,
+                        "chapter_id": str(chapter.id),
+                        "quote": d.quote if d.quote and d.quote in (chapter.content or "") else "",
+                    }
+                    notes.setdefault(key,{})[str(ordinal)] = note
                     g = groups.setdefault(key, {"versions": [], "ordinals": []})
                     g["versions"].append((ordinal, d.content))
                     g["ordinals"].append(ordinal)
@@ -367,7 +472,7 @@ def _run_extraction(
                     job.novel_id,
                     SettingDraft(category=cat, name=name, content=content),
                     ordinals,
-                    job.created_by,
+                    job.created_by, notes[(cat,name)],
                 )
             if conflicts:
                 try:
@@ -381,63 +486,148 @@ def _run_extraction(
                             for c in conflicts
                         ]
                     )
-                except Exception:  # noqa: BLE001  合并失败退化为取最长版本
-                    merged = [
-                        SettingDraft(
-                            category=c["category"],
-                            name=c["name"],
-                            content=max(c["versions"], key=len),
-                        )
-                        for c in conflicts
-                    ]
-                ordinal_map = {(c["category"], c["name"]): c["ordinals"] for c in conflicts}
-                for m in merged:
+                except Exception:
+                    merged = []
+                summaries = {(m.category, m.name): m for m in merged if m.content.strip()}
+                for conflict in conflicts:
+                    key = (conflict["category"], conflict["name"])
+                    draft = summaries.get(key) or SettingDraft(
+                        category=key[0],
+                        name=key[1],
+                        content="\n".join(dict.fromkeys(conflict["versions"])),
+                    )
                     _upsert_draft(
                         db,
                         job.project_id,
                         job.novel_id,
-                        m,
-                        ordinal_map.get((m.category, m.name), []),
+                        draft,
+                        conflict["ordinals"],
                         job.created_by,
+                        notes[key],
                     )
+            # The chapter receipt and its extracted settings must commit together.
+            db.refresh(job, with_for_update=True)
+            stopping = (job.chapter_progress or {}).get("stop_requested", False)
+            for ordinal, _ in results:
+                done.add(ordinal)
+                failed.pop(str(ordinal), None)
+            job.chapter_progress = {
+                **progress,
+                "revisions": revisions,
+                "requested": sorted(requested),
+                "done": sorted(done),
+                "failed": failed,
+            }
+            job.done_chapters = len(done)
+            job.error = f"{len(failed)} 章提取失败" if failed else None
+            if stopping:
+                job.status = "cancelled"
             db.commit()
+            if stopping:
+                return
 
-        job.status = "succeeded"
+        db.refresh(job, with_for_update=True)
+        if job.status == "cancelled":
+            return
+        job.status = ("partial" if done else "failed") if failed else "succeeded"
         db.commit()
     except Exception as exc:  # noqa: BLE001
         try:
+            db.rollback()
             job = db.get(SettingExtraction, job_id)
             if job is not None:
                 job.status = "failed"
-                job.error = str(exc)
+                job.error = exc.message if isinstance(exc, AppError) else "提取中断，已保留完成的章节"
                 db.commit()
         except Exception:  # noqa: BLE001
             pass
-    finally:
-        db.close()
+
+
+def retry_extraction(db, ctx, job_id):
+    job = get_extraction(db, ctx.project.id, job_id)
+    db.scalar(select(Novel.id).where(Novel.id == job.novel_id).with_for_update())
+    db.refresh(job, with_for_update=True)
+    if job.status in {"running", "succeeded"}:
+        return job
+    if not (job.chapter_progress or {}).get("requested"):
+        raise Conflict("旧任务没有逐章记录，请选择章节范围重新提取")
+    active = db.scalar(
+        select(SettingExtraction.id).where(
+            SettingExtraction.novel_id == job.novel_id,
+            SettingExtraction.status == "running",
+            SettingExtraction.id != job.id,
+        )
+    )
+    if active:
+        raise Conflict("该小说已有提取任务在进行中")
+    requested = job.chapter_progress["requested"]
+    current = _chapter_revisions(db, job.novel_id, min(requested), max(requested))
+    if job.chapter_progress.get("revisions") != current:
+        raise Conflict("章节内容已变化，请按当前章节重新提取")
+    done = _completed_chapters(db, job.novel_id, current)
+    failed = {
+        n: reason
+        for n, reason in job.chapter_progress.get("failed", {}).items()
+        if int(n) not in done
+    }
+    job.done_chapters = len(done)
+    job.chapter_progress = {
+        **job.chapter_progress,
+        "done": done,
+        "failed": failed,
+        "stop_requested": False,
+    }
+    if done == requested:
+        job.status, job.error = "succeeded", None
+        db.flush()
+        return job
+    job.status, job.error = "running", None
+    db.commit()
+    threading.Thread(target=_run_extraction, args=(job.id,), daemon=True).start()
+    return job
 
 
 def get_extraction(db: Session, project_id: uuid.UUID, job_id: uuid.UUID) -> SettingExtraction:
     j = db.get(SettingExtraction, job_id)
     if j is None or j.project_id != project_id:
         raise NotFound("任务不存在")
-    return j
+    return _recover_interrupted(db, j)
 
 
 def latest_extraction(
     db: Session, project_id: uuid.UUID, novel_id: uuid.UUID
 ) -> SettingExtraction | None:
-    return db.scalar(
+    job = db.scalar(
         select(SettingExtraction)
         .where(SettingExtraction.project_id == project_id, SettingExtraction.novel_id == novel_id)
         .order_by(SettingExtraction.created_at.desc())
         .limit(1)
     )
 
+    return _recover_interrupted(db, job)
+
+
+def _recover_interrupted(db, job):
+    if (
+        job
+        and job.status == "running"
+        and job.updated_at < datetime.now(UTC) - timedelta(minutes=2)
+    ):
+        if db.scalar(select(func.pg_try_advisory_xact_lock(_worker_key(job.id)))):
+            db.refresh(job, with_for_update=True)
+            if job.status == "running" and job.updated_at < datetime.now(UTC) - timedelta(
+                minutes=2
+            ):
+                job.status = "partial" if job.done_chapters else "failed"
+                job.error = "提取已中断，可以继续未完成的章节"
+                db.flush()
+    return job
+
 
 def cancel_extraction(db: Session, ctx: ProjectContext, job_id: uuid.UUID) -> SettingExtraction:
     j = get_extraction(db, ctx.project.id, job_id)
+    db.refresh(j, with_for_update=True)
     if j.status == "running":
-        j.status = "cancelled"
+        j.chapter_progress = {**(j.chapter_progress or {}), "stop_requested":True}
         db.flush()
     return j

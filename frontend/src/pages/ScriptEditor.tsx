@@ -1,3 +1,4 @@
+import { StoryAssetMatch, assetMatch, type AssetMatch } from "@/components/StoryAssetMatch";
 import { useCreativeToolTask } from "@/lib/useCreativeToolTask";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { ScriptNameDialog } from "@/components/ScriptNameDialog";
@@ -267,15 +268,19 @@ function ScriptEditorWorkspace() {
   );
   const decompose = {
     isPending: decomposition.busy,
-    mutate: () => {
-      if (decomposition.task?.status === "succeeded")
-        setDec(decomposition.task.result!.output);
-      else
-        decomposition.submit.mutate(
-          {},
-          { onError: (e) => toast.push(e.message, "error") },
-        );
-    },
+    mutate: () =>
+      decomposition.submit.mutate(
+        {},
+        {
+          onSuccess: (task) => {
+            if (task.status === "succeeded" && task.result)
+              setDec(task.result.output);
+            if (task.status === "applied")
+              toast.push("这份剧本的分镜已保存，可在分镜页查看", "success");
+          },
+          onError: (e) => toast.push(e.message, "error"),
+        },
+      ),
   };
   useEffect(() => {
     if (decomposition.task?.status === "succeeded")
@@ -303,20 +308,21 @@ function ScriptEditorWorkspace() {
   );
   const extract = {
     isPending: extraction.busy,
-    mutate: () => {
-      if (extraction.task?.status === "succeeded")
-        setDrafts(
-          extraction.task.result!.output.map((item) => ({
-            ...item,
-            checked: true,
-          })),
-        );
-      else
-        extraction.submit.mutate(
-          {},
-          { onError: (e) => toast.push(e.message, "error") },
-        );
-    },
+    mutate: () =>
+      extraction.submit.mutate(
+        {},
+        {
+          onSuccess: (task) => {
+            if (task.status === "succeeded" && task.result)
+              setDrafts(
+                task.result.output.map((item) => ({ ...item, checked: true })),
+              );
+            if (task.status === "applied")
+              toast.push("已采用这次提取的资产", "success");
+          },
+          onError: (e) => toast.push(e.message, "error"),
+        },
+      ),
   };
   useEffect(() => {
     if (extraction.task?.status === "succeeded") {
@@ -329,18 +335,30 @@ function ScriptEditorWorkspace() {
     }
     if (extraction.task?.status === "applied") setDrafts(null);
   }, [extraction.task?.id, extraction.task?.status]);
+  const [matching, setMatching] = useState<AssetMatch | null>(null);
+  const [matches, setMatches] = useState<Record<number, string | null>>({});
+  useEffect(() => {
+    setMatches({});
+    setMatching(null);
+  }, [extraction.task?.id]);
   const applyEntities = useMutation({
-    mutationFn: () =>
-      extraction.apply.mutateAsync(
-        drafts?.flatMap((item, i) => (item.checked ? [i] : [])),
-      ),
+    mutationFn: (choices: Record<number, string | null>) =>
+      extraction.apply.mutateAsync({
+        selected: drafts?.flatMap((item, i) => (item.checked ? [i] : [])) || [],
+        matches: choices,
+      }),
     onSuccess: () => {
+      setMatching(null);
       setDrafts(null);
       toast.push(tr("se.entitiesApplied"), "success");
       void qc.invalidateQueries({ queryKey: ["assets", projectId] });
       void qc.invalidateQueries({ queryKey: ["script-stats", scriptId] });
     },
-    onError: (e) => toast.push((e as Error).message, "error"),
+    onError: (e) => {
+      const detail = assetMatch(e);
+      if (detail && detail.index !== undefined) setMatching(detail);
+      else toast.push(e.message, "error");
+    },
   });
 
   const update = (key: number, patch: Partial<ScriptBlock>) =>
@@ -943,6 +961,7 @@ function ScriptEditorWorkspace() {
             {dec.scenes.map((s, i) => (
               <div key={i} className="rounded-md border border-border p-2.5">
                 <div className="text-sm font-medium">{s.title}</div>
+                {s.error && <p className="text-sm text-danger">{s.error}</p>}
                 {s.shots.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {s.shots.map((sh, j) => (
@@ -958,10 +977,29 @@ function ScriptEditorWorkspace() {
               </div>
             ))}
           </div>
+          {dec.scenes.some((s) => s.error) && (
+            <Button
+              variant="outline"
+              disabled={
+                decomposition.busy || decomposition.retryScenes.isPending
+              }
+              onClick={() =>
+                decomposition.retryScenes.mutate(undefined, {
+                  onError: (e) => toast.push(e.message, "error"),
+                })
+              }
+            >
+              只重试未完成场次
+            </Button>
+          )}
           <div className="shrink-0 border-t border-border p-3">
             <Button
               className="w-full"
-              disabled={applyScenes.isPending}
+              disabled={
+                applyScenes.isPending ||
+                decomposition.busy ||
+                !dec.scenes.some((s) => !s.error)
+              }
               onClick={async () => {
                 if (
                   await confirm({
@@ -983,20 +1021,36 @@ function ScriptEditorWorkspace() {
         </Overlay>
       )}
 
+      {matching && (
+        <StoryAssetMatch
+          key={matching.index}
+          base={base}
+          match={matching}
+          busy={applyEntities.isPending}
+          close={() => setMatching(null)}
+          choose={(id) => {
+            const next = { ...matches, [matching.index!]: id };
+            setMatches(next);
+            setMatching(null);
+            if (!matching.manual) applyEntities.mutate(next);
+          }}
+        />
+      )}
       {/* 实体草稿浮层 */}
-      {drafts && (
+      {drafts && !matching && (
         <Overlay
           title={`${tr("se.entities")} · ${drafts.length}`}
           onClose={() => setDrafts(null)}
         >
           <div className="min-h-0 flex-1 space-y-1.5 overflow-auto p-4">
             {drafts.map((d, i) => (
-              <label
+              <div
                 key={i}
                 className="flex cursor-pointer items-center gap-2.5 rounded-md border border-border px-2.5 py-2 transition hover:border-primary/40"
               >
                 <input
                   type="checkbox"
+                  aria-label={d.name}
                   checked={d.checked}
                   onChange={(e) =>
                     setDrafts((ds) =>
@@ -1011,10 +1065,31 @@ function ScriptEditorWorkspace() {
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {d.name}
                 </span>
-                <span className="max-w-[40%] truncate text-xs text-muted-foreground">
-                  {d.summary}
+                <span className="max-w-[48%] text-xs text-muted-foreground">
+                  <span className="block line-clamp-2">{d.summary}</span>
+                  {d.evidence && <q className="mt-1 block">{d.evidence}</q>}
                 </span>
-              </label>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={applyEntities.isPending}
+                  onClick={() =>
+                    setMatching({
+                      name: d.name,
+                      kind: d.type,
+                      index: i,
+                      manual: true,
+                      candidates: [],
+                    })
+                  }
+                >
+                  {i in matches
+                    ? matches[i]
+                      ? "已指定资产"
+                      : "单独新建"
+                    : "关联已有资产"}
+                </Button>
+              </div>
             ))}
           </div>
           <div className="shrink-0 border-t border-border p-3">
@@ -1023,7 +1098,7 @@ function ScriptEditorWorkspace() {
               disabled={
                 applyEntities.isPending || !drafts.some((d) => d.checked)
               }
-              onClick={() => applyEntities.mutate()}
+              onClick={() => applyEntities.mutate(matches)}
             >
               {applyEntities.isPending && (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />

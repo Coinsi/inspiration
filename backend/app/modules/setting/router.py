@@ -57,10 +57,12 @@ def delete_setting(
 @router.post("/settings/{setting_id}/to-asset", response_model=asset_schemas.AssetOut)
 def setting_to_asset(
     setting_id: uuid.UUID,
+    asset_id: uuid.UUID | None = None,
+    separate: bool = False,
     ctx: ProjectContext = Depends(ASSET_EDIT),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return asset_schemas.AssetOut.of(service.to_asset(db, ctx, setting_id))
+    return asset_schemas.AssetOut.of(service.to_asset(db, ctx, setting_id, asset_id, separate))
 
 
 # ── 一键提取(默认全书,可选章节范围) ──
@@ -102,3 +104,12 @@ def cancel_extraction(
     db: Session = Depends(get_db, scope="function"),
 ):
     return service.cancel_extraction(db, ctx, job_id)
+
+
+@router.post("/setting-extractions/{job_id}/retry", response_model=schemas.ExtractionOut)
+def retry_extraction(
+    job_id: uuid.UUID,
+    ctx: ProjectContext = Depends(EDIT),
+    db: Session = Depends(get_db, scope="function"),
+):
+    return service.retry_extraction(db, ctx, job_id)

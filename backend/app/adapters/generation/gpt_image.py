@@ -84,9 +84,8 @@ class GptImageProvider(GenerationProvider):
             if req.count == 1 and getattr(exc, "upstream_status", None) in (401, 403, 404, 429):
                 from app.modules.generation.model_routing import SubmissionRejected
 
-                raise SubmissionRejected(
-                    f"图片服务拒绝提交（HTTP {exc.upstream_status}），未生成结果"
-                ) from None
+                raise SubmissionRejected.for_status(
+                    f"图片服务拒绝提交（HTTP {exc.upstream_status}），未生成结果", exc.upstream_status) from None
             raise
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"GPT Image 调用失败:{exc}") from exc

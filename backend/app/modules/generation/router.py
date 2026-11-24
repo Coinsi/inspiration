@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.models.generation import GenerationJob
-from app.modules.generation import jobs, schemas, service
+from app.modules.generation import jobs, schemas, service, shot_batches
 from app.modules.generation.adoption import Adopt, Selection
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["generation"])
+router.include_router(shot_batches.router)
 TRIGGER = require_action("generation.trigger")
 PROVIDER_MANAGE = require_action("provider.manage")
 QUOTA_MANAGE = require_action("quota.manage")
@@ -378,7 +379,7 @@ def generate(
     ctx: ProjectContext = Depends(TRIGGER),
     db: Session = Depends(get_db, scope="function"),
 ):
-    return service.describe_job(db, service.submit(db, ctx, "shot", shot_id, data))
+    return service.describe_job(db, service.submit(db, ctx, "shot", shot_id, data, reuse_shot=True))
 
 
 @router.post("/assets/{asset_id}/estimate", response_model=schemas.EstimateOut)

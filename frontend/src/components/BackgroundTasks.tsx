@@ -26,6 +26,7 @@ interface Task {
   // breakdown
   sceneId?: string;
   count?: number;
+  unfinished?: number;
   // decompose
   novelId?: string;
   chapterId?: string;
@@ -96,6 +97,13 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
               : "running",
         label: breakdown ? "AI 拆分镜" : "章节拆解",
         error: r.error ?? undefined,
+        unfinished: breakdown
+          ? (r.result?.output as Shot[] | undefined)?.filter(
+              (s) => s.storyboard?.breakdown_error,
+            ).length
+          : (r.result?.output as DecomposeResult | undefined)?.scenes?.filter(
+              (s) => s.error,
+            ).length,
         sceneId: breakdown ? r.target_id : undefined,
         chapterId: breakdown ? undefined : r.target_id,
         novelId: r.result?.novel_id,
@@ -118,11 +126,16 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
     async (pid: string, operation: string, targetId: string) => {
       try {
         setSubmitError(null);
-        await api.post(`/projects/${pid}/creative-tool-tasks`, {
-          operation,
-          target_id: targetId,
-          request_key: crypto.randomUUID(),
-        });
+        const receipt = await api.post<Receipt>(
+          `/projects/${pid}/creative-tool-tasks`,
+          {
+            operation,
+            target_id: targetId,
+            request_key: crypto.randomUUID(),
+          },
+        );
+        setDismissed(ids => ids.filter(id => id !== receipt.id));
+        setFocusedId(receipt.id);
       } catch (e) {
         setSubmitError((e as Error).message);
       } finally {
@@ -165,6 +178,23 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
             task={item}
             onView={() => setFocusedId(item.id)}
             onRetry={() => {
+              if (item.kind === "decompose" && item.unfinished) {
+                void api
+                  .post(
+                    "/projects/" +
+                      projectId +
+                      "/creative-tool-tasks/" +
+                      item.id +
+                      "/retry-scenes",
+                  )
+                  .then(() =>
+                    qc.invalidateQueries({
+                      queryKey: ["background-tool-tasks", projectId],
+                    }),
+                  )
+                  .catch((e) => setSubmitError(e.message));
+                return;
+              }
               void start(
                 projectId,
                 item.kind === "breakdown"
@@ -251,12 +281,12 @@ function TaskBadge({
           <div className="truncate text-[13px] font-medium">{task.label}</div>
           <div className="mt-0.5 text-xs text-muted-foreground">
             {running && `${runningText} ${sec}s`}
-            {done && doneText}
+            {done && (task.unfinished ? "待补全 " + task.unfinished + (isBreakdown ? " 个镜头" : " 个场次") : doneText)}
             {task.status === "error" && (task.error || tr("bg.failed"))}
           </div>
-          {task.status === "error" && (
+          {(task.status === "error" || (done && !!task.unfinished)) && (
             <button className="mt-1.5 text-xs text-primary" onClick={onRetry}>
-              重试
+              {task.unfinished ? "只重试未完成项" : "重试"}
             </button>
           )}
           {done && (

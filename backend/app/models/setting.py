@@ -23,6 +23,7 @@ class Setting(Base, TimestampMixin):
     content: Mapped[str] = mapped_column(Text, default="")
     # 来源章节序号列表(溯源:这条设定出自哪些章)
     source_chapters: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    source_notes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
@@ -43,5 +44,6 @@ class SettingExtraction(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(16), default="running")  # running/succeeded/failed/cancelled
     total_chapters: Mapped[int] = mapped_column(Integer, default=0)
     done_chapters: Mapped[int] = mapped_column(Integer, default=0)
+    chapter_progress: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     error: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))

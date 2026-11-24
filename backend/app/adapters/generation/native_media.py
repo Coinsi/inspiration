@@ -147,7 +147,7 @@ class NativeMedia(GenerationProvider):
                         ):
                             from app.modules.generation.model_routing import SubmissionRejected
 
-                            raise SubmissionRejected(message)
+                            raise SubmissionRejected.for_status(message, response.status_code)
                         raise ProviderError(message)
                     body = bytearray()
                     for chunk in response.iter_bytes():

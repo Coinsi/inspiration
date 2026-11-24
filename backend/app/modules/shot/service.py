@@ -4,15 +4,12 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.adapters.contracts import ConsistencyContext, consistency_registry
 from app.core import audit
 from app.core.deps import ProjectContext
 from app.core.errors import Conflict, NotFound
 from app.models.asset import Asset
-from app.models.consistency import VisualIdentity
 from app.models.enums import ProductionStatus
 from app.models.narrative import Chapter, Novel, Scene
-from app.models.prompt import PromptFragment
 from app.models.shot import Shot, ShotAssetRef
 from app.modules.shot import schemas
 
@@ -119,7 +116,6 @@ def update(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, data: schemas.S
 def create_shot(db: Session, ctx: ProjectContext, scene_id: uuid.UUID, data: schemas.ShotCreate) -> Shot:
     """在某场景末尾新建一个镜头(分镜工作台手动加镜头)。"""
     from app.models.narrative import Scene
-    from app.platform import coding
 
     scene = db.get(Scene, scene_id)
     if scene is None or scene.project_id != ctx.project.id or scene.deleted_at is not None:
@@ -141,59 +137,86 @@ def create_shot(db: Session, ctx: ProjectContext, scene_id: uuid.UUID, data: sch
 
 
 def breakdown_scene(
-    db: Session, ctx: ProjectContext, scene_id: uuid.UUID, strategy_name: str | None = None
+    db: Session, ctx: ProjectContext, scene_id: uuid.UUID, strategy_name: str | None = None, *, checkpoint=None,
 ) -> list[Shot]:
-    """AI 拆分镜:把一个场景拆成多个带分镜规格的镜头,追加到该场景。"""
-    from app.models.narrative import Chapter, Scene
+    """Create a sequence, or enrich existing shots without replacing their identity."""
     from app.modules.narrative.service import _strategy
+    from app.modules.asset.story_sources import AssetNames, scope_for
+    from app.modules.shot import breakdown
 
-    scene = db.get(Scene, scene_id)
-    if scene is None or scene.project_id != ctx.project.id or scene.deleted_at is not None:
+    scene = db.scalar(
+        select(Scene)
+        .where(Scene.id == scene_id, Scene.project_id == ctx.project.id, Scene.deleted_at.is_(None))
+        .with_for_update()
+    )
+    if not scene:
         raise NotFound("场景不存在")
+    existing = list_shots(db, ctx.project.id, scene_id)
+    missing = [
+        s
+        for s in existing
+        if not all((s.storyboard or {}).get(k) for k in ("still_prompt", "motion_prompt"))
+    ]
+    if existing and not missing:
+        return existing
+    text = "\n".join(dict.fromkeys(p for p in (scene.title, scene.summary, scene.body) if p))
+    strategy = _strategy(db, ctx.project.id, strategy_name)
+    if existing:
+        names = AssetNames(
+            db, ctx.project.id, scope_for(db, scene.script_id, scene.adapted_from_chapter_id)
+        )
+        for shot in missing:
+            try:
+                with db.begin_nested():
+                    original_text = (shot.title, shot.description)
+                    if strategy.name == "mock":
+                        from app.adapters.contracts import StoryboardShotSuggestion
 
-    # 输入:场景文字 + 来源章节节选(场景正文多为 mock 留下的极短文本,故回溯章节剧情)
-    parts: list[str] = []
-    if scene.title:
-        parts.append(f"场景:{scene.title}")
-    if scene.summary:
-        parts.append(f"概要:{scene.summary}")
-    body = (scene.body or "").strip()
-    if body and body != (scene.summary or "").strip():
-        parts.append(f"场景正文:{body}")
-    if scene.adapted_from_chapter_id:
-        ch = db.get(Chapter, scene.adapted_from_chapter_id)
-        if ch and ch.content:
-            parts.append(f"所属章节背景(节选,供参考):{ch.content[:2500]}")
-    text = "\n".join(parts) or (scene.title or "")
+                        detail = shot.description or shot.title or scene.title or "空镜头"
+                        draft = StoryboardShotSuggestion(
+                            title=shot.title or "",
+                            description=detail,
+                            still_prompt=detail,
+                            motion_prompt=detail,
+                        )
+                    else:
+                        instruction = f"本场背景：{text[:1800]}。只细化已有的一镜，恰好返回一个镜头。镜头标题：{shot.title}。镜头内容：{shot.description}"
+                        drafts = breakdown.suggest(
+                            db, strategy, ctx.project.id, instruction, scene.adapted_from_chapter_id
+                        )
+                        if len(drafts) != 1 or not drafts[0].still_prompt.strip():
+                            raise Conflict("模型未返回该镜头的定格画面，请重试此镜")
+                        draft = drafts[0]
+                    db.refresh(shot, with_for_update=True)
+                    if shot.deleted_at:
+                        continue
+                    if original_text != (shot.title, shot.description):
+                        raise Conflict("镜头内容已更新，可以按最新内容补全分镜")
+                    breakdown.save_draft(db, shot, draft, names)
+                    shot.storyboard = {
+                        k: v for k, v in shot.storyboard.items() if k != "breakdown_error"
+                    }
+            except Exception as exc:
+                from app.core.errors import AppError
 
-    strat = _strategy(db, ctx.project.id, strategy_name)
-    suggestions = strat.suggest_storyboard_shots(text)
-    if not suggestions:
-        return list_shots(db, ctx.project.id, scene_id)
-
-    # 替换模式:LLM 成功后才清空(软删)该场景现有镜头,再从头生成,避免"删了又没生成"
-    cleared = 0
-    for old in list_shots(db, ctx.project.id, scene_id):
-        old.deleted_at = func.now()
-        cleared += 1
+                shot.storyboard = {
+                    **(shot.storyboard or {}),
+                    "breakdown_error": exc.message
+                    if isinstance(exc, AppError)
+                    else "未取得该镜的分镜，请重试",
+                }
+            if checkpoint:
+                checkpoint()
+    else:
+        drafts = breakdown.suggest(
+            db, strategy, ctx.project.id, text, scene.adapted_from_chapter_id
+        )
+        if not drafts:
+            raise Conflict("模型没有返回可用的镜头，请重试")
+        breakdown.create_drafts(db, ctx, scene, drafts)
     db.flush()
-
-    for i, sug in enumerate(suggestions, 1):
-        sb: dict = {}
-        for k in ("shot_size", "camera_angle", "camera_move", "transition", "aspect_ratio", "pacing", "dialogue"):
-            v = getattr(sug, k)
-            if v:
-                sb[k] = v
-        if sug.duration_sec is not None:
-            sb["duration_sec"] = sug.duration_sec
-        db.add(Shot(
-            project_id=ctx.project.id, scene_id=scene_id, ordinal=i,
-            code=f"{scene.code}-SH{i:03d}", title=sug.title or f"镜头 {i}",
-            description=sug.description, storyboard=sb, created_by=ctx.user.id,
-        ))
     audit.record(db, action="shot.breakdown", user_id=ctx.user.id, project_id=ctx.project.id,
-                 target_type="scene", target_id=scene_id, detail={"count": len(suggestions), "cleared": cleared})
-    db.flush()
+                 target_type="scene", target_id=scene.id, detail={"count": len(existing) if existing else len(drafts)})
     return list_shots(db, ctx.project.id, scene_id)
 
 
@@ -226,13 +249,51 @@ def reorder_shots(db: Session, ctx: ProjectContext, scene_id: uuid.UUID, shot_id
 
 # ── 引用(浮动/钉死) ──
 def set_asset_refs(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, refs) -> list[ShotAssetRef]:
+    from app.modules.shot.inputs import pinned
     s = _get(db, ctx.project.id, shot_id)
+    db.refresh(s, with_for_update=True)
+    previous = {(r.asset_id, r.role): r.usage for r in list_asset_refs(db, ctx.project.id, s.id)}
+    if len({(r.asset_id, r.role) for r in refs}) != len(refs):
+        raise Conflict("同一项资产已在镜头中")
+    board = s.storyboard or {}
+    pending = list(board.get("unresolved_subjects") or [])
+    resolved_usage = {}
+    for r in refs:
+        asset = db.get(Asset, r.asset_id)
+        if not asset or asset.project_id != ctx.project.id or asset.deleted_at:
+            raise NotFound("参考的资产不存在")
+        if r.resolves_subject:
+            subject = next(
+                (
+                    x
+                    for x in pending
+                    if x.get("name") == r.resolves_subject and x.get("type") == asset.type
+                ),
+                None,
+            )
+            if subject is None:
+                raise Conflict("待确认的镜头主体已变化，请刷新")
+            pending.remove(subject)
+            resolved_usage[(r.asset_id, r.role)] = {
+                k: subject.get(k) for k in ("look", "evidence", "aspects") if subject.get(k)
+            }
+        if r.ref_mode == "pinned":
+            pinned(db, ctx.project.id, asset.id, r.pinned_version_id)
     db.query(ShotAssetRef).filter(ShotAssetRef.shot_id == s.id).delete()
+    added_ids = {str(r.asset_id) for r in refs}
+    suppressed = (
+        set(board.get("suppressed_asset_ids", [])) | {str(aid) for aid, _ in previous}
+    ) - added_ids
+    if pending != board.get("unresolved_subjects", []) or suppressed != set(
+        board.get("suppressed_asset_ids", [])
+    ):
+        s.storyboard = {**board, "unresolved_subjects": pending, "suppressed_asset_ids": sorted(suppressed)}
     created = []
     for i, r in enumerate(refs):
         ref = ShotAssetRef(
             shot_id=s.id, asset_id=r.asset_id, role=r.role,
-            ref_mode=r.ref_mode, pinned_version_id=r.pinned_version_id, ordinal=i,
+            ref_mode=r.ref_mode, pinned_version_id=r.pinned_version_id if r.ref_mode == "pinned" else None, ordinal=i,
+            usage=resolved_usage.get((r.asset_id, r.role)) or (r.usage.model_dump() if r.usage else previous.get((r.asset_id, r.role)) or {}),
         )
         db.add(ref)
         created.append(ref)
@@ -310,7 +371,7 @@ def _storyboard_prompt_parts(sb: dict) -> list[str]:
 
 
 # ── 提示词 BOM 组合 ──
-def compose_prompt(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID) -> schemas.ComposeOut:
+def compose_prompt(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID, media_type="image", *, inputs=None) -> schemas.ComposeOut:
     s = _get(db, project_id, shot_id)
     if s.prompt_override:
         return schemas.ComposeOut(final_prompt=s.prompt_override, parts=[s.prompt_override], overridden=True)
@@ -320,31 +381,20 @@ def compose_prompt(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID) -> sc
     if scene and scene.summary:
         parts.append(scene.summary)
 
-    refs = list_asset_refs(db, project_id, shot_id)
-    for ref in refs:
-        asset = db.get(Asset, ref.asset_id)
-        if asset is None:
-            continue
-        vi = db.scalar(select(VisualIdentity).where(VisualIdentity.asset_id == asset.id))
-        if vi is not None:
-            frag_text = None
-            if vi.prompt_fragment_id:
-                frag = db.get(PromptFragment, vi.prompt_fragment_id)
-                frag_text = frag.text if frag else None
-            cctx = ConsistencyContext(
-                asset_name=asset.name, prompt_fragment_text=frag_text,
-                lora_ref=vi.lora_ref, reference_set=vi.reference_set,
-            )
-            strat = consistency_registry.create(vi.strategy)
-            parts.extend(strat.prompt_parts(cctx))
-        else:
-            parts.append(asset.name)
+    from app.modules.shot.inputs import resolved
 
-    if s.description:
-        parts.append(s.description)
+    board = s.storyboard or {}
+    if scene and scene.visual_brief and board.get("inherit_scene", True):
+        parts.append(scene.visual_brief)
+    for entry in inputs if inputs is not None else resolved(db, s):
+        parts.extend(entry["parts"])
+    parts.append(board.get("still_prompt") or s.description or s.title or "")
+    if media_type == "video":
+        parts.append(board.get("motion_prompt") or s.description or "")
 
     # 分镜规格 → 提示词术语(景别 / 机位 / 运镜 / 画面比例 自动拼入)
-    parts.extend(_storyboard_prompt_parts(s.storyboard or {}))
+    specs = board if media_type == "video" else {k: v for k, v in board.items() if k != "camera_move"}
+    parts.extend(_storyboard_prompt_parts(specs))
 
     # 去重 + 去空:相同片段(忽略首尾空白/句末标点)不重复拼入
     seen: set[str] = set()

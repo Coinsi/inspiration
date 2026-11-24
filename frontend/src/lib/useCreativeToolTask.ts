@@ -61,11 +61,23 @@ export function useCreativeToolTask<T>(
     },
   });
   const apply = useMutation({
-    mutationFn: (selected?: number[]) =>
-      api.post(`${base}/${query.data!.id}/apply`, { selected }),
+    mutationFn: (
+      choice?:
+        | number[]
+        | { selected: number[]; matches: Record<number, string | null> },
+    ) =>
+      api.post(
+        `${base}/${query.data!.id}/apply`,
+        Array.isArray(choice) ? { selected: choice } : choice || {},
+      ),
     onSuccess: () => {
       void cache.invalidateQueries({ queryKey: key });
     },
+  });
+  const retryScenes = useMutation({
+    mutationFn: () =>
+      api.post<ToolTask<T>>(`${base}/${query.data!.id}/retry-scenes`),
+    onSuccess: (task) => cache.setQueryData(key, task),
   });
   const busy =
     submit.isPending ||
@@ -76,6 +88,7 @@ export function useCreativeToolTask<T>(
     busy,
     submit,
     apply,
+    retryScenes,
     ready: !!targetId && !query.isPending && !query.isError,
   };
 }

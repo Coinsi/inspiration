@@ -6,6 +6,9 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+from app.adapters.contracts import StoryboardShotSuggestion
+
+
 class ChapterOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -120,12 +123,12 @@ class SceneOut(BaseModel):
     adapted_from_chapter_id: uuid.UUID | None
 
 
-class ShotBrief(BaseModel):
-    title: str
-    description: str = ""
+class ShotBrief(StoryboardShotSuggestion):
+    pass
 
 
 class SceneSuggestionOut(BaseModel):
+    error: str | None = None
     title: str
     summary: str = ""
     body: str = ""
@@ -147,6 +150,9 @@ class EntityDraftOut(BaseModel):
     type: str
     name: str
     summary: str = ""
+    evidence: str = ""
+    asset_id: uuid.UUID | None = None
+    separate: bool = False
 
 
 class ExtractEntitiesIn(BaseModel):
@@ -157,3 +163,5 @@ class ExtractEntitiesIn(BaseModel):
 
 class ApplyEntitiesIn(BaseModel):
     entities: list[EntityDraftOut]
+    script_id: uuid.UUID | None = None
+    chapter_id: uuid.UUID | None = None

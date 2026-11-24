@@ -48,6 +48,34 @@ class ShotAssetRef(Base, TimestampMixin):
     ref_mode: Mapped[RefMode] = mapped_column(String(16), default=RefMode.floating)
     pinned_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     role: Mapped[str] = mapped_column(String(32), default="character")
+    usage: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
 
     __table_args__ = (UniqueConstraint("shot_id", "asset_id", "role", name="uq_shot_asset_ref"),)
+
+
+class ShotBatch(Base, TimestampMixin):
+    __tablename__ = "shot_batch"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
+    scene_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("scene.id"), index=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("user.id"))
+    request_key: Mapped[uuid.UUID] = mapped_column(UUID)
+    options: Mapped[dict] = mapped_column(JSONB)
+    __table_args__ = (
+        UniqueConstraint("project_id", "created_by", "request_key", name="uq_shot_batch_request"),
+    )
+
+
+class ShotBatchItem(Base, TimestampMixin):
+    __tablename__ = "shot_batch_item"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID, ForeignKey("shot_batch.id", ondelete="CASCADE"), index=True
+    )
+    shot_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("shot.id"))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("generation_job.id"))
+    state: Mapped[str] = mapped_column(String(20), index=True, default="queued")
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    __table_args__ = (UniqueConstraint("batch_id", "shot_id", name="uq_shot_batch_item"),)

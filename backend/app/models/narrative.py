@@ -98,6 +98,8 @@ class Scene(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     title: Mapped[str | None] = mapped_column(String(255))
     summary: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, default="")
+    source_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    visual_brief: Mapped[str] = mapped_column(Text, default="", server_default="")
     adapted_from_chapter_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chapter.id")
     )

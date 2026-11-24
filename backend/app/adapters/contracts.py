@@ -192,6 +192,18 @@ class ShotSuggestion(BaseModel):
     description: str = ""
 
 
+class ShotSubject(BaseModel):
+    """A visible subject, or a location whose light/layout the shot actually uses."""
+
+    name: str = Field(min_length=1, max_length=255)
+    type: Literal["character", "location", "prop", "costume", "vehicle", "style"]
+    aspects: list[Literal["face", "wardrobe", "layout", "light", "appearance"]] = Field(
+        default_factory=list
+    )
+    look: str = Field(default="", max_length=120)
+    evidence: str = Field(default="", max_length=500)
+
+
 class StoryboardShotSuggestion(BaseModel):
     """AI 拆分镜:镜头 + 分镜规格建议(各 *_ 字段为前后端统一的稳定 key)。"""
 
@@ -205,12 +217,16 @@ class StoryboardShotSuggestion(BaseModel):
     pacing: str = ""
     duration_sec: float | None = None
     dialogue: str = ""
+    still_prompt: str = ""
+    motion_prompt: str = ""
+    subjects: list[ShotSubject] = Field(default_factory=list)
 
 
 class EntityDraft(BaseModel):
     type: Literal["character", "prop", "location", "costume", "vehicle"]
     name: str
     summary: str = ""
+    evidence: str = ""
 
 
 # 剧本正文块类型(typed blocks);AI 与编辑器共用的稳定集合
@@ -242,6 +258,8 @@ class SettingDraft(BaseModel):
     category: str
     name: str
     content: str = ""
+    chapter_fact: str = ""
+    quote: str = ""
 
 
 class ScriptBlock(BaseModel):
@@ -271,7 +289,8 @@ class DecompositionStrategy(ABC):
     def suggest_storyboard_shots(self, scene_text: str) -> list[StoryboardShotSuggestion]:
         """默认实现:基于 suggest_shots,仅给标题/描述(无规格);云 LLM 会覆盖出完整规格。"""
         return [
-            StoryboardShotSuggestion(title=s.title, description=s.description)
+            StoryboardShotSuggestion(title=s.title, description=s.description,
+                                     still_prompt=s.description or s.title, motion_prompt=s.description or s.title)
             for s in self.suggest_shots(scene_text)
         ]
 
@@ -288,13 +307,13 @@ class DecompositionStrategy(ABC):
         """并发提取的冲突合并:同一条设定出现多个版本时,融合为一个完整版。
 
         conflicts: [{category, name, versions: [content, ...]}]
-        默认实现:取最长版本(离线可用);云 LLM 覆盖为真正的语义融合。
+        默认实现:保留各个来源(离线可用);云 LLM 覆盖为真正的语义融合。
         """
         return [
             SettingDraft(
                 category=c["category"],
                 name=c["name"],
-                content=max((c.get("versions") or [""]), key=len),
+                content="\n".join(dict.fromkeys(c.get("versions") or [])),
             )
             for c in conflicts
         ]
