@@ -394,6 +394,11 @@ export interface Scene {
   summary: string | null;
   adapted_from_chapter_id: string | null;
 }
+export interface AppliedScene extends Scene {
+  scene_created: boolean;
+  shots_added: number;
+  shots_kept: number;
+}
 export interface Shot {
   id: string;
   code: string;

@@ -123,6 +123,12 @@ class SceneOut(BaseModel):
     adapted_from_chapter_id: uuid.UUID | None
 
 
+class AppliedSceneOut(SceneOut):
+    scene_created: bool
+    shots_added: int
+    shots_kept: int
+
+
 class ShotBrief(StoryboardShotSuggestion):
     pass
 

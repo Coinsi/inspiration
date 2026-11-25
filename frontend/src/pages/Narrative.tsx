@@ -39,9 +39,11 @@ import { cn } from "@/lib/utils";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { useElapsedSeconds } from "@/lib/useElapsedSeconds";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
+import { refreshAppliedScenes, sceneAdoptionMessage } from "@/lib/scene-adoption";
 import {
   api,
   apiUpload,
+  type AppliedScene,
   type DecomposeResult,
   type Novel,
   type NovelDirectory,
@@ -330,15 +332,19 @@ function NarrativeWorkspace() {
     },
   });
   const applyScenes = useMutation({
-    mutationFn: () =>
-      api.post(`${base}/scripts/${scriptId}/apply-scenes`, {
-        chapter_id: chapter?.id,
-        scenes: dec?.scenes,
+    mutationFn: (target: { scriptId: string; chapterId: string | null; scenes: DecomposeResult["scenes"] }) =>
+      api.post<AppliedScene[]>(`${base}/scripts/${target.scriptId}/apply-scenes`, {
+        chapter_id: target.chapterId,
+        scenes: target.scenes,
       }),
-    onSuccess: () => {
-      dismiss();
-      setDec(null);
-      toast.push(tr("nar.applied"), "success");
+    onSuccess: (scenes, target) => {
+      const failed = target.scenes.filter(scene => scene.error).length;
+      if (!failed && scriptId === target.scriptId && chapterId === target.chapterId) {
+        dismiss();
+        setDec(null);
+      }
+      toast.push(sceneAdoptionMessage(scenes, failed, lang), "success");
+      void refreshAppliedScenes(qc, projectId!, target.scriptId);
     },
     onError: (e) => toast.push((e as Error).message, "error"),
   });
@@ -916,7 +922,7 @@ function NarrativeWorkspace() {
                                 confirmText: tr("nar.applyScenes"),
                               })
                             ) {
-                              applyScenes.mutate();
+                              applyScenes.mutate({ scriptId, chapterId, scenes: dec.scenes });
                             }
                           }}
                         >

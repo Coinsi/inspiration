@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
-import { api } from "./api";
+import { api, type AppliedScene } from "./api";
 
 export type ToolTask<T> = {
   id: string;
@@ -64,9 +64,10 @@ export function useCreativeToolTask<T>(
     mutationFn: (
       choice?:
         | number[]
+        | { fill_empty_scenes: boolean }
         | { selected: number[]; matches: Record<number, string | null> },
     ) =>
-      api.post(
+      api.post<{ applied: boolean; scenes?: AppliedScene[] }>(
         `${base}/${query.data!.id}/apply`,
         Array.isArray(choice) ? { selected: choice } : choice || {},
       ),

@@ -314,7 +314,7 @@ def decompose(
     return service.decompose_chapter(db, ctx.project.id, chapter_id, strategy)
 
 
-@router.post("/scripts/{script_id}/apply-scenes", response_model=list[schemas.SceneOut])
+@router.post("/scripts/{script_id}/apply-scenes", response_model=list[schemas.AppliedSceneOut])
 def apply_scenes(
     script_id: uuid.UUID,
     data: schemas.ApplyScenesIn,

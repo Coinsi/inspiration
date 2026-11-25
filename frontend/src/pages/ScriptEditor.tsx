@@ -1,5 +1,6 @@
 import { StoryAssetMatch, assetMatch, type AssetMatch } from "@/components/StoryAssetMatch";
 import { useCreativeToolTask } from "@/lib/useCreativeToolTask";
+import { refreshAppliedScenes, sceneAdoptionMessage } from "@/lib/scene-adoption";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { ScriptNameDialog } from "@/components/ScriptNameDialog";
 import { SearchField } from "@/components/ui/search-field";
@@ -70,7 +71,7 @@ function ScriptEditorWorkspace() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
 
   const {
     data: script,
@@ -273,10 +274,8 @@ function ScriptEditorWorkspace() {
         {},
         {
           onSuccess: (task) => {
-            if (task.status === "succeeded" && task.result)
+            if ((task.status === "succeeded" || task.status === "applied") && task.result)
               setDec(task.result.output);
-            if (task.status === "applied")
-              toast.push("这份剧本的分镜已保存，可在分镜页查看", "success");
           },
           onError: (e) => toast.push(e.message, "error"),
         },
@@ -285,14 +284,16 @@ function ScriptEditorWorkspace() {
   useEffect(() => {
     if (decomposition.task?.status === "succeeded")
       setDec(decomposition.task.result!.output);
-    if (decomposition.task?.status === "applied") setDec(null);
   }, [decomposition.task?.id, decomposition.task?.status]);
   const applyScenes = useMutation({
-    mutationFn: () => decomposition.apply.mutateAsync(undefined),
-    onSuccess: () => {
-      setDec(null);
-      toast.push(tr("se.scenesApplied"), "success");
-      void qc.invalidateQueries({ queryKey: ["script-stats", scriptId] });
+    mutationFn: () => decomposition.apply.mutateAsync({
+      fill_empty_scenes: decomposition.task?.status === "applied",
+    }),
+    onSuccess: (result) => {
+      const failed = dec?.scenes.filter(scene => scene.error).length ?? 0;
+      if (!failed) setDec(null);
+      toast.push(sceneAdoptionMessage(result.scenes ?? [], failed, lang), "success");
+      void refreshAppliedScenes(qc, projectId!, scriptId!);
     },
     onError: (e) => toast.push((e as Error).message, "error"),
   });
@@ -602,8 +603,8 @@ function ScriptEditorWorkspace() {
                 ) : (
                   <Clapperboard className="mr-1 h-4 w-4" />
                 )}
-                {decomposition.task?.status === "succeeded"
-                  ? "查看场次建议"
+                {decomposition.task?.status === "succeeded" || decomposition.task?.status === "applied"
+                  ? tr("se.viewSceneSuggestions")
                   : tr("se.decompose")}
               </Button>
               <Button
@@ -981,7 +982,7 @@ function ScriptEditorWorkspace() {
             <Button
               variant="outline"
               disabled={
-                decomposition.busy || decomposition.retryScenes.isPending
+                decomposition.busy || decomposition.retryScenes.isPending || applyScenes.isPending
               }
               onClick={() =>
                 decomposition.retryScenes.mutate(undefined, {
@@ -998,6 +999,7 @@ function ScriptEditorWorkspace() {
               disabled={
                 applyScenes.isPending ||
                 decomposition.busy ||
+                decomposition.retryScenes.isPending ||
                 !dec.scenes.some((s) => !s.error)
               }
               onClick={async () => {

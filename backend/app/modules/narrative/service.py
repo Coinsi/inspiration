@@ -1,6 +1,7 @@
 """narrative 业务:小说导入(解析策略)、剧本/场次、AI 拆解与落库。"""
 
 import uuid
+from collections import Counter, defaultdict, deque
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from app.core.config import settings
 from app.core.deps import ProjectContext
 from app.core.errors import NotFound, Conflict, Locked
 from app.models.enums import AssetType
+from app.models.identity import Project
 from app.models.narrative import Chapter, Novel, Script, Scene
 from app.models.shot import Shot
 from app.modules.narrative import schemas
@@ -613,70 +615,102 @@ def decompose_chapter(db: Session, project_id: uuid.UUID, chapter_id: uuid.UUID,
 
 def apply_scenes(
     db: Session, ctx: ProjectContext, script_id: uuid.UUID, data: schemas.ApplyScenesIn
-) -> list[Scene]:
-    script = _get_script(db, ctx.project.id, script_id)
-    chapter_id = data.chapter_id or script.source_chapter_id
-    db.refresh(script, with_for_update=True)
-    if chapter_id:
-        _get_chapter(db, ctx.project.id, chapter_id, allow_archived=data.chapter_id is None)
-    base_ord = db.scalar(
-        select(func.coalesce(func.max(Scene.ordinal), 0)).where(Scene.script_id == script.id)
-    )
-    created = []
+) -> list[schemas.AppliedSceneOut]:
     from app.modules.narrative.tool_tasks import fingerprint
 
-    occurrences = {}
-    previous = list_scenes(db, ctx.project.id, script.id)
-    # Reserve failed slots too, so a recovered scene keeps its script position.
-    known_ordinal = {}
+    script = _get_script(db, ctx.project.id, script_id)
+    db.refresh(script, with_for_update=True)
+    chapter_id = data.chapter_id or script.source_chapter_id
+    if chapter_id:
+        _get_chapter(db, ctx.project.id, chapter_id, allow_archived=data.chapter_id is None)
+    # Manual edits, removal, restoration and single-scene breakdown lock the scene too.
+    # Take the scene locks before the project/coding lock used when allocating new shots.
+    previous = db.scalars(
+        select(Scene)
+        .where(
+            Scene.script_id == script.id,
+            Scene.project_id == ctx.project.id,
+            Scene.deleted_at.is_(None),
+        )
+        .order_by(Scene.ordinal, Scene.id)
+        .with_for_update()
+    ).all()
+    db.scalar(select(Project.id).where(Project.id == ctx.project.id).with_for_update())
+    active_counts = dict(
+        db.execute(
+            select(Shot.scene_id, func.count())
+            .join(Scene, Scene.id == Shot.scene_id)
+            .where(
+                Scene.script_id == script.id,
+                Shot.project_id == ctx.project.id,
+                Shot.deleted_at.is_(None),
+            )
+            .group_by(Shot.scene_id)
+        ).all()
+    )
+    last_ordinal = db.scalar(
+        select(func.coalesce(func.max(Scene.ordinal), 0)).where(Scene.script_id == script.id)
+    )
+    base_ord = last_ordinal
+    occupied = {scene.ordinal for scene in previous}
+    keyed = {old.source_key: old for old in previous if old.source_key}
+    legacy = defaultdict(deque)
     for old in previous:
-        if old.source_key:
-            known_ordinal[old.source_key] = old.ordinal
-    keys = []
+        if not old.source_key and old.adapted_from_chapter_id == chapter_id:
+            text = (old.body or "").strip() or (old.summary or "").strip()
+            legacy[((old.title or "").strip(), text)].append(old)
+    occurrences = Counter()
+    plan = []
+    # Include failed scenes while positioning the plan. A later retry uses their original slots.
     for i, sc in enumerate(data.scenes, 1):
-        identity = (str(chapter_id or ""), sc.title.strip(), sc.body.strip() or sc.summary.strip())
-        index = occurrences.get(identity, 0)
-        occurrences[identity] = index + 1
-        key = fingerprint([*identity, index])
-        keys.append((sc, identity, key))
-        if key in known_ordinal:
-            base_ord = min(base_ord, known_ordinal[key] - i)
-    for i, (sc, identity, key) in enumerate(keys, 1):
+        identity = (sc.title.strip(), sc.body.strip() or sc.summary.strip())
+        key = fingerprint([str(chapter_id or ""), *identity, occurrences[identity]])
+        occurrences[identity] += 1
+        scene = keyed.get(key)
+        if scene is None and legacy.get(identity):
+            scene = legacy[identity].popleft()
+        if scene is not None:
+            base_ord = min(base_ord, scene.ordinal - i)
+        plan.append((sc, key, scene))
+
+    applied = []
+    for i, (sc, key, scene) in enumerate(plan, 1):
         if sc.error:
             continue
-        existing = next((s for s in previous if s.source_key == key), None)
-        if existing is None:
-            existing = next(
-                (
-                    s
-                    for s in previous
-                    if not s.source_key
-                    and s.adapted_from_chapter_id == chapter_id
-                    and (s.title or "").strip() == identity[1]
-                    and ((s.body or s.summary or "").strip() == identity[2])
-                ),
-                None,
+        is_new = scene is None
+        if scene is None:
+            ordinal = base_ord + i
+            if ordinal < 1 or ordinal in occupied:
+                ordinal = last_ordinal + 1
+            last_ordinal = max(last_ordinal, ordinal)
+            occupied.add(ordinal)
+            scene = Scene(
+                project_id=ctx.project.id,
+                script_id=script.id,
+                code=coding.next_code(db, ctx.project, "scene"),
+                ordinal=ordinal,
+                title=sc.title,
+                summary=sc.summary,
+                body=sc.body,
+                adapted_from_chapter_id=chapter_id,
+                created_by=ctx.user.id,
             )
-        if existing:
-            existing.source_key = key
-            created.append(existing)
-            continue
-        scene = Scene(
-            project_id=ctx.project.id,
-            script_id=script.id,
-            code=coding.next_code(db, ctx.project, "scene"),
-            ordinal=base_ord + i,
-            title=sc.title,
-            summary=sc.summary,
-            body=sc.body,
-            adapted_from_chapter_id=chapter_id,
-            source_key=key,
-            created_by=ctx.user.id,
+            db.add(scene)
+            db.flush()
+        scene.source_key = key
+        kept = active_counts.get(scene.id, 0)
+        added = 0
+        if sc.shots and not kept:
+            breakdown.create_drafts(db, ctx, scene, sc.shots)
+            added = len(sc.shots)
+        applied.append(
+            schemas.AppliedSceneOut(
+                **schemas.SceneOut.model_validate(scene).model_dump(),
+                scene_created=is_new,
+                shots_added=added,
+                shots_kept=kept,
+            )
         )
-        db.add(scene)
-        db.flush()
-        breakdown.create_drafts(db, ctx, scene, sc.shots)
-        created.append(scene)
     audit.record(
         db,
         action="narrative.apply_scenes",
@@ -684,10 +718,10 @@ def apply_scenes(
         project_id=ctx.project.id,
         target_type="script",
         target_id=script.id,
-        detail={"scenes": len(created)},
+        detail={"scenes": len(applied), "shots_added": sum(row.shots_added for row in applied)},
     )
     db.flush()
-    return created
+    return applied
 
 
 def extract_entities(

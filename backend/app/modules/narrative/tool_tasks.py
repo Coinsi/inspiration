@@ -15,6 +15,7 @@ from app.core.errors import AppError, Conflict, Forbidden, NotFound
 from app.core.permissions import require
 from app.models.identity import Project, User, Membership
 from app.models.narrative import Chapter, Scene, CreativeToolTask
+from app.models.shot import Shot
 from app.modules.narrative import service, schemas
 
 Operation = Literal[
@@ -80,6 +81,28 @@ def latest(db, project_id, operation, target_id):
         )
         .order_by(CreativeToolTask.created_at.desc())
         .limit(1)
+    )
+
+
+def _breakdown_still_current(db, task):
+    """A finished breakdown can be reused only while its shots are still on this board."""
+    if task.operation != "scene_breakdown" or task.status != "succeeded":
+        return True
+    output = (task.result or {}).get("output") or []
+    if not output or any((row.get("storyboard") or {}).get("breakdown_error") for row in output):
+        return False
+    live = db.execute(
+        select(Shot.id, Shot.storyboard).where(
+            Shot.project_id == task.project_id,
+            Shot.scene_id == task.target_id,
+            Shot.deleted_at.is_(None),
+        )
+    ).all()
+    if {str(row.id) for row in live} != {row.get("id") for row in output}:
+        return False
+    return all(
+        (row.storyboard or {}).get("still_prompt") and (row.storyboard or {}).get("motion_prompt")
+        for row in live
     )
 
 
@@ -152,20 +175,12 @@ def submit(
     ):
         active.status, active.error = "queued", None
         return active
-    incomplete_shots = (
-        active
-        and data.operation == "scene_breakdown"
-        and any(
-            (row.get("storyboard") or {}).get("breakdown_error")
-            for row in (active.result or {}).get("output", [])
-        )
-    )
     if (
         active
-        and not incomplete_shots
         and data.operation != "assist_message"
         and active.source_revision == revision
         and active.status in {"queued", "running", "succeeded", "applied"}
+        and _breakdown_still_current(db, active)
     ):
         return active
     if active and active.status in {"queued", "running"}:
@@ -264,6 +279,7 @@ def retry_scenes(
 class Adopt(BaseModel):
     selected: list[int] | None = None
     matches: dict[int, uuid.UUID | None] = Field(default_factory=dict)
+    fill_empty_scenes: bool = False
 
 
 @router.post("/{task_id}/apply")
@@ -280,40 +296,49 @@ def apply(
     )
     if not task:
         raise NotFound("任务不存在")
-    if task.status == "applied":
-        return {"applied": True}
-    if task.status != "succeeded" or task.operation not in {"script_decompose", "script_entities"}:
+    refill = task.operation == "script_decompose" and data.fill_empty_scenes
+    if task.status == "applied" and not refill:
+        source(db, ctx, task.operation, task.target_id)
+        return (
+            {"applied": True, "scenes": []}
+            if task.operation == "script_decompose"
+            else {"applied": True}
+        )
+    if task.status not in {"succeeded", "applied"} or task.operation not in {
+        "script_decompose",
+        "script_entities",
+    }:
         raise Conflict("任务尚不可应用")
     if source(db, ctx, task.operation, task.target_id, lock=True) != task.source_revision:
         raise Conflict("剧本已修改，这份建议已过期，请重新生成")
     output = task.result["output"]
     if task.operation == "script_decompose":
-        service.apply_scenes(
+        scenes = service.apply_scenes(
             db, ctx, task.target_id, schemas.ApplyScenesIn(scenes=output["scenes"])
         )
-    else:
-        require(ctx.role, "asset.edit")
-        selected = data.selected if data.selected is not None else list(range(len(output)))
-        if len(set(selected)) != len(selected) or any(i < 0 or i >= len(output) for i in selected):
-            raise Conflict("选择的条目无效")
-        entities = []
-        for i in selected:
-            item = dict(output[i])
-            if i in data.matches:
-                item.update(asset_id=data.matches[i], separate=data.matches[i] is None)
-            entities.append(item)
-        try:
-            service.apply_entities(
-                db, ctx, schemas.ApplyEntitiesIn(script_id=task.target_id, entities=entities)
-            )
-        except AppError as exc:
-            if "index" in exc.detail:
-                exc.detail["index"] = selected[exc.detail["index"]]
-            raise
-    if task.operation != "script_decompose" or not any(
-        row.get("error") for row in output["scenes"]
-    ):
-        task.status = "applied"
+        if not any(row.get("error") for row in output["scenes"]):
+            task.status = "applied"
+        return {"applied": True, "scenes": scenes}
+
+    require(ctx.role, "asset.edit")
+    selected = data.selected if data.selected is not None else list(range(len(output)))
+    if len(set(selected)) != len(selected) or any(i < 0 or i >= len(output) for i in selected):
+        raise Conflict("选择的条目无效")
+    entities = []
+    for i in selected:
+        item = dict(output[i])
+        if i in data.matches:
+            item.update(asset_id=data.matches[i], separate=data.matches[i] is None)
+        entities.append(item)
+    try:
+        service.apply_entities(
+            db, ctx, schemas.ApplyEntitiesIn(script_id=task.target_id, entities=entities)
+        )
+    except AppError as exc:
+        if "index" in exc.detail:
+            exc.detail["index"] = selected[exc.detail["index"]]
+        raise
+    task.status = "applied"
     return {"applied": True}
 
 
