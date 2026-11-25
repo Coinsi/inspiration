@@ -1,15 +1,18 @@
 """Tool execution, durable previews, idempotency and stale adoption boundaries."""
 
 # ruff: noqa: F811
+import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from sqlalchemy import select, func
-from app.models.narrative import Script, Scene
-from app.modules.narrative import tool_tasks, service
-from app.modules.assist import service as assist
-from app.adapters.decomposition.mock import MockDecomposer
+
+from sqlalchemy import func, select
+
 from app.adapters.assist.mock import MockAssist
-from tests.test_media_workflow import studio, post_ok  # noqa: F401
+from app.adapters.decomposition.mock import MockDecomposer
+from app.models.narrative import Scene, Script
+from app.modules.assist import service as assist
+from app.modules.narrative import service, tool_tasks
+from tests.test_media_workflow import post_ok, studio  # noqa: F401
 
 
 def setup_tools(studio, monkeypatch):
@@ -112,6 +115,78 @@ def test_legacy_scene_progress_in_editor_and_task_center(studio, monkeypatch):
         task.result = {"output": {"scenes": scenes[1:], "strategy": "mock"}}
     assert client.get(url).json()["summary"]["status"] == "failed"
     assert client.get(root + "/activity?category=media").json()["total"] == 0
+
+
+def test_retry_saves_a_long_storyboard_streamed_one_character_at_a_time(studio, monkeypatch):
+    from app.adapters.decomposition.cloud_llm import CloudLLMDecomposer
+    from tests.test_litellm_sdk import upstream
+
+    client, _, _, root, script = setup_tools(studio, monkeypatch)
+    blocks = [
+        {"block_type": "scene_heading", "text": "街道"},
+        {"block_type": "action", "text": "街灯亮起"},
+        {"block_type": "scene_heading", "text": "房间"},
+        {"block_type": "action", "text": "推开木门"},
+    ]
+    assert client.put(root + f"/scripts/{script['id']}/blocks", json={"blocks": blocks}).is_success
+    shots = [
+        {
+            "title": f"镜头 {i + 1}",
+            "still_prompt": "夕阳穿过窗户洒进房间，窗帘下的木地板映出淡淡暖光。" * 21,
+            "motion_prompt": "镜头从门旁缓慢向前，光线随窗帘的起伏而变化。" * 12,
+        }
+        for i in range(12)
+    ]
+    long_reply = json.dumps({"shots": shots}, ensure_ascii=False)
+    calls = []
+
+    def frame(content, reason=None):
+        data = {
+            "id": "chatcmpl-regression",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "gpt-6.2-sol",
+            "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": reason}],
+        }
+        return b"data: " + json.dumps(data, ensure_ascii=False).encode() + b"\n\n"
+
+    def reply(_method, _path, body):
+        scene = json.loads(body)["messages"][-1]["content"]
+        calls.append(scene)
+        if scene == "街灯亮起":
+            data = frame(json.dumps({"shots": shots[:1]}, ensure_ascii=False), "stop")
+        elif calls.count(scene) == 1:
+            data = frame('{"shots":[', "length")
+        else:
+            data = b"".join(frame(char) for char in long_reply) + frame("", "stop")
+        return 200, "text/event-stream", data + b"data: [DONE]\n\n"
+
+    for key in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(key, "127.0.0.1,localhost")
+    with upstream(reply) as (endpoint, _):
+        strategy = CloudLLMDecomposer(endpoint, "test-key", "gpt-6.2-sol")
+        monkeypatch.setattr(service, "_strategy", lambda *_: strategy)
+        jobs = root + "/creative-tool-tasks"
+        params = {"operation": "script_decompose", "target_id": script["id"]}
+        task = client.post(jobs, json={**params, "request_key": str(uuid.uuid4())}).json()
+        assert tool_tasks.run_once()
+        detail_url = root + f"/activity/creative/{task['id']}"
+        first = client.get(detail_url).json()
+        assert first["summary"]["status"] == "partial"
+        assert "长度上限" in first["scenes"][1]["error"]
+        saved = client.get(jobs, params=params).json()["result"]["output"]["scenes"][0]
+
+        assert client.post(jobs + f"/{task['id']}/retry-scenes").is_success
+        assert tool_tasks.run_once()
+        result = client.get(jobs, params=params).json()["result"]
+        kept, retried = result["output"]["scenes"]
+        assert kept == saved
+        assert [s["title"] for s in retried["shots"]] == [s["title"] for s in shots]
+        assert [s["still_prompt"] for s in retried["shots"]] == [s["still_prompt"] for s in shots]
+        assert [s["motion_prompt"] for s in retried["shots"]] == [s["motion_prompt"] for s in shots]
+        assert result["progress"]["completed"] == 2 and result["progress"]["failed"] == 0
+        assert client.get(detail_url).json()["summary"]["status"] == "succeeded"
+        assert calls == ["街灯亮起", "推开木门", "推开木门"]
 
 
 def test_stale_preview_and_foreign_target(studio, monkeypatch):

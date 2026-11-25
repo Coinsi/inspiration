@@ -3,7 +3,12 @@ import json
 
 import pytest
 
-from app.adapters.assist.streaming import progress, read_completion
+from app.adapters.assist.streaming import (
+    MAX_REPLY_BYTES,
+    progress,
+    read_completion,
+    read_sdk_completion,
+)
 from app.core.errors import CapabilityUnsupported
 from app.modules.harness.live_progress import preview
 from app.modules.harness.prompt_budget import bounded
@@ -32,6 +37,37 @@ def test_stream_delivers_deltas_and_usage_before_returning():
         text, usage = read_completion(stream)
     assert seen == ["你", "你好"]
     assert text == "你好" and usage["total_tokens"] == 9
+
+
+@pytest.mark.parametrize("sdk_reader", [False, True])
+def test_reply_size_limit_uses_utf8_text_bytes(sdk_reader):
+    content = "画" * (MAX_REPLY_BYTES // 3) + "x" * (MAX_REPLY_BYTES % 3)
+
+    def read(tail):
+        frames = [
+            {"choices": [{"delta": {"content": content}}]},
+            {"choices": [{"delta": {"content": tail}, "finish_reason": "stop"}]},
+        ]
+        if sdk_reader:
+            return read_sdk_completion(frames)[0]
+        return read_completion(response("".join(event(frame) for frame in frames)))[0]
+
+    assert read("") == content
+    with pytest.raises(ValueError, match="正文超过"):
+        read("字")
+
+
+@pytest.mark.parametrize("sdk_reader", [False, True])
+def test_excessive_stream_metadata_has_its_own_limit(sdk_reader, monkeypatch):
+    from app.adapters.assist import streaming
+
+    monkeypatch.setattr(streaming, "MAX_TRANSPORT_BYTES", 512)
+    frame = {"id": "x" * 512, "choices": [{"delta": {"content": "a"}, "finish_reason": "stop"}]}
+    with pytest.raises(streaming.CompletionReadError, match="传输数据"):
+        if sdk_reader:
+            read_sdk_completion([frame])
+        else:
+            read_completion(response(event(frame)))
 
 
 @pytest.mark.parametrize(

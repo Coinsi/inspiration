@@ -75,6 +75,38 @@ def failure(exc, operation="模型请求"):
     return ProviderError(f"{operation}失败{suffix}，请核对模型能力、渠道地址和服务状态")
 
 
+def _chat_failure(exc, *, receiving):
+    import httpx
+    import openai
+    from litellm.exceptions import MidStreamFallbackError
+
+    # LiteLLM wraps transport failures during iteration. Classify using the
+    # original exception type, never its message (which may contain the input).
+    stream_failure = isinstance(exc, MidStreamFallbackError)
+    cause = exc
+    if stream_failure:
+        cause = exc.original_exception or exc
+        receiving = not exc.is_pre_first_chunk
+    status = getattr(cause, "status_code", None)
+    if status == 504:
+        return ProviderError("模型网关响应超时（HTTP 504），请稍后重试")
+    if status == 408:
+        return ProviderError("模型请求超时（HTTP 408），请稍后重试")
+    if status == 429:
+        return ProviderError("模型服务暂时限流（HTTP 429），请稍后重试")
+    transport = (cause, cause.__cause__, cause.__context__)
+    timeout_types = (TimeoutError, httpx.TimeoutException, openai.APITimeoutError)
+    if any(isinstance(err, timeout_types) for err in transport):
+        return ProviderError("等待模型服务响应超时，请稍后重试")
+    connection_types = (ConnectionError, httpx.TransportError, openai.APIConnectionError)
+    if any(isinstance(err, connection_types) for err in transport):
+        message = "模型回复传输中断，未收到完整结果" if receiving else "无法连接模型服务"
+        return ProviderError(message)
+    if stream_failure and receiving:
+        return ProviderError("模型回复传输中断，未收到完整结果")
+    return failure(cause)
+
+
 def chat(
     system,
     user,
@@ -86,7 +118,7 @@ def chat(
     max_output_tokens=None,
     temperature=None,
 ):
-    from app.adapters.assist.streaming import read_sdk_completion
+    from app.adapters.assist.streaming import CompletionReadError, read_sdk_completion
 
     params = connection(endpoint, token, provider)
     # Let each model use its supported default. Reasoning models can reject
@@ -95,6 +127,7 @@ def chat(
         params["temperature"] = temperature
     if max_output_tokens is not None:
         params["max_completion_tokens"] = max_output_tokens
+    response = None
     try:
         response = sdk().completion(
             model=model,
@@ -107,5 +140,7 @@ def chat(
         return read_sdk_completion(response)
     except ProviderError:
         raise
+    except CompletionReadError as exc:
+        raise ProviderError(str(exc)) from None
     except Exception as exc:
-        raise failure(exc) from None
+        raise _chat_failure(exc, receiving=response is not None) from None

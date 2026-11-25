@@ -107,6 +107,9 @@ def test_sdk_does_not_replay_failed_submit(status):
     with upstream(reply) as (endpoint, calls):
         with pytest.raises(ProviderError) as exc:
             chat("system", "hi", endpoint, "test-key", "test")
+        assert str(status) in exc.value.message
+        if status == 504:
+            assert "超时" in exc.value.message
         assert "secret" not in str(exc.value)
         assert len(calls) == 1
 
@@ -192,8 +195,15 @@ def test_video_reference_is_rejected_not_silently_dropped():
         )
 
 
-@pytest.mark.parametrize("reason", ["length", "content_filter", None])
-def test_real_sdk_incomplete_stream_is_never_an_action(reason):
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("length", "长度上限"),
+        ("content_filter", "内容审核"),
+        (None, "中断"),
+    ],
+)
+def test_real_sdk_incomplete_stream_is_never_an_action(reason, expected):
     def reply(*_):
         event = {
             "id": "c",
@@ -204,8 +214,34 @@ def test_real_sdk_incomplete_stream_is_never_an_action(reason):
         }
         return 200, "text/event-stream", b"data: " + json.dumps(event).encode() + b"\n\n"
 
-    with upstream(reply) as (endpoint, _), pytest.raises(ProviderError):
+    with upstream(reply) as (endpoint, calls), pytest.raises(ProviderError, match=expected):
         chat("system", "hi", endpoint, "test", "test")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_chat_preserves_wrapped_transport_failure_without_exposing_details(monkeypatch, timed_out):
+    from types import SimpleNamespace
+
+    import httpx
+    from litellm.exceptions import MidStreamFallbackError
+
+    from app.adapters import model_sdk
+
+    def interrupted(**_):
+        yield {"choices": [{"delta": {"content": '{"partial":'}}]}
+        cause = httpx.ReadTimeout if timed_out else httpx.RemoteProtocolError
+        raise MidStreamFallbackError(
+            "private provider details",
+            "test",
+            "openai",
+            original_exception=cause("private request data"),
+        )
+
+    monkeypatch.setattr(model_sdk, "sdk", lambda: SimpleNamespace(completion=interrupted))
+    with pytest.raises(ProviderError, match="超时" if timed_out else "中断") as error:
+        chat("system", "user", "http://example.test", "test", "test")
+    assert "private" not in error.value.message
 
 
 def test_gemini_video_maps_reference_bytes_and_duration():
