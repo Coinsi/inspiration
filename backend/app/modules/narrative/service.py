@@ -495,19 +495,24 @@ def _break_down_scenes(
     db, project_id, strategy, chapter_id, scenes, previous=None, checkpoint=None
 ):
     from app.core.errors import AppError, ProviderError
+    from app.modules.narrative.scene_progress import PENDING_MESSAGE
 
     saved = (previous or {}).get("scenes", [])
     for index, scene in enumerate(scenes):
         if index < len(saved) and not saved[index].get("error") and saved[index].get("shots"):
             scenes[index] = schemas.SceneSuggestionOut.model_validate(saved[index])
+            scenes[index].breakdown_status = "succeeded"
         else:
-            scene.error = "尚未完成拆镜"
+            scene.breakdown_status = "pending"
+            scene.error = PENDING_MESSAGE
     result = schemas.DecomposeOut(strategy=strategy.name, scenes=scenes)
-    if checkpoint:
-        checkpoint(result)
     for scene in result.scenes:
-        if not scene.error:
+        if scene.breakdown_status == "succeeded":
             continue
+        scene.breakdown_status = "running"
+        if checkpoint:
+            # Publish the previous outcome and the next scene before its model call.
+            checkpoint(result)
         try:
             drafts = breakdown.suggest(
                 db, strategy, project_id, scene.body or scene.summary or scene.title, chapter_id
@@ -516,10 +521,10 @@ def _break_down_scenes(
                 raise ProviderError("模型没有返回镜头，请重试此场")
             scene.shots = [schemas.ShotBrief(**draft.model_dump()) for draft in drafts]
             scene.error = None
+            scene.breakdown_status = "succeeded"
         except Exception as exc:
             scene.error = exc.message if isinstance(exc, AppError) else "未取得有效分镜，请重试此场"
-        if checkpoint:
-            checkpoint(result)
+            scene.breakdown_status = "failed"
     return result
 
 

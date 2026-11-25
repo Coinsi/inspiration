@@ -1,4 +1,5 @@
 import { StoryAssetMatch, assetMatch, type AssetMatch } from "@/components/StoryAssetMatch";
+import { SceneTaskProgress, SceneTaskRows } from "@/components/SceneTaskProgress";
 import { useCreativeToolTask } from "@/lib/useCreativeToolTask";
 import { refreshAppliedScenes, sceneAdoptionMessage } from "@/lib/scene-adoption";
 import { StudioSelect } from "@/components/ui/studio-select";
@@ -30,12 +31,13 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import AssistPanel from "@/components/AssistPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useI18n } from "@/lib/i18n";
 import { usePersistentState } from "@/lib/usePersistentState";
@@ -261,37 +263,40 @@ function ScriptEditorWorkspace() {
   };
 
   // ── 派生:场次/镜头 ──
-  const [dec, setDec] = useState<DecomposeResult | null>(null);
+  const [params] = useSearchParams();
+  const [scenePreviewOpen, setScenePreviewOpen] = useState(params.get("tool") === "scenes");
+  const seenSceneTask = useRef<string | null>(null);
   const decomposition = useCreativeToolTask<DecomposeResult>(
     projectId!,
     "script_decompose",
     scriptId!,
   );
-  const decompose = {
-    isPending: decomposition.busy,
-    mutate: () =>
-      decomposition.submit.mutate(
-        {},
-        {
-          onSuccess: (task) => {
-            if ((task.status === "succeeded" || task.status === "applied") && task.result)
-              setDec(task.result.output);
-          },
-          onError: (e) => toast.push(e.message, "error"),
-        },
-      ),
+  const sceneTask = decomposition.task;
+  const dec = sceneTask?.result?.output;
+  const progress = sceneTask?.result?.progress;
+  const sceneActive = decomposition.busy || decomposition.retryScenes.isPending;
+  const startSceneTask = () => {
+    setScenePreviewOpen(true);
+    decomposition.submit.mutate({}, {
+      onError: (e) => { setScenePreviewOpen(false); toast.push(e.message, "error"); },
+    });
+  };
+  const showSceneTask = () => {
+    if (sceneTask) setScenePreviewOpen(true);
+    else startSceneTask();
   };
   useEffect(() => {
-    if (decomposition.task?.status === "succeeded")
-      setDec(decomposition.task.result!.output);
-  }, [decomposition.task?.id, decomposition.task?.status]);
+    if (!sceneTask || seenSceneTask.current === sceneTask.id) return;
+    seenSceneTask.current = sceneTask.id;
+    if (sceneTask.status === "succeeded" || params.get("tool") === "scenes") setScenePreviewOpen(true);
+  }, [sceneTask, params]);
   const applyScenes = useMutation({
     mutationFn: () => decomposition.apply.mutateAsync({
       fill_empty_scenes: decomposition.task?.status === "applied",
     }),
     onSuccess: (result) => {
       const failed = dec?.scenes.filter(scene => scene.error).length ?? 0;
-      if (!failed) setDec(null);
+      if (!failed) setScenePreviewOpen(false);
       toast.push(sceneAdoptionMessage(result.scenes ?? [], failed, lang), "success");
       void refreshAppliedScenes(qc, projectId!, scriptId!);
     },
@@ -551,15 +556,14 @@ function ScriptEditorWorkspace() {
               制作工具
             </summary>
             <div>
-              {(decomposition.task?.status === "succeeded" ||
+              {((sceneTask && !sceneActive) ||
                 extraction.task?.status === "succeeded") && (
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={dirty || decomposition.busy || extraction.busy}
+                  disabled={dirty || serverChanged || save.isPending || sceneActive || extraction.busy}
                   onClick={() => {
-                    if (decomposition.task?.status === "succeeded")
-                      decomposition.submit.mutate({});
+                    if (sceneTask) startSceneTask();
                     if (extraction.task?.status === "succeeded")
                       extraction.submit.mutate({});
                   }}
@@ -589,23 +593,21 @@ function ScriptEditorWorkspace() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => decompose.mutate()}
+                onClick={showSceneTask}
                 disabled={
                   !decomposition.ready ||
-                  decompose.isPending ||
-                  dirty ||
-                  save.isPending ||
-                  serverChanged
+                  decomposition.submit.isPending ||
+                  (!sceneTask && (dirty || save.isPending || serverChanged))
                 }
               >
-                {decompose.isPending ? (
+                {sceneActive ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : (
                   <Clapperboard className="mr-1 h-4 w-4" />
                 )}
-                {decomposition.task?.status === "succeeded" || decomposition.task?.status === "applied"
-                  ? tr("se.viewSceneSuggestions")
-                  : tr("se.decompose")}
+                {sceneActive ? (lang === "zh" ? "查看拆镜进度" : "View breakdown progress")
+                  : sceneTask?.status === "failed" ? (lang === "zh" ? "查看拆镜结果" : "View breakdown result")
+                  : dec ? tr("se.viewSceneSuggestions") : tr("se.decompose")}
               </Button>
               <Button
                 size="sm"
@@ -953,74 +955,154 @@ function ScriptEditorWorkspace() {
       </div>
 
       {/* 派生场次浮层 */}
-      {dec && dec.scenes.length > 0 && (
-        <Overlay
-          title={`${tr("se.deriveScenes")} · ${dec.scenes.length}`}
-          onClose={() => setDec(null)}
+      {scenePreviewOpen && (
+        <Modal
+          open
+          width={580}
+          bodyClassName="flex min-h-0 flex-col"
+          title={tr("se.deriveScenes")}
+          onClose={() => setScenePreviewOpen(false)}
         >
-          <div className="min-h-0 flex-1 space-y-2 overflow-auto p-4">
-            {dec.scenes.map((s, i) => (
-              <div key={i} className="rounded-md border border-border p-2.5">
-                <div className="text-sm font-medium">{s.title}</div>
-                {s.error && <p className="text-sm text-danger">{s.error}</p>}
-                {s.shots.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {s.shots.map((sh, j) => (
-                      <span
-                        key={j}
-                        className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                      >
-                        {sh.title}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          {dec.scenes.some((s) => s.error) && (
-            <Button
-              variant="outline"
-              disabled={
-                decomposition.busy || decomposition.retryScenes.isPending || applyScenes.isPending
-              }
-              onClick={() =>
-                decomposition.retryScenes.mutate(undefined, {
-                  onError: (e) => toast.push(e.message, "error"),
-                })
-              }
-            >
-              只重试未完成场次
-            </Button>
-          )}
-          <div className="shrink-0 border-t border-border p-3">
-            <Button
-              className="w-full"
-              disabled={
-                applyScenes.isPending ||
-                decomposition.busy ||
-                decomposition.retryScenes.isPending ||
-                !dec.scenes.some((s) => !s.error)
-              }
-              onClick={async () => {
-                if (
-                  await confirm({
-                    title: tr("se.applyScenes"),
-                    message: tr("se.applyScenesConfirm"),
-                    confirmText: tr("se.applyScenes"),
-                  })
-                ) {
-                  applyScenes.mutate();
-                }
-              }}
-            >
-              {applyScenes.isPending && (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+          {(sceneTask || sceneActive) && (
+            <div className="shrink-0 space-y-2 border-b border-border px-4 py-3">
+              <SceneTaskProgress
+                status={sceneTask?.status ?? "queued"}
+                progress={progress}
+              />
+              {sceneTask && (
+                <Link
+                  className="studio-link text-xs"
+                  to={`${base}/tasks?category=story&kind=creative&task=${sceneTask.id}`}
+                >
+                  {lang === "zh" ? "在任务中心查看" : "View in task center"} →
+                </Link>
               )}
-              {tr("se.applyScenes")}
-            </Button>
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-auto px-4">
+            {!sceneTask && !sceneActive && decomposition.query.isPending && (
+              <p className="py-4 text-sm text-muted-foreground" role="status">
+                {lang === "zh" ? "正在读取任务进度…" : "Loading task progress…"}
+              </p>
+            )}
+            {decomposition.query.isError && (
+              <p role="alert" className="py-2 text-sm text-danger">
+                {lang === "zh"
+                  ? "暂时无法刷新进度"
+                  : "Progress could not be refreshed"}
+                <button
+                  className="studio-link ml-2"
+                  onClick={() => void decomposition.query.refetch()}
+                >
+                  {lang === "zh" ? "重新读取" : "Refresh"}
+                </button>
+              </p>
+            )}
+            {sceneTask?.error && (
+              <p role="alert" className="py-2 text-sm text-danger">
+                {sceneTask.error}
+              </p>
+            )}
+            {dec && (
+              <SceneTaskRows
+                stopped={sceneTask?.status === "failed"}
+                rows={dec.scenes.map((s) => ({
+                  title: s.title,
+                  state: s.breakdown_status ?? (s.error ? "failed" : "succeeded"),
+                  shots: s.shots.length,
+                  shotTitles: s.shots.map((shot) => shot.title),
+                  error: s.error,
+                }))}
+              />
+            )}
+            {!sceneActive &&
+              !decomposition.query.isPending &&
+              !decomposition.query.isError &&
+              !dec?.scenes.length && (
+                <p className="py-4 text-sm text-muted-foreground">
+                  {lang === "zh" ? "暂无场次建议" : "No scene suggestions yet"}
+                </p>
+              )}
           </div>
-        </Overlay>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border p-3">
+            {!sceneActive &&
+              !!dec?.scenes.length &&
+              (dec.scenes.some((s) => s.error) || sceneTask?.status === "failed") && (
+                <Button
+                  variant="outline"
+                  disabled={
+                    decomposition.busy ||
+                    decomposition.retryScenes.isPending ||
+                    applyScenes.isPending
+                  }
+                  onClick={() =>
+                    decomposition.retryScenes.mutate(undefined, {
+                      onError: (e) => toast.push(e.message, "error"),
+                    })
+                  }
+                >
+                  {dec.scenes.some((s) => s.error)
+                    ? lang === "zh"
+                      ? "只重试未完成场次"
+                      : "Retry unfinished scenes"
+                    : lang === "zh"
+                      ? "恢复已完成结果"
+                      : "Recover completed scenes"}
+                </Button>
+              )}
+            {sceneActive && (
+              <Button variant="outline" onClick={() => setScenePreviewOpen(false)}>
+                {lang === "zh" ? "在后台继续" : "Continue in background"}
+              </Button>
+            )}
+            {!sceneActive &&
+              sceneTask?.status === "failed" &&
+              !dec?.scenes.length && (
+                <Button
+                  disabled={dirty || save.isPending || serverChanged}
+                  onClick={startSceneTask}
+                >
+                  {lang === "zh" ? "重新拆镜" : "Retry breakdown"}
+                </Button>
+              )}
+            {!sceneTask && !sceneActive && decomposition.ready && (
+              <Button
+                disabled={dirty || save.isPending || serverChanged}
+                onClick={startSceneTask}
+              >
+                {tr("se.decompose")}
+              </Button>
+            )}
+            {!sceneActive &&
+              !!dec?.scenes.length &&
+              sceneTask?.status !== "failed" && (
+                <Button
+                  disabled={
+                    applyScenes.isPending ||
+                    decomposition.busy ||
+                    decomposition.retryScenes.isPending ||
+                    !dec.scenes.some((s) => !s.error)
+                  }
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        title: tr("se.applyScenes"),
+                        message: tr("se.applyScenesConfirm"),
+                        confirmText: tr("se.applyScenes"),
+                      })
+                    ) {
+                      applyScenes.mutate();
+                    }
+                  }}
+                >
+                  {applyScenes.isPending && (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  )}
+                  {tr("se.applyScenes")}
+                </Button>
+              )}
+          </div>
+        </Modal>
       )}
 
       {matching && (
@@ -1280,7 +1362,7 @@ function Overlay({
       if (e.key !== "Tab") return;
       const items = Array.from(
         dialog?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
         ) ?? [],
       ).filter((el) => el.getClientRects().length);
       if (e.shiftKey && document.activeElement === items[0]) {

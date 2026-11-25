@@ -11,6 +11,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
+import { SceneTaskProgress, SceneTaskRows, type SceneProgressRow } from "./SceneTaskProgress";
+import { useI18n } from "@/lib/i18n";
 
 type Destination = { label: string; path: string | null };
 type Action = {
@@ -38,6 +40,7 @@ type Detail = {
   changes: Change[];
   children: { id: string; status: string }[];
   progress: { completed: number; total: number } | null;
+  scenes?: SceneProgressRow[];
   history: { id: string; label: string; at: string }[];
   more_history: boolean;
 };
@@ -84,15 +87,17 @@ export function ActivityDetail({
   const qc = useQueryClient(),
     confirm = useConfirm(),
     toast = useToast();
+  const zh = useI18n().lang === "zh";
   const query = useQuery({
     queryKey: ["activity-detail", projectId, kind, id],
     queryFn: () =>
       api.get<Detail>(`/projects/${projectId}/activity/${kind}/${id}`),
-    refetchInterval: (q) =>
-      q.state.data &&
-      !["succeeded", "failed", "canceled"].includes(q.state.data.summary.status)
-        ? 3000
-        : false,
+    refetchInterval: (q) => {
+      const status = q.state.data?.summary.status;
+      if (!status) return false;
+      if (!["succeeded", "failed", "partial", "canceled"].includes(status)) return 3000;
+      return kind === "creative" && ["partial", "failed"].includes(status) ? 15000 : false;
+    },
   });
   const command = useMutation({
     mutationFn: (action: Action) =>
@@ -104,6 +109,8 @@ export function ActivityDetail({
         qc.invalidateQueries({ queryKey: ["jobs", projectId] }),
         qc.invalidateQueries({ queryKey: ["conversations", projectId] }),
         qc.invalidateQueries({ queryKey: ["conversation", projectId] }),
+        qc.invalidateQueries({ queryKey: ["creative-tool-task", projectId] }),
+        qc.invalidateQueries({ queryKey: ["background-tool-tasks", projectId] }),
       ]);
     },
     onError: (error) => {
@@ -133,6 +140,7 @@ export function ActivityDetail({
   if (!query.data) return <div className="task-empty">正在读取任务…</div>;
   const data = query.data,
     s = data.summary;
+  const story = kind === "creative" || kind === "adaptation";
   return (
     <div className="task-detail-body">
       <div className="task-detail-title">
@@ -143,6 +151,18 @@ export function ActivityDetail({
         <p>{s.target_name}</p>
       </div>
       {data.source && <DestinationLink item={data.source} />}
+      {story && (data.scenes || s.scene_progress) && (
+        <section className="activity-section">
+          <SceneTaskProgress status={s.status} progress={s.scene_progress} />
+          {data.scenes && <SceneTaskRows rows={data.scenes} stopped={s.status === "failed"} unit={s.scene_progress?.unit} />}
+        </section>
+      )}
+      {story && !data.scenes && !s.scene_progress && ["pending", "running"].includes(s.status) && (
+        <p className="text-sm text-muted-foreground">
+          {s.status === "pending" ? (zh ? "已排队，等待开始" : "Queued") :
+            (zh ? "正在等待模型返回结果" : "Waiting for the model response")}
+        </p>
+      )}
       {data.progress && data.progress.total > 0 && (
         <div className="activity-progress">
           <label>
@@ -151,24 +171,24 @@ export function ActivityDetail({
           <progress value={data.progress.completed} max={data.progress.total} />
         </div>
       )}
-      <section className="activity-section">
+      {!story && <section className="activity-section">
         <h4>结果保存在哪里</h4>
         <p className="whitespace-pre-wrap">{data.result_note}</p>
-      </section>
-      <section className="activity-section">
+      </section>}
+      {!story && <section className="activity-section">
         <h4>影响范围</h4>
         {data.scope.length ? (
           data.scope.map((item, i) => <DestinationLink key={i} item={item} />)
         ) : (
           <p>未指定可修改对象，当前任务不会直接修改作品正文。</p>
         )}
-      </section>
+      </section>}
       {s.error && (
         <p className="task-error" role="alert">
           {taskError(s.error)}
         </p>
       )}
-      <section className="activity-section">
+      {(!story || data.actions.length > 0) && <section className="activity-section">
         <h4>如何继续</h4>
         <p>{data.recovery_note}</p>
         <div className="task-actions">
@@ -184,7 +204,7 @@ export function ActivityDetail({
             </Button>
           ))}
         </div>
-      </section>
+      </section>}
       {!!data.changes.length && (
         <section className="activity-section">
           <h4>内容修改</h4>
@@ -234,7 +254,7 @@ export function ActivityDetail({
           ))}
         </section>
       )}
-      <section className="activity-section">
+      {!story && <section className="activity-section">
         <h4>操作记录</h4>
         {data.history.length ? (
           <ol className="activity-history">
@@ -249,7 +269,7 @@ export function ActivityDetail({
           <p>暂无已记录的操作。</p>
         )}
         {data.more_history && <p>显示最近 30 条操作。</p>}
-      </section>
+      </section>}
       <details className="task-metadata">
         <summary>任务信息</summary>
         <dl>

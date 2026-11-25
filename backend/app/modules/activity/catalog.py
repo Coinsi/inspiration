@@ -1,6 +1,7 @@
 """SQL-paginated task projection. Never load complete media or conversation histories."""
 
 from sqlalchemy import String, case, cast, func, literal, or_, select, union_all
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.models.agent import AgentRun
 from app.models.canvas import Canvas, CanvasRun
@@ -13,7 +14,13 @@ from app.models.transcription import TranscriptionRun
 from app.modules.generation.task_center import base_query
 
 ACTIVE = ("pending", "submitted", "running")
-ATTENTION = ("failed", "paused", "needs_review")
+ATTENTION = ("failed", "partial", "paused", "needs_review")
+CATEGORIES = {
+    "story": ("creative", "adaptation"),
+    "generation": ("generation",),
+    "media": ("import", "index", "processing", "transcription"),
+    "workflow": ("agent", "canvas"),
+}
 
 
 def normalized(column):
@@ -31,15 +38,16 @@ def normalized(column):
     )
 
 
-def projection(model, kind, title, target_type, target_id, available, provider, operation):
+def projection(model, kind, title, target_type, target_id, available, provider, operation,
+               *, status=None, scene_progress=None):
     return select(
         model.id.label("id"),
         literal(kind).label("kind"),
         title.label("target_name"),
-        literal(target_type).label("target_type"),
+        (literal(target_type) if isinstance(target_type, str) else target_type).label("target_type"),
         target_id.label("target_id"),
         available.label("target_available"),
-        normalized(model.status).label("status"),
+        (normalized(model.status) if status is None else status).label("status"),
         model.status.label("raw_status"),
         provider.label("provider"),
         operation.label("operation"),
@@ -50,10 +58,13 @@ def projection(model, kind, title, target_type, target_id, available, provider, 
         literal(None, String).label("model_name"),
         literal(0).label("result_count"),
         literal(False).label("has_warnings"),
+        (literal(None, JSONB) if scene_progress is None else scene_progress).label("scene_progress"),
     )
 
 
 def queries(ctx):
+    from app.modules.activity.story import story_queries
+
     pid = ctx.project.id
     gen, title = base_query(pid)
     # Keep the generation source resolution's project isolation.
@@ -85,6 +96,7 @@ def queries(ctx):
             ),
             else_=False,
         ).label("has_warnings"),
+        literal(None, JSONB).label("scene_progress"),
     )
     private = (
         select(ConversationMessage.id)
@@ -118,7 +130,7 @@ def queries(ctx):
         .join(Canvas, (Canvas.id == CanvasRun.canvas_id) & (Canvas.project_id == pid))
         .where(CanvasRun.project_id == pid)
     )
-    result = [gen, agent, canvas]
+    result = {"generation": gen, "agent": agent, "canvas": canvas}
     for model, kind, provider in (
         (MediaVersion, "import", literal("素材入库")),
         (MediaIndex, "index", literal("画面索引")),
@@ -142,12 +154,15 @@ def queries(ctx):
         )
         if model is TranscriptionRun:
             q = q.where(TranscriptionRun.project_id == pid)
-        result.append(q)
+        result[kind] = q
+    result.update(story_queries(ctx, projection))
     return result
 
 
-def catalog(db, ctx, status="", operation="", search="", offset=0, limit=24):
-    tasks = union_all(*queries(ctx)).subquery()
+def catalog(db, ctx, status="", operation="", search="", offset=0, limit=24, category=""):
+    sources = queries(ctx)
+    kinds = CATEGORIES[category] if category else sources.keys()
+    tasks = union_all(*(sources[k] for k in kinds)).subquery()
     query = select(tasks)
     if operation:
         query = query.where(tasks.c.operation == operation)
@@ -173,7 +188,8 @@ def catalog(db, ctx, status="", operation="", search="", offset=0, limit=24):
         query = query.where(tasks.c.status.in_(selected))
     rows = (
         db.execute(
-            query.order_by(tasks.c.created_at.desc(), tasks.c.kind, tasks.c.id.desc())
+            query.order_by(case((tasks.c.kind.in_(CATEGORIES["story"]), tasks.c.updated_at),
+                                else_=tasks.c.created_at).desc(), tasks.c.kind, tasks.c.id.desc())
             .offset(offset)
             .limit(limit + 1)
         )

@@ -70,6 +70,50 @@ def test_tool_dedup_and_atomic_adoption(studio, monkeypatch):
         )
 
 
+def test_legacy_scene_progress_in_editor_and_task_center(studio, monkeypatch):
+    from app.models.narrative import CreativeToolTask
+
+    client, sessions, ids, root, script = setup_tools(studio, monkeypatch)
+    jobs = root + "/creative-tool-tasks"
+    data = {
+        "operation": "script_decompose",
+        "target_id": script["id"],
+        "request_key": str(uuid.uuid4()),
+    }
+    task_id = client.post(jobs, json=data).json()["id"]
+    scenes = [
+        {"title": "街道", "shots": [{"title": "镜头", "still_prompt": "private prompt"}]},
+        {"title": "街道", "error": "模型请求失败", "shots": []},
+    ]
+    with sessions.begin() as db:
+        task = db.get(CreativeToolTask, task_id)
+        task.status = "succeeded"
+        task.result = {"output": {"scenes": scenes, "strategy": "mock"}}
+    row = client.get(root + "/activity?category=story&operation=script_decompose").json()["items"][
+        0
+    ]
+    assert row["status"] == "partial" and row["target_name"] == script["title"]
+    assert row["scene_progress"]["shots"] == row["scene_progress"]["failed"] == 1
+    assert "private prompt" not in str(row)
+    url = root + f"/activity/creative/{task_id}"
+    detail = client.get(url).json()
+    assert [s["state"] for s in detail["scenes"]] == ["succeeded", "failed"]
+    assert detail["actions"][0]["path"].endswith("/retry-scenes")
+    assert client.get(
+        f"/api/v1/projects/{ids['other']}/activity/creative/{task_id}"
+    ).status_code in (403, 404)
+    editor = client.get(
+        jobs, params={"operation": data["operation"], "target_id": script["id"]}
+    ).json()
+    assert editor["result"]["progress"]["completed"] == row["scene_progress"]["completed"] == 1
+    with sessions.begin() as db:
+        task = db.get(CreativeToolTask, task_id)
+        assert "progress" not in task.result
+        task.result = {"output": {"scenes": scenes[1:], "strategy": "mock"}}
+    assert client.get(url).json()["summary"]["status"] == "failed"
+    assert client.get(root + "/activity?category=media").json()["total"] == 0
+
+
 def test_stale_preview_and_foreign_target(studio, monkeypatch):
     client, sessions, ids, root, script = setup_tools(studio, monkeypatch)
     payload = {
@@ -277,6 +321,26 @@ def test_breakdown_and_entity_tools(studio, monkeypatch):
         ).json()
         assert restored["status"] == "succeeded", restored
         assert isinstance(restored["result"]["output"], list)
+        if operation == "scene_breakdown":
+            url = root + f"/activity/creative/{restored['id']}"
+            detail = client.get(url).json()
+            progress = detail["summary"]["scene_progress"]
+            assert progress["unit"] == "shot"
+            assert progress["total"] == progress["completed"] == len(detail["scenes"]) > 0
+            assert progress["failed"] == 0
+            # Existing receipts have only the saved shots. Mixed outcomes must remain visible.
+            from app.models.narrative import CreativeToolTask
+            with sessions.begin() as db:
+                entry = db.get(CreativeToolTask, restored["id"])
+                entry.result = {"output": [
+                    {"title": "街角", "storyboard": {"still_prompt": "private visual description"}},
+                    {"title": "路口", "storyboard": {"breakdown_error": "模型没有返回分镜"}},
+                ]}
+            older = client.get(url).json()
+            assert older["summary"]["status"] == "partial"
+            assert older["summary"]["scene_progress"]["failed"] == 1
+            assert older["scenes"][1]["error"] == "模型没有返回分镜"
+            assert "private visual description" not in str(older)
         assert (
             client.post(root + "/creative-tool-tasks", json=request).json()["id"]
             == response.json()["id"]

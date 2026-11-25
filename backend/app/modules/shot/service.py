@@ -165,7 +165,12 @@ def breakdown_scene(
         names = AssetNames(
             db, ctx.project.id, scope_for(db, scene.script_id, scene.adapted_from_chapter_id)
         )
+        completed = len(existing) - len(missing)
+        failed = 0
+        positions = {shot.id: i for i, shot in enumerate(existing, 1)}
         for shot in missing:
+            if checkpoint:
+                checkpoint(len(existing), completed, failed, positions[shot.id], shot.title)
             try:
                 with db.begin_nested():
                     original_text = (shot.title, shot.description)
@@ -196,6 +201,7 @@ def breakdown_scene(
                     shot.storyboard = {
                         k: v for k, v in shot.storyboard.items() if k != "breakdown_error"
                     }
+                completed += 1
             except Exception as exc:
                 from app.core.errors import AppError
 
@@ -205,8 +211,7 @@ def breakdown_scene(
                     if isinstance(exc, AppError)
                     else "未取得该镜的分镜，请重试",
                 }
-            if checkpoint:
-                checkpoint()
+                failed += 1
     else:
         drafts = breakdown.suggest(
             db, strategy, ctx.project.id, text, scene.adapted_from_chapter_id

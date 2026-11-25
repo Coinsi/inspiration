@@ -16,7 +16,7 @@ from app.core.permissions import require
 from app.models.identity import Project, User, Membership
 from app.models.narrative import Chapter, Scene, CreativeToolTask
 from app.models.shot import Shot
-from app.modules.narrative import service, schemas
+from app.modules.narrative import scene_progress, service, schemas
 
 Operation = Literal[
     "script_decompose", "script_entities", "scene_breakdown", "chapter_decompose", "assist_message"
@@ -106,6 +106,17 @@ def _breakdown_still_current(db, task):
     )
 
 
+def receipt(task):
+    if not task or task.operation not in scene_progress.OPERATIONS or not task.result:
+        return task
+    output = task.result.get("output")
+    if not output or "progress" in task.result:
+        return task
+    # Enrich historical receipts on read. Their original suggestions remain untouched.
+    scenes = [dict(scene, breakdown_status=scene_progress.scene_state(scene)) for scene in output["scenes"]]
+    return {**jsonable_encoder(task), "result": scene_progress.with_progress(task.result, {**output, "scenes": scenes})}
+
+
 @router.get("")
 def current(
     operation: Operation,
@@ -114,7 +125,7 @@ def current(
     db=Depends(get_db, scope="function"),
 ):
     source(db, ctx, operation, target_id)
-    return latest(db, ctx.project.id, operation, target_id)
+    return receipt(latest(db, ctx.project.id, operation, target_id))
 
 
 @router.get("/recent")
@@ -164,7 +175,7 @@ def submit(
             or previous.payload != payload
         ):
             raise Conflict("同一提交标识不能用于不同内容")
-        return previous
+        return receipt(previous)
     active = latest(db, ctx.project.id, data.operation, data.target_id)
     if (
         active
@@ -173,8 +184,8 @@ def submit(
         and data.operation in {"script_decompose", "chapter_decompose"}
         and (active.result or {}).get("output", {}).get("scenes")
     ):
-        active.status, active.error = "queued", None
-        return active
+        scene_progress.queue_unfinished(active)
+        return receipt(active)
     if (
         active
         and data.operation != "assist_message"
@@ -182,7 +193,7 @@ def submit(
         and active.status in {"queued", "running", "succeeded", "applied"}
         and _breakdown_still_current(db, active)
     ):
-        return active
+        return receipt(active)
     if active and active.status in {"queued", "running"}:
         raise Conflict("该对象已有任务执行中，请等待完成后再提交")
     task = CreativeToolTask(
@@ -205,7 +216,7 @@ def execute(db, ctx, task):
     if task.operation in {"script_decompose", "chapter_decompose"}:
 
         def checkpoint(result):
-            task.result = {**(task.result or {}), "output": result.model_dump(mode="json")}
+            task.result = scene_progress.with_progress(task.result, result.model_dump(mode="json"))
             db.commit()
             db.refresh(task, with_for_update=True)
             if task.status != "running":
@@ -229,7 +240,11 @@ def execute(db, ctx, task):
         if source(db, ctx, task.operation, task.target_id, lock=True) != task.source_revision:
             raise Conflict("场景已修改，请重新生成分镜")
 
-        def save_shot():
+        def save_shot(total, completed, failed, current, title):
+            task.result = {"progress": {
+                "unit": "shot", "total": total, "completed": completed, "failed": failed,
+                "current": current, "current_title": title,
+            }}
             db.commit()
             db.refresh(task, with_for_update=True)
             if (
@@ -246,7 +261,17 @@ def execute(db, ctx, task):
         result = assist.post_message(
             db, ctx, task.target_id, assist_schemas.PostMessageIn.model_validate(task.payload)
         )
-    receipt = {"output": jsonable_encoder(result)}
+    output = jsonable_encoder(result)
+    receipt = {"output": output}
+    if task.operation in scene_progress.OPERATIONS:
+        # The last scene and the final task status are committed together by the worker.
+        receipt = scene_progress.with_progress(task.result, output)
+    elif task.operation == "scene_breakdown":
+        failed = sum(bool((row.get("storyboard") or {}).get("breakdown_error")) for row in output)
+        receipt["progress"] = {
+            "unit": "shot", "total": len(output), "completed": len(output) - failed, "failed": failed,
+            "current": None, "current_title": None,
+        }
     if task.operation == "chapter_decompose":
         receipt["novel_id"] = str(db.get(Chapter, task.target_id).novel_id)
     return receipt
@@ -258,21 +283,27 @@ def retry_scenes(
     ctx: ProjectContext = Depends(get_project_context),
     db=Depends(get_db, scope="function"),
 ):
-    task = db.scalar(
-        select(CreativeToolTask)
-        .where(CreativeToolTask.id == task_id, CreativeToolTask.project_id == ctx.project.id)
-        .with_for_update()
+    query = select(CreativeToolTask).where(
+        CreativeToolTask.id == task_id, CreativeToolTask.project_id == ctx.project.id
     )
-    if not task or task.operation not in {"script_decompose", "chapter_decompose"}:
+    task = db.scalar(query)
+    if not task or task.operation not in scene_progress.OPERATIONS:
         raise NotFound("找不到这次拆镜任务")
     if source(db, ctx, task.operation, task.target_id) != task.source_revision:
         raise Conflict("原文已修改，请从最新内容重新拆解")
     if task.status in {"queued", "running"}:
         return task
-    scenes = (task.result or {}).get("output", {}).get("scenes", [])
-    if not any(row.get("error") for row in scenes):
+    task = db.scalar(query.with_for_update().execution_options(populate_existing=True))
+    if task.status in {"queued", "running"}:
         return task
-    task.status, task.error = "queued", None
+    if latest(db, ctx.project.id, task.operation, task.target_id).id != task.id:
+        raise Conflict("已有更新的拆镜任务，请查看当前任务后重试")
+    scenes = (task.result or {}).get("output", {}).get("scenes", [])
+    if not any(scene_progress.scene_state(row) != "succeeded" for row in scenes):
+        if task.status == "failed" and scenes:
+            task.status, task.error = "succeeded", None
+        return receipt(task)
+    scene_progress.queue_unfinished(task)
     return task
 
 
@@ -360,7 +391,7 @@ def run_once():
         if not task:
             return False
         if task.status == "running":
-            task.status, task.error = "failed", "任务被中断，未保存结果，请检查后重试"
+            task.status, task.error = "failed", "任务被中断，请检查已保存的进度后重试"
             db.commit()
             return True
         task.status = "running"

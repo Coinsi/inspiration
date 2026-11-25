@@ -81,6 +81,7 @@ function NarrativeWorkspace() {
   const setNovelId = (id: string | null) => {
     setParams((previous) => {
       const next = new URLSearchParams(previous);
+      next.delete("chapter");
       if (id) next.set("novel", id);
       else next.delete("novel");
       return next;
@@ -184,13 +185,23 @@ function NarrativeWorkspace() {
     setDirectoryOpen(false);
   };
   useEffect(() => {
+    const requested = params.get("chapter");
+    if (detail && !detailError && requested) {
+      if (detail.chapters.some(c => c.id === requested)) setChapterId(requested);
+      setParams(previous => {
+        const next = new URLSearchParams(previous);
+        next.delete("chapter");
+        return next;
+      }, { replace: true });
+      return;
+    }
     if (
       detail &&
       !detailError &&
       !detail.chapters.some((c) => c.id === chapterId)
     )
       setChapterId(detail.chapters[0]?.id ?? null);
-  }, [detail, detailError, chapterId, setChapterId]);
+  }, [detail, detailError, chapterId, setChapterId, params, setParams]);
   useEffect(() => {
     readingRef.current?.scrollTo({ top: 0 });
   }, [chapter?.id]);
@@ -323,6 +334,7 @@ function NarrativeWorkspace() {
     },
     onSuccess: (task) => {
       qc.setQueryData(["chapter-script-task", projectId, task.chapter_id], task);
+      void qc.invalidateQueries({ queryKey: ["jobs", projectId] });
       toast.push(task.status === "succeeded" ? "剧本已生成，可点击查看" : "已提交，可离开页面，稍后回来查看进度", "success");
     },
     onError: (e) => {
@@ -699,8 +711,12 @@ function NarrativeWorkspace() {
                       恢复:加回 startDecompose 按钮即可,后端 /novels/decompose 接口仍在 */}
                       <Button
                         size="sm"
-                        disabled={genScript.isPending || taskBusy || scriptTask.isPending || scriptTask.isError}
+                        disabled={genScript.isPending || scriptTask.isPending || scriptTask.isError}
                         onClick={() => {
+                          if (taskBusy && scriptTask.data) {
+                            navigate(`${base}/tasks?category=story&kind=adaptation&task=${scriptTask.data.id}`);
+                            return;
+                          }
                           if (scriptTask.data?.status === "succeeded" && scriptTask.data.script_id) {
                             navigate(`${base}/scripts/${scriptTask.data.script_id}`);
                           } else genScript.mutate();
@@ -712,7 +728,7 @@ function NarrativeWorkspace() {
                           <Sparkles className="mr-1 h-4 w-4" />
                         )}
                         {genScript.isPending || taskBusy
-                          ? (scriptTask.data?.status === "queued" ? "等待生成…" : tr("nar.generatingScript"))
+                          ? (taskBusy ? "查看生成进度" : tr("nar.generatingScript"))
                           : scriptTask.data?.status === "succeeded" ? "查看剧本"
                           : scriptTask.data?.status === "failed" ? "重试生成"
                           : tr("nar.genScript")}

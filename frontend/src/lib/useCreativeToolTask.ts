@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { api, type AppliedScene } from "./api";
+import type { SceneProgress } from "./task-center";
 
 export type ToolTask<T> = {
   id: string;
   status: "queued" | "running" | "succeeded" | "failed" | "applied";
-  result: { output: T } | null;
+  result: { output: T; progress?: SceneProgress } | null;
   payload: { content?: string; skills?: unknown[] };
   error: string | null;
 };
@@ -22,6 +23,11 @@ export function useCreativeToolTask<T>(
   const pendingRequest = useRef<{ signature: string; key: string } | null>(
     null,
   );
+  function remember(task: ToolTask<T>) {
+    cache.setQueryData(key, task);
+    void cache.invalidateQueries({ queryKey: ["jobs", projectId] });
+    void cache.invalidateQueries({ queryKey: ["activity-detail", projectId, "creative", task.id] });
+  }
   const query = useQuery({
     queryKey: key,
     queryFn: () =>
@@ -53,7 +59,7 @@ export function useCreativeToolTask<T>(
       });
     },
     onSuccess: (task) => {
-      cache.setQueryData(key, task);
+      remember(task);
       pendingRequest.current = null;
     },
     onError: () => {
@@ -73,12 +79,14 @@ export function useCreativeToolTask<T>(
       ),
     onSuccess: () => {
       void cache.invalidateQueries({ queryKey: key });
+      void cache.invalidateQueries({ queryKey: ["jobs", projectId] });
+      void cache.invalidateQueries({ queryKey: ["activity-detail", projectId] });
     },
   });
   const retryScenes = useMutation({
     mutationFn: () =>
       api.post<ToolTask<T>>(`${base}/${query.data!.id}/retry-scenes`),
-    onSuccess: (task) => cache.setQueryData(key, task),
+    onSuccess: remember,
   });
   const busy =
     submit.isPending ||

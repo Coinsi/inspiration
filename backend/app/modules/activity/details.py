@@ -14,6 +14,7 @@ from app.models.identity import AuditLog
 from app.models.library import LibraryMedia, MediaVersion
 from app.models.media_index import MediaIndex
 from app.models.media_processing import MediaProcessingRun
+from app.models.narrative import CreativeToolTask, ScriptGenerationTask
 from app.models.transcription import TranscriptionRun
 from app.modules.activity.catalog import queries
 
@@ -24,8 +25,9 @@ MODELS = {
     "index": MediaIndex,
     "processing": MediaProcessingRun,
     "transcription": TranscriptionRun,
+    "creative": CreativeToolTask,
+    "adaptation": ScriptGenerationTask,
 }
-KINDS = ["generation", "agent", "canvas", "import", "index", "processing", "transcription"]
 LABELS = {"pause": "暂停", "resume": "继续执行", "cancel": "停止任务", "retry": "重试未完成部分"}
 
 
@@ -89,7 +91,7 @@ def history(db, ctx, target_id):
 def detail(db, ctx, kind, task_id):
     if kind not in MODELS:
         raise NotFound("任务不存在")
-    q = queries(ctx)[KINDS.index(kind)]
+    q = queries(ctx)[kind]
     model = MODELS[kind]
     row = db.execute(q.where(model.id == task_id)).mappings().first()
     if not row:
@@ -107,6 +109,11 @@ def detail(db, ctx, kind, task_id):
         "progress": None,
         "recovery_note": "",
     }
+    if kind in ("creative", "adaptation"):
+        from app.modules.activity.story import fill_detail
+
+        fill_detail(db, ctx, run, result)
+        return result
     result["history"], result["more_history"] = history(db, ctx, task_id)
 
     def action(name, path, payload=None, note=""):

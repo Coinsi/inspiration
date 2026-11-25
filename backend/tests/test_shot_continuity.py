@@ -229,6 +229,12 @@ def test_partial_scene_retry_preserves_other_shots_and_order(studio, monkeypatch
 
     def shots(self, text):
         calls.append(text)
+        # A separate HTTP request can see which scene is actually in the model call.
+        detail = client.get(root + f"/activity/creative/{task['id']}").json()
+        visible = detail["summary"]["scene_progress"]
+        assert detail["summary"]["status"] == "running"
+        assert detail["scenes"][visible["current"] - 1]["state"] == "running"
+        observed.append((visible["current"], visible["completed"], visible["failed"], visible["attempt"]))
         if text == "街边下雪" and calls.count(text) == 1:
             raise ProviderError("当前场次请求失败")
         return [StoryboardShotSuggestion(title=text, still_prompt=text + "，远景")]
@@ -241,6 +247,7 @@ def test_partial_scene_retry_preserves_other_shots_and_order(studio, monkeypatch
         "request_key": str(uuid.uuid4()),
     }
     task = client.post(jobs, json=data).json()
+    observed = []
 
     def scenes():
         return client.get(root + f"/scripts/{script['id']}/scenes").json()
@@ -256,11 +263,21 @@ def test_partial_scene_retry_preserves_other_shots_and_order(studio, monkeypatch
         True,
         False,
     ]
+    assert observed == [(1, 0, 0, 1), (2, 1, 0, 1), (3, 1, 1, 1)]
+    attention = client.get(root + "/activity?category=story&status=attention").json()
+    assert [(item["id"], item["status"]) for item in attention["items"]] == [(task["id"], "partial")]
     post_ok(client, jobs + "/" + task["id"] + "/apply", {})
     original = {s["title"]: s["id"] for s in scenes()}
     assert list(original) == ["街口", "路灯"]
-    assert client.post(jobs + "/" + task["id"] + "/retry-scenes").status_code == 202
+    retry_url = jobs + "/" + task["id"] + "/retry-scenes"
+    queued = client.post(retry_url).json()
+    assert [s["breakdown_status"] for s in queued["result"]["output"]["scenes"]] == ["succeeded", "pending", "succeeded"]
+    assert queued["result"]["progress"]["preserved"] == 2
+    assert client.post(retry_url).json()["result"]["progress"]["attempt"] == 2
     assert tool_tasks.run_once()
+    assert observed[-1] == (2, 2, 0, 2)
+    assert receipt()["result"]["progress"]["completed"] == 3
+    assert client.get(root + "/activity?category=story&status=attention").json()["total"] == 0
     post_ok(client, jobs + "/" + task["id"] + "/apply", {})
     assert [s["title"] for s in scenes()] == ["街口", "街边", "路灯"]
     assert all(s["id"] == original[s["title"]] for s in scenes() if s["title"] in original)

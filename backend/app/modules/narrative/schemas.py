@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -134,6 +135,7 @@ class ShotBrief(StoryboardShotSuggestion):
 
 
 class SceneSuggestionOut(BaseModel):
+    breakdown_status: Literal["pending", "running", "succeeded", "failed"] | None = None
     error: str | None = None
     title: str
     summary: str = ""

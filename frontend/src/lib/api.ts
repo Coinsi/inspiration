@@ -374,6 +374,7 @@ export interface ShotBrief {
   description: string;
 }
 export interface SceneSuggestion {
+  breakdown_status?: "pending" | "running" | "succeeded" | "failed" | null;
   error?: string | null;
   title: string;
   summary: string;

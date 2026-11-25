@@ -622,6 +622,7 @@
   font-size: 11px;
   color: hsl(var(--muted));
 }
+.task-status.status-partial,
 .task-status.status-needs_review,
 .task-status.status-paused {
   background: hsl(var(--muted));

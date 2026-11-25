@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Clock3,
+  Clapperboard,
   Download,
   Film,
   Image,
@@ -20,6 +21,9 @@ import {
   ACTIVE_JOBS,
   JOB_LABEL,
   OPERATIONS,
+  TASK_CATEGORIES,
+  operationCategory,
+  sceneProgressLabel,
   mediaExtension,
   taskLabel,
   taskSource,
@@ -48,6 +52,7 @@ function TaskPage({ projectId }: { projectId: string }) {
     zh = useI18n().lang === "zh";
   const status = search.get("status") || "",
     operation = search.get("operation") || "",
+    category = search.get("category") || (operation ? operationCategory(operation) : ""),
     term = search.get("search") || "";
   const page = Math.min(
       4166,
@@ -82,7 +87,7 @@ function TaskPage({ projectId }: { projectId: string }) {
         else next.delete(key);
       }
       if (
-        ["status", "operation", "search", "page"].some((key) => key in patch)
+        ["status", "category", "operation", "search", "page"].some((key) => key in patch)
       ) {
         next.delete("job");
         next.delete("task");
@@ -97,10 +102,10 @@ function TaskPage({ projectId }: { projectId: string }) {
       kind: taskKind !== "generation" ? taskKind : "",
     });
   const query = useQuery({
-    queryKey: ["jobs", projectId, "catalog", status, operation, term, page],
+    queryKey: ["jobs", projectId, "catalog", status, category, operation, term, page],
     queryFn: () =>
       api.get<TaskCatalog>(
-        `${base}/activity?${new URLSearchParams({ status, operation, search: term, offset: String(page * 24), limit: "24" })}`,
+        `${base}/activity?${new URLSearchParams({ status, category, operation, search: term, offset: String(page * 24), limit: "24" })}`,
       ),
     refetchInterval: 5000,
   });
@@ -162,6 +167,7 @@ function TaskPage({ projectId }: { projectId: string }) {
       count: counts
         ? (counts.failed || 0) +
           (counts.paused || 0) +
+          (counts.partial || 0) +
           (counts.needs_review || 0)
         : undefined,
     },
@@ -257,24 +263,33 @@ function TaskPage({ projectId }: { projectId: string }) {
           </Button>
         </form>
         <StudioSelect
+          aria-label={zh ? "任务分类" : "Task category"}
+          value={category}
+          onValueChange={(value) => navigate({ category: value, operation: "", page: "" })}
+        >
+          <option value="">{zh ? "全部分类" : "All categories"}</option>
+          {Object.entries(TASK_CATEGORIES).map(([key, label]) =>
+            <option key={key} value={key}>{label[zh ? 0 : 1]}</option>)}
+        </StudioSelect>
+        <StudioSelect
           aria-label={zh ? "任务类型" : "Task type"}
           value={operation}
           onValueChange={(selectedValue) =>
-            navigate({ operation: selectedValue, page: "" })
+            navigate({ category, operation: selectedValue, page: "" })
           }
         >
           <option value="">{zh ? "全部任务类型" : "All task types"}</option>
-          {Object.entries(OPERATIONS).map(([key, label]) => (
+          {Object.entries(OPERATIONS).filter(([key]) => !category || operationCategory(key) === category).map(([key, label]) => (
             <option key={key} value={key}>
               {label[zh ? 0 : 1]}
             </option>
           ))}
         </StudioSelect>
-        {(term || operation || status) && (
+        {(term || category || operation || status) && (
           <button
             className="task-reset"
             onClick={() =>
-              navigate({ search: "", operation: "", status: "", page: "" })
+              navigate({ search: "", category: "", operation: "", status: "", page: "" })
             }
           >
             {zh ? "清除筛选" : "Clear filters"}
@@ -333,14 +348,14 @@ function TaskPage({ projectId }: { projectId: string }) {
               <Activity />
               <h2>
                 {zh
-                  ? term || status || operation
+                  ? term || status || category || operation
                     ? "没有符合条件的任务"
                     : "从一次创作开始"
                   : "No tasks found"}
               </h2>
               <p>
                 {zh
-                  ? term || status || operation
+                  ? term || status || category || operation
                     ? "调整搜索或筛选条件后再试。"
                     : "对话、生成、画布、素材处理与导出记录都会保留在这里。"
                   : "Generate media or adjust your filters."}
@@ -368,7 +383,9 @@ function TaskPage({ projectId }: { projectId: string }) {
               onClick={() => select(j.id, j.kind)}
             >
               <span className={`task-type-icon status-${j.status}`}>
-                {j.kind !== "generation" ? (
+                {j.kind === "creative" || j.kind === "adaptation" ? (
+                  <Clapperboard />
+                ) : j.kind !== "generation" ? (
                   <Activity />
                 ) : j.operation === "render" || j.request_type === "video" ? (
                   <Film />
@@ -391,6 +408,11 @@ function TaskPage({ projectId }: { projectId: string }) {
                     <small>{zh ? " · 来源已移除" : " · Source removed"}</small>
                   )}
                 </h3>
+                {!!j.scene_progress?.total && <p>{sceneProgressLabel(j.scene_progress, zh)}
+                  {j.status === "running" && j.scene_progress.current && (zh
+                    ? ` · 正在拆第 ${j.scene_progress.current} ${j.scene_progress.unit === "shot" ? "镜" : "场"}`
+                    : ` · Working on ${j.scene_progress.unit === "shot" ? "shot" : "scene"} ${j.scene_progress.current}`)}
+                </p>}
                 {(j.error || j.has_warnings || j.last_event) && <p className={j.error ? "text-danger" : ""}>
                   {(j.error ? taskError(j.error, zh) : null) ||
                     (j.has_warnings
@@ -415,7 +437,7 @@ function TaskPage({ projectId }: { projectId: string }) {
                         : j.model_name || j.provider}
                   </span>
                   <time>
-                    {new Date(j.created_at).toLocaleString(
+                    {new Date(j.kind === "creative" || j.kind === "adaptation" ? j.updated_at : j.created_at).toLocaleString(
                       zh ? "zh-CN" : "en-US",
                     )}
                   </time>

@@ -10,6 +10,7 @@ export const JOB_LABEL: Record<string, string> = {
   canceled: "已取消",
   paused: "已暂停",
   needs_review: "待确认",
+  partial: "部分完成",
 };
 export function generationCreditNotice(job: GenJob, zh: boolean) {
   const credit = job.credit_reservation;
@@ -47,6 +48,11 @@ export function taskError(error: string, zh = true) {
     .trim();
 }
 export const OPERATIONS: Record<string, [string, string]> = {
+  chapter_to_script: ["章节生成剧本", "Chapter to script"],
+  script_decompose: ["剧本拆镜", "Script breakdown"],
+  chapter_decompose: ["章节拆镜", "Chapter breakdown"],
+  scene_breakdown: ["场次拆分镜", "Scene storyboard"],
+  script_entities: ["剧本提取资产", "Script asset extraction"],
   agent: ["创作对话", "Conversation"],
   canvas: ["画布执行", "Canvas run"],
   import: ["素材入库与预览", "Import & preview"],
@@ -68,6 +74,35 @@ export const OPERATIONS: Record<string, [string, string]> = {
   video_trim: ["导出视频片段", "Video trim"],
   library_materialize: ["素材制作", "Library media"],
 };
+export const TASK_CATEGORIES = {
+  story: ["故事与分镜", "Story & storyboard"],
+  generation: ["生成与导出", "Generation & export"],
+  media: ["素材处理", "Media processing"],
+  workflow: ["对话与画布", "Conversations & canvas"],
+} as const;
+export function operationCategory(operation: string): keyof typeof TASK_CATEGORIES {
+  if (["chapter_to_script", "script_decompose", "chapter_decompose", "scene_breakdown", "script_entities"].includes(operation)) return "story";
+  if (["agent", "canvas"].includes(operation)) return "workflow";
+  if (["import", "index", "processing", "transcription"].includes(operation)) return "media";
+  return "generation";
+}
+
+export type SceneProgress = {
+  unit?: "scene" | "shot";
+  total: number;
+  completed: number;
+  failed: number;
+  shots?: number;
+  current?: number | null;
+  current_title?: string | null;
+  attempt?: number;
+  preserved?: number;
+};
+export function sceneProgressLabel(p: SceneProgress, zh: boolean) {
+  const unit = p.unit === "shot" ? (zh ? "镜" : "shots") : (zh ? "场" : "scenes");
+  const done = zh ? `已完成 ${p.completed} / ${p.total} ${unit}` : `${p.completed} / ${p.total} ${unit} ready`;
+  return p.failed ? done + (zh ? ` · ${p.failed} ${unit}失败` : ` · ${p.failed} failed`) : done;
+}
 export function taskLabel(operation: string, requestType: string, zh: boolean) {
   if (operation === "library_materialize")
     return requestType === "image"
@@ -108,6 +143,7 @@ export function taskSource(project: string, targetType: string, id: string) {
   return null;
 }
 export interface TaskSummary {
+  scene_progress?: SceneProgress | null;
   id: string;
   kind?: string;
   target_type: string;

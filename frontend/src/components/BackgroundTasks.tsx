@@ -8,10 +8,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, type DecomposeResult, type Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useElapsedSeconds } from "@/lib/useElapsedSeconds";
+import { sceneProgressLabel, type SceneProgress } from "@/lib/task-center";
 
 type Status = "running" | "done" | "error";
 type Kind = "breakdown" | "decompose";
@@ -27,6 +28,7 @@ interface Task {
   sceneId?: string;
   count?: number;
   unfinished?: number;
+  progress?: SceneProgress;
   // decompose
   novelId?: string;
   chapterId?: string;
@@ -54,7 +56,7 @@ type Receipt = {
   target_id: string;
   status: string;
   error: string | null;
-  result: { output: DecomposeResult | Shot[]; novel_id?: string } | null;
+  result: { output: DecomposeResult | Shot[]; novel_id?: string; progress?: SceneProgress } | null;
 };
 
 /** Durable server receipts remain discoverable after refresh or route changes. */
@@ -97,6 +99,7 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
               : "running",
         label: breakdown ? "AI 拆分镜" : "章节拆解",
         error: r.error ?? undefined,
+        progress: r.result?.progress,
         unfinished: breakdown
           ? (r.result?.output as Shot[] | undefined)?.filter(
               (s) => s.storyboard?.breakdown_error,
@@ -222,7 +225,7 @@ function TaskBadge({
   onView: () => void;
   onRetry: () => void;
 }) {
-  const { t: tr } = useI18n();
+  const { t: tr, lang } = useI18n();
   const navigate = useNavigate();
   const sec = useElapsedSeconds(task?.status === "running");
   if (!task) return null;
@@ -280,10 +283,14 @@ function TaskBadge({
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{task.label}</div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            {running && `${runningText} ${sec}s`}
+            {running && (task.progress?.total ? sceneProgressLabel(task.progress, lang === "zh") : `${runningText} ${sec}s`)}
             {done && (task.unfinished ? "待补全 " + task.unfinished + (isBreakdown ? " 个镜头" : " 个场次") : doneText)}
             {task.status === "error" && (task.error || tr("bg.failed"))}
           </div>
+          {running && <Link className="studio-link text-xs"
+            to={`/projects/${task.projectId}/tasks?category=story&kind=creative&task=${task.id}`}>
+            {lang === "zh" ? "查看进度" : "View progress"}
+          </Link>}
           {(task.status === "error" || (done && !!task.unfinished)) && (
             <button className="mt-1.5 text-xs text-primary" onClick={onRetry}>
               {task.unfinished ? "只重试未完成项" : "重试"}

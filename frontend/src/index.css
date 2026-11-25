@@ -123,6 +123,20 @@
   .studio-empty {
     @apply flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground;
   }
+  .studio-progress {
+    @apply block h-1.5 w-full appearance-none overflow-hidden rounded-full border-0 bg-border;
+  }
+  .studio-progress::-webkit-progress-bar {
+    background: hsl(var(--border));
+  }
+  .studio-progress::-webkit-progress-value {
+    background: hsl(var(--accent));
+    border-radius: inherit;
+  }
+  .studio-progress::-moz-progress-bar {
+    background: hsl(var(--accent));
+    border-radius: inherit;
+  }
   .glass {
     background: hsl(var(--card));
   }
