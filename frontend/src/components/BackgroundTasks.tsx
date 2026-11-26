@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { api, type DecomposeResult, type Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useElapsedSeconds } from "@/lib/useElapsedSeconds";
@@ -59,12 +59,18 @@ type Receipt = {
   result: { output: DecomposeResult | Shot[]; novel_id?: string; progress?: SceneProgress } | null;
 };
 
+function isActiveReceipt(receipt: Receipt) {
+  return receipt.status === "queued" || receipt.status === "running";
+}
+
 /** Durable server receipts remain discoverable after refresh or route changes. */
 export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const location = useLocation();
   const projectId = location.pathname.match(/\/projects\/([^/]+)/)?.[1] ?? "";
+  const browsingAssets = useMatch("/projects/:projectId/assets/*");
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [observedActive, setObservedActive] = useState<string[]>([]);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const receipts = useQuery({
@@ -73,10 +79,19 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
       api.get<Receipt[]>(`/projects/${projectId}/creative-tool-tasks/recent`),
     enabled: !!projectId,
     refetchInterval: (q) =>
-      q.state.data?.some((r) => ["queued", "running"].includes(r.status))
+      q.state.data?.some(isActiveReceipt)
         ? 2000
         : 15_000,
   });
+  // Keep the outcome of a task seen running, without replaying old results over a character profile.
+  useEffect(() => {
+    const recent = receipts.data;
+    if (!recent) return;
+    setObservedActive(previous => {
+      const next = recent.filter(r => isActiveReceipt(r) || previous.includes(r.id)).map(r => r.id);
+      return next.length === previous.length && next.every((id, i) => id === previous[i]) ? previous : next;
+    });
+  }, [receipts.data]);
   const newestTargets = new Set<string>();
   const tasks: Task[] = (receipts.data ?? [])
     .filter((r) => {
@@ -148,6 +163,9 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
     [qc],
   );
   const task = tasks.find((item) => item.id === focusedId) ?? tasks[0] ?? null;
+  const visibleTasks = browsingAssets
+    ? tasks.filter(item => item.status === "running" || item.id === focusedId || observedActive.includes(item.id))
+    : tasks;
   const dismiss = useCallback(() => {
     if (task) setDismissed((ids) => [...ids, task.id]);
   }, [task]);
@@ -175,7 +193,7 @@ export function BackgroundTaskProvider({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="fixed bottom-5 left-5 z-[90] max-h-[60vh] space-y-2 overflow-auto">
-        {tasks.map((item) => (
+        {visibleTasks.map((item) => (
           <TaskBadge
             key={item.id}
             task={item}

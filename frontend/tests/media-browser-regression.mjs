@@ -346,6 +346,27 @@ try {
     assert.deepEqual(writes.map(write => write.path), ["/projects/p/assets/actor/impact-preview", "/projects/p/assets/actor"]);
     assert.deepEqual(writes[1].body.tags, ["雨夜", "值守"]);
   }, { catalog: [asset("actor", "秦禹")] });
+  await scenario("character pages show live task outcomes without replaying old failures", async ({ page }) => {
+    const receipt = (id, status, error) => ({
+      id, target_id: id, operation: "scene_breakdown", status, error, result: null,
+    });
+    let running = true;
+    await page.route("**/creative-tool-tasks/recent", route => route.fulfill({ json: [
+      receipt("recent", running ? "running" : "failed", running ? null : "刚才的任务失败"),
+      receipt("older", "failed", "昨天的任务失败"),
+    ] }));
+    await page.goto(base + "/projects/p/assets/actor");
+    await page.getByRole("link", { name: "查看进度" }).waitFor();
+    assert.equal(await page.getByText("昨天的任务失败").count(), 0);
+    running = false;
+    await page.getByText("刚才的任务失败").waitFor();
+    await Promise.all([
+      page.waitForResponse(r => r.url().endsWith("/creative-tool-tasks/recent")),
+      page.reload(),
+    ]);
+    await page.getByRole("tab", { name: "出场与镜头" }).waitFor();
+    assert.equal(await page.getByText(/昨天的任务失败|刚才的任务失败/).count(), 0);
+  }, { catalog: [asset("actor", "秦禹")] });
   await scenario("page selection preserves other pages and skips locked items", async ({ page, writes }) => {
     await page.goto(base + "/projects/p/assets");
     await page.getByRole("button", { name: "选择", exact: true }).click();
