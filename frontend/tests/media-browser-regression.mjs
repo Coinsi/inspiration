@@ -53,7 +53,9 @@ const shots = [1, 2].map((n) => ({
   storyboard: { duration_sec: 3, shot_size: "medium", dialogue: "再见" },
 }));
 async function scenario(name, run, { role = "admin", catalog = assets, allowCreate = false } = {}) {
-  const items = [...catalog];
+  const items = catalog.map(item => ({ ...item }));
+  const cast = { id: "member", kind: "character", asset_id: "actor", name: "秦禹", evidence: "秦禹拉紧外衣，快步走入街口。",
+    prompt: "深色防寒服，衣襟上留着薄霜。", direction: "", reference_hash: null };
   const context = await browser.newContext({
       viewport: { width: 1440, height: 1000 },
     }),
@@ -63,7 +65,7 @@ async function scenario(name, run, { role = "admin", catalog = assets, allowCrea
     errors = [];
   let broken = "",
     selected = "g1";
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(e.stack || e.message));
   await context.addInitScript(() => {
     localStorage.setItem("inspiration_token", "fixture");
     localStorage.setItem("inspiration_lang", "zh");
@@ -85,6 +87,18 @@ async function scenario(name, run, { role = "admin", catalog = assets, allowCrea
     if (req.method() !== "GET") {
       const body = req.postDataJSON();
       writes.push({ path, body });
+      if (path === "/projects/p/assets/actor/impact-preview" && role === "admin") {
+        return respond({ shots: [], outputs: [], clips: [], untracked_outputs: 0 });
+      }
+      if (path === "/projects/p/assets/actor" && req.method() === "PATCH" && role === "admin") {
+        const actor = items.find(item => item.id === "actor");
+        Object.assign(actor, body);
+        return respond(actor);
+      }
+      if (path === "/projects/p/scenes/night/elements/member" && req.method() === "PATCH" && role === "admin") {
+        Object.assign(cast, body);
+        return respond(cast);
+      }
       if (allowCreate && req.method() === "POST" && path === "/projects/p/assets") {
         const created = { ...asset("created-prop", body.name), ...body };
         items.push(created);
@@ -145,12 +159,24 @@ async function scenario(name, run, { role = "admin", catalog = assets, allowCrea
           ordinal: 0,
         },
       ]);
-    if (path.endsWith("/assets/b/usages")) return respond([
-      { shot_id: "s1", shot_code: "SHOT1", shot_title: "镜头 1", scene_title: scene.title,
-        role: "character", ref_mode: "floating" },
-      { shot_id: "s1", shot_code: "SHOT1", shot_title: "镜头 1", scene_title: scene.title,
-        role: "costume", ref_mode: "pinned", pinned_version_no: 2 },
+    if (path.endsWith("/assets/b/appearances")) return respond([
+      { scene_id: scene.id, title: "INT. " + scene.title, ordinal: 1, script_id: "script", script_title: "告别",
+        novel_title: "冬夜", chapter_id: "chapter", chapter_title: "第一章", members: [],
+        shots: [{ id: "s1", title: "关窗", ordinal: 1, pinned_versions: [2] }] },
     ]);
+    if (path.endsWith("/assets/actor/appearances")) {
+      const source = { script_id: "script", script_title: "雨夜归途", novel_title: "北城往事", chapter_id: "c1",
+        chapter_title: "第一章 · 初到北城", locked: false, removed_from_script: false };
+      return respond([
+        { ...source, scene_id: "night", ordinal: 1, title: "EXT. 无名街道 - 夜",
+          members: [{ id: cast.id, name: cast.name, direction_excerpt: cast.direction, reference_hash: cast.reference_hash }],
+          shots: [{ id: "s1", ordinal: 1, title: "低头赶路", pinned_versions: [] }, { id: "s2", ordinal: 2, title: "回望街口", pinned_versions: [] }] },
+        { ...source, scene_id: "room", ordinal: 2, title: "INT. 值班室 - 夜",
+          members: [{ id: "member2", name: cast.name, direction_excerpt: "", reference_hash: null }], shots: [] },
+      ]);
+    }
+    if (path.endsWith("/scenes/night/elements")) return respond([cast]);
+    if (path.endsWith("/scenes/room/elements")) return respond([{ ...cast, id: "member2", direction: "", reference_hash: null }]);
     const entity = items.find(a => path === "/projects/p/assets/" + a.id);
     if (entity) return respond(entity);
     if (path.endsWith("/generations"))
@@ -186,11 +212,11 @@ async function scenario(name, run, { role = "admin", catalog = assets, allowCrea
 }
 try {
   await scenario(
-    "asset sorting, preview, scoped page selection and empty search",
+    "asset sorting, profile navigation, scoped page selection and empty search",
     async ({ page, writes }) => {
       await page.goto(`${base}/projects/p/assets`);
       await page
-        .getByRole("button", { name: "快速预览 Beta", exact: true })
+        .getByRole("link", { name: "打开 Beta", exact: true })
         .waitFor();
       assert.match(await page.locator("article").first().innerText(), /Beta/);
       const tops = await page.locator("main article").evaluateAll(nodes => nodes.map(node => ({
@@ -206,18 +232,19 @@ try {
       await page.getByRole("option", { name: "名称 A → Z", exact: true }).click();
       assert.match(await page.locator("article").first().innerText(), /Alpha/);
       await page
-        .getByRole("button", { name: "快速预览 Alpha", exact: true })
+        .getByRole("link", { name: "打开 Alpha", exact: true })
         .click();
-      await page.getByRole("dialog").waitFor();
+      await page.getByRole("tab", { name: "出场与镜头" }).waitFor();
+      assert.equal(await page.getByRole("dialog").count(), 0);
+      await page.getByRole("tab", { name: "参考图", exact: true }).click();
       await page.getByText("原始参考", { exact: true }).waitFor();
-      const previewActions = page.getByRole("dialog").getByRole("button", { name: "Alpha的更多操作" });
+      const previewActions = page.getByRole("button", { name: "Alpha的更多操作" });
       await previewActions.click();
-      await page.getByRole("menuitem", { name: "查看详情" }).waitFor();
+      await page.getByRole("menuitem", { name: "版本历史" }).waitFor();
       await page.keyboard.press("Escape");
       await page.getByRole("menu").waitFor({ state: "hidden" });
-      await page.getByRole("dialog").waitFor();
-      assert.ok(await previewActions.evaluate(el => el === document.activeElement));
-      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Alpha的更多操作");
+      await page.getByRole("link", { name: "返回角色与场景" }).click();
       await page.getByRole("button", { name: "图谱", exact: true }).click();
       await page.getByRole("button", { name: "选择", exact: true }).click();
       assert.equal(await page.getByRole("button", { name: "列表", exact: true }).getAttribute("aria-pressed"), "true");
@@ -231,7 +258,7 @@ try {
       await page.getByRole("button", { name: "退出选择", exact: true }).click();
       await page.getByRole("button", { name: "卡片", exact: true }).click();
       await page
-        .getByRole("button", { name: "快速预览 Alpha", exact: true })
+        .getByRole("link", { name: "打开 Alpha", exact: true })
         .waitFor();
       await page.screenshot({ path: `${out}/assets-fixture.png` });
       assert.deepEqual(writes, []);
@@ -244,19 +271,81 @@ try {
     await page.keyboard.press("Enter");
     await page.getByRole("menu").waitFor();
     assert.equal(await page.getByRole("menuitem", { name: "移入回收站" }).getAttribute("aria-disabled"), "true");
-    await page.getByRole("menuitem", { name: "查看引用镜头" }).click();
-    await page.getByRole("tab", { name: "引用镜头" }).waitFor();
-    const shot = page.getByRole("link").filter({ hasText: scene.title });
+    await page.getByRole("menuitem", { name: "查看资料" }).waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("link", { name: "查看Beta的 1 个引用镜头" }).click();
+    await page.getByRole("tab", { name: "出场与镜头" }).waitFor();
+    await page.getByRole("heading", { name: "第 1 场 · 内景 · " + scene.title }).waitFor();
+    await page.getByText("1 个引用镜头", { exact: true }).click();
+    const shot = page.getByRole("link", { name: /关窗/ });
     const href = new URL(await shot.getAttribute("href"), base);
     assert.equal(href.pathname, "/projects/p/shots");
     assert.equal(href.searchParams.get("shot"), "s1");
     assert.equal(href.searchParams.get("tab"), "refs");
-    assert.equal(href.searchParams.get("return"), new URL(page.url()).pathname + new URL(page.url()).search);
+    const back = new URL(page.url());
+    back.searchParams.set("scene", scene.id);
+    assert.equal(href.searchParams.get("return"), back.pathname + back.search);
     assert.match(await shot.innerText(), /镜头 1/);
-    assert.match(await shot.innerText(), /浮动引用/);
-    assert.match(await shot.innerText(), /固定引用 v2/);
+    assert.match(await shot.innerText(), /使用第 2 版/);
+    assert.doesNotMatch(await page.locator("main").innerText(), /SHOT1|浮动引用/);
+    await page.goto(base + "/projects/p/assets?preview=b");
+    await page.getByRole("heading", { name: "Beta", exact: true }).waitFor();
+    await page.getByRole("link", { name: "返回角色与场景" }).click();
+    await page.getByRole("link", { name: "打开 Beta" }).waitFor();
     assert.deepEqual(writes, []);
   }, { role: "viewer" });
+  await scenario("one character profile covers scenes before and after shot creation", async ({ page, writes }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(base + "/projects/p/assets");
+    await page.getByRole("link", { name: "打开 秦禹" }).click();
+    const appearance = page.getByRole("button", { name: "本场形象", exact: true });
+    await appearance.first().waitFor();
+    assert.equal(await appearance.count(), 2);
+    await page.getByText("2 个引用镜头", { exact: true }).click();
+    await page.getByRole("link", { name: /低头赶路/ }).waitFor();
+    await page.screenshot({ path: out + "/character-desktop.png" });
+    await appearance.first().click();
+    const dialog = page.getByRole("dialog", { name: "秦禹的本场形象" });
+    await dialog.getByText("雨夜归途 · 第 1 场 · 外景 · 无名街道 - 夜", { exact: true }).waitFor();
+    await dialog.getByLabel("本场画面描述").fill("围巾上沾着新雪。");
+    assert.equal(await dialog.getByText("关联的项目素材", { exact: true }).count(), 0);
+    await dialog.getByRole("button", { name: "保存本场设置" }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.reload();
+    await page.getByText("围巾上沾着新雪。", { exact: true }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: out + "/character-mobile.png" });
+    await appearance.first().click();
+    assert.equal(await dialog.getByLabel("本场画面描述").inputValue(), "围巾上沾着新雪。");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({ path: out + "/character-scene-mobile.png" });
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+    await page.waitForFunction(el => document.activeElement === el, await appearance.first().elementHandle());
+    await appearance.nth(1).click();
+    assert.notEqual(await dialog.getByLabel("本场画面描述").inputValue(), "围巾上沾着新雪。");
+    assert.deepEqual(writes.map(w => w.path), ["/projects/p/scenes/night/elements/member"]);
+  }, { catalog: [{ ...asset("actor", "秦禹"), representative_blob_hash: "hash4",
+    summary: "二十三岁，身材壮硕，头发略显凌乱。常穿一件深色防寒服，习惯把围巾拉到下巴。" }] });
+  await scenario("editing character details saves the name, description and tags together", async ({ page, writes }) => {
+    await page.goto(base + "/projects/p/assets/actor?tab=info");
+    await page.locator("#asset-name").fill("阿岚");
+    await page.locator("#asset-summary").fill("站台的夜班值守员。");
+    const tag = page.locator("#asset-tag");
+    await tag.fill("雨夜");
+    await tag.press("Enter");
+    await page.getByRole("button", { name: "移除标签 雨夜" }).waitFor();
+    await tag.fill("值守");
+    assert.deepEqual(writes, []);
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("tab", { name: "出场与镜头" }).waitFor();
+    await page.reload();
+    await page.getByRole("heading", { name: "阿岚", exact: true }).waitFor();
+    await page.getByText("站台的夜班值守员。", { exact: true }).waitFor();
+    await page.getByText("雨夜 · 值守", { exact: true }).waitFor();
+    assert.deepEqual(writes.map(write => write.path), ["/projects/p/assets/actor/impact-preview", "/projects/p/assets/actor"]);
+    assert.deepEqual(writes[1].body.tags, ["雨夜", "值守"]);
+  }, { catalog: [asset("actor", "秦禹")] });
   await scenario("page selection preserves other pages and skips locked items", async ({ page, writes }) => {
     await page.goto(base + "/projects/p/assets");
     await page.getByRole("button", { name: "选择", exact: true }).click();
@@ -322,7 +411,7 @@ try {
     setBroken("");
     await page.getByRole("button", { name: "重试", exact: true }).click();
     await page
-      .getByRole("button", { name: "快速预览 Beta", exact: true })
+      .getByRole("link", { name: "打开 Beta", exact: true })
       .waitFor();
   });
   await scenario(
@@ -377,7 +466,7 @@ try {
           .isDisabled(),
       );
       await page
-        .getByRole("button", { name: "已选定 · g1", exact: true })
+        .getByRole("button", { name: "方案 3 · 已采用", exact: true })
         .click();
       await page
         .getByRole("button", { name: "生成优化建议", exact: true })
@@ -392,10 +481,10 @@ try {
         .click();
       assert.equal(await page.getByRole("dialog").count(), 0);
       assert.ok(!writes.some((w) => w.path.endsWith("/generate")));
-      await page.getByLabel("加入比较 · g1", { exact: true }).check();
-      await page.getByLabel("加入比较 · g2", { exact: true }).check();
+      await page.getByLabel("加入比较 · 方案 3", { exact: true }).check();
+      await page.getByLabel("加入比较 · 方案 2", { exact: true }).check();
       assert.ok(
-        await page.getByLabel("加入比较 · g3", { exact: true }).isDisabled(),
+        await page.getByLabel("加入比较 · 方案 1", { exact: true }).isDisabled(),
       );
       await page
         .getByRole("button", { name: "比较版本 (2/2)", exact: true })

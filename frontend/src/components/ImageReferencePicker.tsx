@@ -10,6 +10,7 @@ import {
   type RefImage,
 } from "@/lib/api";
 import { MediaImage } from "@/components/MediaImage";
+import { generationLabels } from "@/lib/generation-labels";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 
@@ -36,7 +37,8 @@ export function ImageReferencePicker({
   onChange: (refs: PromptReference[]) => void;
   disabled: boolean;
 }) {
-  const zh = useI18n().lang === "zh";
+  const { lang, t } = useI18n();
+  const zh = lang === "zh";
   const [assetId, setAssetId] = useState("");
   const [search, setSearch] = useState("");
   const base = `/projects/${projectId}`;
@@ -47,7 +49,7 @@ export function ImageReferencePicker({
   const scopeId = assetId || targetId,
     scopeType = assetId ? "asset" : targetType;
   const images = useQuery({
-    queryKey: ["prompt-reference-options", projectId, scopeType, scopeId],
+    queryKey: ["prompt-reference-options", projectId, scopeType, scopeId, lang],
     queryFn: async () => {
       const [generations, references] = await Promise.all([
         api.get<Generation[]>(
@@ -57,6 +59,7 @@ export function ImageReferencePicker({
           ? api.get<RefImage[]>(`${base}/assets/${scopeId}/reference-images`)
           : Promise.resolve([]),
       ]);
+      const labels = generationLabels(generations, zh);
       return [
         ...references.map((r, i): PromptReference => ({
           kind: "asset_reference",
@@ -70,7 +73,7 @@ export function ImageReferencePicker({
             kind: "generation",
             id: g.id,
             blob_hash: g.output_blob_hash!,
-            title: `${g.is_selected ? (zh ? "已选定" : "Selected") : g.provider} · ${g.id.slice(0, 8)}`,
+            title: `${labels.get(g.id)}${g.is_selected ? (zh ? " · 已采用" : " · Selected") : ""}`,
           })),
       ];
     },
@@ -117,7 +120,7 @@ export function ImageReferencePicker({
           )
           .map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name} · {a.code}
+              {a.name} · {t("asset." + a.type)}
             </option>
           ))}
       </StudioSelect>

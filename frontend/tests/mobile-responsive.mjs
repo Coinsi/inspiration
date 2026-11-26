@@ -92,7 +92,7 @@ async function phoneInteractions(context, variant, repeat) {
     await filter.getByRole("option", { name: "开场", exact: true }).click();
     await page.getByRole("button", { name: "林间旅人的更多操作", exact: true }).click();
     await bounded(page.getByRole("menu", { name: "林间旅人的更多操作", exact: true }));
-    await page.getByRole("menuitem", { name: "查看引用镜头", exact: true }).waitFor();
+    await page.getByRole("menuitem", { name: "查看参考图", exact: true }).waitFor();
     await page.keyboard.press("Escape");
     result.checks.push("asset list, tag choices and item actions fit the mobile viewport");
     await visit("/skills");

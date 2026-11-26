@@ -218,6 +218,8 @@ def update_look(db, ctx, scene_id, element_id, data):
     row = db.get(SceneElement, element_id)
     if not row or row.scene_id != scene.id or not row.active:
         raise NotFound("找不到这项场次素材")
+    if data.expected_asset_id is not None and data.expected_asset_id != row.asset_id:
+        raise Conflict("本场关联的素材已更改，请重新打开本场形象")
     from app.models.enums import VersionStatus
 
     if scene.status == VersionStatus.locked:

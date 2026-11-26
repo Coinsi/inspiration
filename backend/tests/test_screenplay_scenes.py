@@ -118,6 +118,9 @@ def test_same_location_changes_only_the_shots_using_the_action(studio, monkeypat
     first, second = (s["id"] for s in scenes)
     before_shots = client.get(root + "/assets", params={"scene_id": first}).json()
     assert [a["id"] for a in before_shots] == [actor["id"]]
+    appearances = client.get(root + f"/assets/{actor['id']}/appearances").json()
+    assert [(s["scene_id"], s["shots"]) for s in appearances] == [(first, [])]
+    assert appearances[0]["members"][0]["name"] == "秦禹"
     with sessions() as db:
         assert not db.get(Script, uuid.UUID(script_id)).legacy_blocks
         assert db.get(Scene, uuid.UUID(first)).body.startswith("秦禹:")
@@ -162,10 +165,17 @@ def test_same_location_changes_only_the_shots_using_the_action(studio, monkeypat
     roster = client.get(root + f"/scenes/{first}/elements").json()
     bag = next(e for e in roster if e["asset_id"] == prop["id"])
     label = "陈旧青蓝色粗麻，不带花纹"
+    stale = client.patch(root + f"/scenes/{first}/elements/{bag['id']}",
+                         json={"expected_asset_id": actor["id"], "direction": "过期编辑"})
+    assert stale.status_code == 409
     changed = client.patch(
-        root + f"/scenes/{first}/elements/{bag['id']}", json={"direction": label}
+        root + f"/scenes/{first}/elements/{bag['id']}", json={"expected_asset_id": prop["id"], "direction": label}
     )
     assert changed.is_success, changed.text
+    appearances = client.get(root + f"/assets/{prop['id']}/appearances").json()
+    assert [s["scene_id"] for s in appearances] == [first, second]
+    assert [s["members"][0]["direction_excerpt"] for s in appearances] == [label, ""]
+    assert [s["shots"][0]["id"] for s in appearances] == [carrying["id"], later["id"]]
     ref = client.get(root + f"/shots/{carrying['id']}/asset-refs").json()
     assert [item["asset_id"] for item in ref] == [prop["id"]]
     assert not client.get(root + f"/shots/{window['id']}/asset-refs").json()

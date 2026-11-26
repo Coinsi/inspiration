@@ -141,6 +141,7 @@ class SceneElementOut(BaseModel):
 
 
 class SceneElementEdit(BaseModel):
+    expected_asset_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
     reference_hash: str | None = Field(default=None, max_length=128)
     direction: str | None = Field(default=None, max_length=6000)

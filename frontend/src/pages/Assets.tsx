@@ -10,13 +10,12 @@ import {
   Lock,
   Plus,
   Share2,
-  Sparkles,
   Square,
   Trash2,
   Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AssetActions,
   assetPath,
@@ -25,7 +24,6 @@ import {
   useAssetTrash,
 } from "@/components/AssetActions";
 import AssetGraph from "@/components/AssetGraph";
-import { AssetPreview } from "@/components/AssetPreview";
 import { MaterialTabs } from "@/components/MaterialTabs";
 import { SceneMaterials, storyScope } from "@/components/SceneMaterials";
 import { MediaImage } from "@/components/MediaImage";
@@ -156,18 +154,7 @@ function AssetsContent({ projectId }: { projectId: string }) {
     });
   }
 
-  const previewId = params.get("preview");
-  const preview = previewId ? list.data?.find((a) => a.id === previewId) : undefined;
-  function setPreview(id: string | null) {
-    const next = new URLSearchParams(params);
-    if (id) next.set("preview", id);
-    else next.delete("preview");
-    setParams(next, { replace: !id });
-  }
-  const trash = useAssetTrash(projectId, () => {
-    exitSelection();
-    if (previewId) setPreview(null);
-  });
+  const trash = useAssetTrash(projectId, exitSelection);
   const create = useMutation({
     mutationFn: () =>
       api.post<Asset>(base + "/assets", { name: name.trim(), type, tags: [], metadata: {} }),
@@ -175,7 +162,7 @@ function AssetsContent({ projectId }: { projectId: string }) {
       setCreateOpen(false);
       setName("");
       qc.setQueryData(["asset", asset.id], asset);
-      navigate(assetPath(projectId, asset.id, here));
+      navigate(assetPath(projectId, asset.id, here, "info"));
       invalidateAssetLists(qc, projectId);
       toast.push(zh ? `已创建「${asset.name}」` : `Created “${asset.name}”`, "success");
     },
@@ -188,7 +175,7 @@ function AssetsContent({ projectId }: { projectId: string }) {
     selected,
     blocked: !readyToSelect,
     activate: (asset) => {
-      if (!selectingItems) return setPreview(asset.id);
+      if (!selectingItems) return navigate(assetPath(projectId, asset.id, here));
       if (!readyToSelect || asset.status === "locked") return;
       setSelected((previous) => {
         const next = new Set(previous);
@@ -205,7 +192,7 @@ function AssetsContent({ projectId }: { projectId: string }) {
         onTrash={() => trash.mutate([asset])}
       />
     ),
-    usagePath: (asset) => assetPath(projectId, asset.id, here, "usages"),
+    detailPath: (asset) => assetPath(projectId, asset.id, here),
   };
   const otherTypes = ASSET_TYPES.filter((k) => !commonTypes.includes(k));
   const choices: [View, typeof List, string][] = [
@@ -225,6 +212,13 @@ function AssetsContent({ projectId }: { projectId: string }) {
     ["type.asc", zh ? "类型 A → Z" : "Type A → Z"],
     ["type.desc", zh ? "类型 Z → A" : "Type Z → A"],
   ];
+  const oldPreview = params.get("preview");
+  if (oldPreview) {
+    const from = new URLSearchParams(params);
+    from.delete("preview");
+    const listPath = location.pathname + (from.size ? "?" + from : "");
+    return <Navigate replace to={assetPath(projectId, oldPreview, listPath)} />;
+  }
   return (
     <div className="studio-page material-workspace unified-materials space-y-3">
       <header className="materials-heading !mb-3 flex-wrap">
@@ -536,15 +530,6 @@ function AssetsContent({ projectId }: { projectId: string }) {
           </Button>
         </div>
       )}
-      {preview && (
-        <AssetPreview
-          projectId={projectId}
-          asset={preview}
-          canTrash={canEdit && !trash.isPending}
-          onTrash={() => trash.mutate([preview])}
-          onClose={() => setPreview(null)}
-        />
-      )}
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -598,8 +583,22 @@ type BrowseTools = {
   blocked: boolean;
   activate: (a: Asset) => void;
   menu: (a: Asset) => ReactNode;
-  usagePath: (a: Asset) => string;
+  detailPath: (a: Asset) => string;
 };
+
+function AssetEntry({ asset, tools, className, children }: {
+  asset: Asset; tools: BrowseTools; className: string; children: ReactNode;
+}) {
+  const zh = useI18n().lang === "zh";
+  if (!tools.selecting) return (
+    <Link to={tools.detailPath(asset)} className={className} aria-label={(zh ? "打开 " : "Open ") + asset.name}>{children}</Link>
+  );
+  return (
+    <button type="button" className={className} disabled={asset.status === "locked" || tools.blocked}
+      onClick={() => tools.activate(asset)} aria-pressed={tools.selected.has(asset.id)}
+      aria-label={(zh ? "选择 " : "Select ") + asset.name}>{children}</button>
+  );
+}
 
 function ShotCount({
   asset,
@@ -617,7 +616,7 @@ function ShotCount({
   return (
     <Link
       className="studio-link inline-flex min-h-11 items-center sm:min-h-9"
-      to={tools.usagePath(asset)}
+      to={tools.detailPath(asset)}
       aria-label={
         lang === "zh"
           ? `查看${asset.name}的 ${count} 个引用镜头`
@@ -646,20 +645,14 @@ function AssetCard({
     <article
       className={`flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card transition-colors ${checked ? "border-primary ring-1 ring-primary" : "hover:border-border-strong"}`}
     >
-      <button
-        type="button"
-        onClick={() => tools.activate(a)}
-        aria-pressed={tools.selecting ? checked : undefined}
-        aria-label={`${tools.selecting ? (zh ? "选择" : "Select") : zh ? "快速预览" : "Quick preview"} ${a.name}`}
-        disabled={tools.selecting && (locked || tools.blocked)}
-        className="block w-full min-w-0 text-left disabled:opacity-50"
-      >
+      <AssetEntry asset={a} tools={tools} className="block w-full min-w-0 text-left disabled:opacity-50">
         <div
           className={`relative overflow-hidden bg-elevated ${a.representative_blob_hash ? "aspect-video" : pageHasArt ? "h-20 min-[480px]:aspect-video min-[480px]:h-auto" : "h-20"}`}
         >
           {a.representative_blob_hash ? (
             <MediaImage
               src={blobUrl(tools.projectId, a.representative_blob_hash, "thumbnail")}
+              className={a.type === "character" ? "[&_img]:object-contain" : undefined}
               alt={a.name}
             />
           ) : (
@@ -685,10 +678,10 @@ function AssetCard({
         <div className="px-4 pt-3">
           <h2 className="truncate text-sm font-semibold">{a.name}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t(`asset.${a.type}`)} · {a.code}
+            {t(`asset.${a.type}`)}
           </p>
         </div>
-      </button>
+      </AssetEntry>
       {a.summary && (
         <p className="mx-4 mt-2 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">
           {a.summary}
@@ -703,15 +696,11 @@ function AssetCard({
         </p>
       )}
       <div className="mt-auto flex min-h-11 flex-wrap items-center gap-x-3 px-4 py-1.5 text-xs text-muted-foreground">
-        <span title={t("detail.ref")} className="inline-flex items-center gap-1">
+        {!!a.ref_count && <span className="inline-flex items-center gap-1">
           <Images size={14} />
-          {a.ref_count ?? 0}
-        </span>
-        <span title={t("detail.gen")} className="inline-flex items-center gap-1">
-          <Sparkles size={14} />
-          {a.gen_count ?? 0}
-        </span>
-        <ShotCount asset={a} tools={tools} />
+          {t("detail.ref")} {a.ref_count}
+        </span>}
+        {!!a.shot_count && <ShotCount asset={a} tools={tools} />}
         {!tools.selecting && <span className="ml-auto">{tools.menu(a)}</span>}
       </div>
     </article>
@@ -745,14 +734,7 @@ function AssetList({
     const checked = tools.selected.has(a.id),
       locked = a.status === "locked";
     return (
-      <button
-        type="button"
-        className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 text-left disabled:opacity-50"
-        disabled={tools.selecting && (locked || tools.blocked)}
-        onClick={() => tools.activate(a)}
-        aria-label={`${tools.selecting ? (zh ? "选择" : "Select") : zh ? "快速预览" : "Quick preview"} ${a.name}`}
-        aria-pressed={tools.selecting ? checked : undefined}
-      >
+      <AssetEntry asset={a} tools={tools} className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 text-left disabled:opacity-50">
         {tools.selecting &&
           (checked ? (
             <CheckSquare size={16} className="shrink-0 text-primary" />
@@ -778,12 +760,9 @@ function AssetList({
               <Lock size={13} className="shrink-0" aria-label={zh ? "已锁定" : "Locked"} />
             )}
           </span>
-          <span className="block break-all text-xs text-muted-foreground">
-            <span className="sm:hidden">{t(`asset.${a.type}`)} · </span>
-            {a.code}
-          </span>
+          <span className="text-xs text-muted-foreground sm:hidden">{t(`asset.${a.type}`)}</span>
         </span>
-      </button>
+      </AssetEntry>
     );
   };
   const rowClass = (id: string) =>

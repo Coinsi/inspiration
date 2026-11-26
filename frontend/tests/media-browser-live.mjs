@@ -71,21 +71,21 @@ try {
   assert.ok(candidate);
   await page.goto(`${base}/projects/${project}/assets`);
   await page
-    .getByRole("button", { name: `快速预览 ${candidate.name}`, exact: true })
+    .getByRole("link", { name: `打开 ${candidate.name}`, exact: true })
     .waitFor();
   await page.waitForFunction(() =>
     [...document.images].every((i) => i.complete),
   );
   await page.screenshot({ path: `${out}/assets-dark.png` });
   await page
-    .getByRole("button", { name: `快速预览 ${candidate.name}`, exact: true })
+    .getByRole("link", { name: `打开 ${candidate.name}`, exact: true })
     .click();
-  await page.getByRole("dialog").waitFor();
+  await page.getByRole("heading", { name: candidate.name, exact: true }).waitFor();
   await page.waitForFunction(() =>
     [...document.images].every((i) => i.complete),
   );
   await page.screenshot({ path: `${out}/asset-preview.png` });
-  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "返回角色与场景" }).click();
   await toggleAccountTheme(page);
   await page.locator("main").evaluate(el => el.scrollTo(0, 0));
   await page.screenshot({ path: `${out}/assets-light.png` });

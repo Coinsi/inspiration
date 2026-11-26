@@ -765,7 +765,7 @@ def list_generations(
                 Generation.target_type == target_type,
                 Generation.target_id == target_id,
             )
-            .order_by(Generation.created_at.desc())
+            .order_by(Generation.created_at.desc(), Generation.id.desc())
         )
     )
 

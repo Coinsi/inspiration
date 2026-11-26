@@ -73,6 +73,36 @@ class ReferenceImageOut(BaseModel):
     ordinal: int
 
 
+class AppearanceMember(BaseModel):
+    id: uuid.UUID
+    name: str
+    direction_excerpt: str
+    reference_hash: str | None
+
+
+class AppearanceShot(BaseModel):
+    id: uuid.UUID
+    title: str | None
+    ordinal: int
+    pinned_versions: list[int] = Field(default_factory=list)
+
+
+class AssetAppearance(BaseModel):
+    scene_id: uuid.UUID
+    title: str | None
+    ordinal: int
+    locked: bool
+    removed_from_script: bool
+    script_id: uuid.UUID
+    script_title: str
+    novel_title: str | None
+    chapter_id: uuid.UUID | None
+    chapter_ordinal: int | None
+    chapter_title: str | None
+    members: list[AppearanceMember] = Field(default_factory=list)
+    shots: list[AppearanceShot] = Field(default_factory=list)
+
+
 class VersionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

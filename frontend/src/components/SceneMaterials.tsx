@@ -1,10 +1,12 @@
 import { useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { assetPath, invalidateAssetLists } from "@/components/AssetActions";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
@@ -14,6 +16,7 @@ import {
   type SceneListItem,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { sceneLabel } from "@/lib/scene-label";
 
 const fields = ["novel_id", "chapter_id", "script_id", "scene_id"] as const;
 type Field = (typeof fields)[number];
@@ -75,18 +78,18 @@ export function SceneMaterials({
     if (field === "scene_id")
       return {
         value: s.id,
-        label: String(s.ordinal) + " · " + (s.title || s.code),
+        label: sceneLabel(s, zh),
       };
     const id = s[field];
     if (!id) return null;
     if (field === "chapter_id")
       return {
         value: id,
-        label: s.chapter_title || labels[1] + " " + s.chapter_ordinal,
+        label: s.chapter_title || (s.chapter_ordinal != null ? (zh ? `第 ${s.chapter_ordinal} 章` : `Chapter ${s.chapter_ordinal}`) : (zh ? "未命名章节" : "Untitled chapter")),
       };
     return {
       value: id,
-      label: (field === "novel_id" ? s.novel_title : s.script_title) || id,
+      label: field === "novel_id" ? s.novel_title || (zh ? "未命名小说" : "Untitled novel") : s.script_title || (zh ? "未命名剧本" : "Untitled script"),
     };
   }
   function choices(index: number) {
@@ -122,7 +125,7 @@ export function SceneMaterials({
         >
           {expanded ? "▾ " : "▸ "}
           {zh ? "按故事筛选" : "Filter by story"}
-          {active ? " · " + (active.title || active.code) : ""}
+          {active ? " · " + sceneLabel(active, zh) : ""}
         </Button>
         {!!scope.size && (
           <Button size="sm" variant="ghost" onClick={() => choose(0, "")}>
@@ -205,7 +208,8 @@ export function SceneMaterials({
           key={editing.id}
           projectId={projectId}
           sceneId={sceneId}
-          member={editing}
+          memberId={editing.id}
+          memberName={editing.name}
           canEdit={canEdit}
           onClose={() => setEditing(null)}
         />
@@ -214,19 +218,52 @@ export function SceneMaterials({
   );
 }
 
-function SceneLook({
-  projectId,
-  sceneId,
-  member,
-  canEdit,
-  onClose,
-}: {
+type SceneLookProps = {
   projectId: string;
   sceneId: string;
-  member: ElementUse;
+  appearance?: { sceneLabel: string; assetId: string; cover: string | null };
   canEdit: boolean;
   onClose: () => void;
+};
+
+export function SceneLook({ memberId, memberName, ...props }: SceneLookProps & {
+  memberId: string;
+  memberName: string;
 }) {
+  const { projectId, sceneId, appearance, onClose } = props;
+  const { t, lang } = useI18n();
+  const zh = lang === "zh";
+  const [opener] = useState(() => document.activeElement);
+  const roster = useQuery({
+    queryKey: ["scene-elements", projectId, sceneId],
+    queryFn: () => api.get<ElementUse[]>(`/projects/${projectId}/scenes/${sceneId}/elements`),
+  });
+  const member = roster.data?.find(e => e.id === memberId && (!appearance || e.asset_id === appearance.assetId));
+  return (
+    <Dialog.Root open onOpenChange={open => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/55" />
+        <Dialog.Content aria-describedby={undefined}
+          onCloseAutoFocus={event => {
+            if (opener instanceof HTMLElement && opener.isConnected) { event.preventDefault(); opener.focus(); }
+          }}
+          className="fixed left-1/2 top-1/2 z-[101] max-h-[90dvh] w-11/12 max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <Dialog.Title className="font-semibold">{appearance ? memberName + (zh ? "的本场形象" : " · Scene appearance") : memberName}</Dialog.Title>
+            <Dialog.Close asChild><Button variant="ghost" size="icon" aria-label={zh ? "关闭" : "Close"}><X size={16} /></Button></Dialog.Close>
+          </div>
+          {appearance && <p className="mb-4 text-sm text-muted-foreground">{appearance.sceneLabel}</p>}
+          {member ? <SceneLookEditor key={member.id} {...props} member={member} />
+            : roster.isPending ? <p role="status">{t("common.loading")}</p>
+            : roster.isError ? <div role="alert">{t("common.loadFailed")} <Button size="sm" variant="outline" onClick={() => void roster.refetch()}>{zh ? "重试" : "Retry"}</Button></div>
+            : <p>{zh ? "本场关联已更改，请重新查看场次。" : "This scene’s cast has changed."}</p>}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function SceneLookEditor({ projectId, sceneId, member, canEdit, appearance, onClose }: SceneLookProps & { member: ElementUse }) {
   const zh = useI18n().lang === "zh";
   const cache = useQueryClient();
   const location = useLocation();
@@ -241,7 +278,7 @@ function SceneLook({
   const assets = useQuery({
     queryKey: ["assets", projectId, member.kind, "", ""],
     queryFn: () => api.get<Asset[]>(base + "/assets?type=" + member.kind),
-    enabled: canEdit,
+    enabled: canEdit && !appearance,
   });
   const images = useQuery({
     queryKey: ["scene-asset-images", projectId, assetId],
@@ -249,7 +286,7 @@ function SceneLook({
       api.get<RefImage[]>(base + "/assets/" + assetId + "/reference-images"),
     enabled: !!assetId,
   });
-  const cover = assets.data?.find(
+  const cover = appearance?.cover ?? assets.data?.find(
     (a) => a.id === assetId,
   )?.representative_blob_hash;
   const hashes = [
@@ -264,6 +301,7 @@ function SceneLook({
       adopt
         ? api.post<ElementUse>(path + "/asset", { direction: localDirection })
         : api.patch<ElementUse>(path, {
+            ...(appearance ? { expected_asset_id: appearance.assetId } : {}),
             ...(assetId !== (member.asset_id || "")
               ? { asset_id: assetId || null }
               : {}),
@@ -282,17 +320,21 @@ function SceneLook({
       ]) {
         void cache.invalidateQueries({ queryKey: [key] });
       }
+      toast.push(zh ? "已保存本场设置" : "Scene settings saved", "success");
       onClose();
     },
-    onError: (error) => toast.push(error.message, "error"),
+    onError: (error) => {
+      toast.push(error.message, "error");
+      void cache.invalidateQueries({ queryKey: ["scene-elements", projectId, sceneId] });
+      void cache.invalidateQueries({ queryKey: ["asset-usages", projectId] });
+    },
   });
   return (
-    <Modal open onClose={onClose} title={member.name} width={540}>
       <div className="space-y-4">
-        <blockquote className="border-l-2 pl-3 text-sm text-muted-foreground">
+        {member.evidence && <blockquote className="border-l-2 pl-3 text-sm text-muted-foreground">
           {member.evidence}
-        </blockquote>
-        {canEdit && (
+        </blockquote>}
+        {canEdit && !appearance && (
           <label className="block space-y-1 text-sm">
             <span>{zh ? "关联的项目素材" : "Linked project asset"}</span>
             <SelectField
@@ -313,7 +355,7 @@ function SceneLook({
             />
           </label>
         )}
-        {assetId && (
+        {assetId && !appearance && (
           <Link
             className="studio-link text-sm"
             to={assetPath(
@@ -338,8 +380,7 @@ function SceneLook({
         )}
         <label className="block space-y-1 text-sm">
           <span>{zh ? "本场画面描述" : "Appearance in this scene"}</span>
-          <textarea
-            className="w-full rounded-md border bg-background p-2"
+          <Textarea
             rows={3}
             readOnly={!canEdit}
             maxLength={6000}
@@ -396,6 +437,5 @@ function SceneLook({
           </div>
         )}
       </div>
-    </Modal>
   );
 }

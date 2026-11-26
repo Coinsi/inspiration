@@ -45,6 +45,14 @@ def test_asset_reference_drilldown_and_trash_impact(studio):  # noqa: F811
         row["scene_title"] == "Test scene" and row["scene_id"] == shot["scene_id"] for row in usages
     )
     assert all(row["ref_mode"] == "pinned" and row["pinned_version_no"] == 1 for row in usages)
+    # Imported shots can reference assets even without a screenplay cast entry.
+    old_scene, = client.get(assets + f"/{setting['id']}/appearances").json()
+    assert old_scene["members"] == [] and old_scene["script_title"] == "Test script"
+    assert [s["id"] for s in old_scene["shots"]] == [shot["id"], other["id"]]
+    assert all(s["pinned_versions"] == [1] for s in old_scene["shots"])
+    person_scene, = client.get(assets + f"/{person['id']}/appearances").json()
+    assert [s["id"] for s in person_scene["shots"]] == [shot["id"]]
+    assert client.get(assets + f"/{locked['id']}/appearances").json() == []
     selected = {"ids": [person["id"], setting["id"], locked["id"], str(uuid.uuid4())]}
     preview = post_ok(client, assets + "/batch-delete/preview", selected)
     assert set(preview["eligible_ids"]) == {person["id"], setting["id"]}
@@ -54,6 +62,8 @@ def test_asset_reference_drilldown_and_trash_impact(studio):  # noqa: F811
     assert client.post(root + f"/library/materials/asset/{locked['id']}/trash").status_code == 423
     assert post_ok(client, assets + "/batch-delete", selected) == {"deleted": 2, "skipped": 2}
     assert post_ok(client, assets + "/batch-delete", selected) == {"deleted": 0, "skipped": 4}
+    assert client.get(assets + f"/{person['id']}/appearances").status_code == 404
+    assert not client.get(f"/api/v1/projects/{ids['other']}/assets/{person['id']}/appearances").is_success
     assert {row["id"] for row in client.get(assets + "/trash").json()} == {
         person["id"],
         setting["id"],

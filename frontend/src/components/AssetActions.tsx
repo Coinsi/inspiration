@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { FileText, Film, Trash2 } from "lucide-react";
+import { FileText, Images, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ActionMenu, ActionMenuItem, ActionMenuSeparator } from "@/components/ui/header-menu";
 import { useConfirm } from "@/components/ui/confirm";
@@ -8,9 +9,9 @@ import { api, type Asset } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
-export function assetPath(projectId: string, assetId: string, returnTo: string, tab = "info") {
+export function assetPath(projectId: string, assetId: string, returnTo: string, tab = "usages") {
   const params = new URLSearchParams();
-  if (tab !== "info") params.set("tab", tab);
+  if (tab !== "usages") params.set("tab", tab);
   params.set("return", returnTo);
   return `/projects/${projectId}/assets/${assetId}?${params}`;
 }
@@ -24,7 +25,7 @@ export function useAssetPermissions(projectId: string) {
 }
 
 export function invalidateAssetLists(qc: QueryClient, projectId: string) {
-  for (const key of ["assets", "assets-pick", "materials", "trash", "workbench-references"]) {
+  for (const key of ["assets", "asset-usages", "assets-pick", "materials", "trash", "workbench-references"]) {
     void qc.invalidateQueries({ queryKey: [key, projectId] });
   }
 }
@@ -85,11 +86,11 @@ export function useAssetTrash(projectId: string, onTrashed: () => void) {
                   : `Used in ${impact.shot_count} shots. `}
                 {impact.floating_shots > 0 &&
                   (zh
-                    ? `${impact.floating_shots} 个镜头有浮动引用，恢复设定或更换参考后才能再次生成。`
+                    ? `${impact.floating_shots} 个镜头使用最新设定，恢复素材或更换参考后才能再次生成。`
                     : `${impact.floating_shots} shots use floating references. Restore the item or replace the reference before generating again. `)}
                 {impact.pinned_shots > 0 &&
                   (zh
-                    ? `${impact.pinned_shots} 个镜头有固定引用，仍可读取已固定的版本。`
+                    ? `${impact.pinned_shots} 个镜头使用指定版本，仍可读取该版本。`
                     : `Pinned versions remain available in ${impact.pinned_shots} shots.`)}
               </p>
             ) : (
@@ -160,28 +161,32 @@ export function AssetActions({
   returnTo,
   canTrash,
   onTrash,
+  children,
 }: {
   projectId: string;
   asset: Asset;
   returnTo: string;
   canTrash: boolean;
   onTrash: () => void;
+  children?: ReactNode;
 }) {
   const zh = useI18n().lang === "zh";
   return (
     <ActionMenu label={zh ? `${asset.name}的更多操作` : `More actions for ${asset.name}`}>
+      {children ?? <>
       <ActionMenuItem asChild>
-        <Link to={assetPath(projectId, asset.id, returnTo)}>
+        <Link to={assetPath(projectId, asset.id, returnTo, "info")}>
           <FileText />
-          {zh ? "查看详情" : "View details"}
+          {canTrash && asset.status !== "locked" ? (zh ? "编辑资料" : "Edit details") : (zh ? "查看资料" : "View details")}
         </Link>
       </ActionMenuItem>
       <ActionMenuItem asChild>
-        <Link to={assetPath(projectId, asset.id, returnTo, "usages")}>
-          <Film />
-          {zh ? "查看引用镜头" : "View referencing shots"}
+        <Link to={assetPath(projectId, asset.id, returnTo, "ref")}>
+          <Images />
+          {zh ? "查看参考图" : "View reference images"}
         </Link>
       </ActionMenuItem>
+      </>}
       <ActionMenuSeparator />
       <ActionMenuItem disabled={!canTrash || asset.status === "locked"} danger onSelect={onTrash}>
         <Trash2 />

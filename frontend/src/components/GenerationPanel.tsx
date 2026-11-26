@@ -12,13 +12,14 @@ import { PromptLibrary } from "@/components/PromptLibrary";
 import { JobStatus } from "@/components/JobStatus";
 import { apiUpload } from "@/lib/api";
 import { librarySourceUrl } from "@/lib/library";
+import { generationLabels } from "@/lib/generation-labels";
 import { Link } from "react-router-dom";
 import { MediaVideo } from "@/components/MediaVideo";
 import { MediaAudio } from "@/components/MediaAudio";
 import { VideoTools } from "@/components/VideoTools";
 import { CharacterTools } from "@/components/CharacterTools";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Star,
   Sparkles,
@@ -383,6 +384,8 @@ function GenerationPanelContent({
         : g.output_type === resultFilter),
   );
   const reference = gens?.find((g) => g.id === sourceId);
+  const labels = useMemo(() => generationLabels(gens || [], zh), [gens, zh]);
+  const sourceLabel = (id: string) => labels.get(id) || (zh ? "其他素材" : "Other source");
   const useVersionPrompt = async (g: Generation) => {
     const original = g.input_refs?.original_prompt ?? g.prompt_snapshot;
     if (
@@ -712,9 +715,9 @@ function GenerationPanelContent({
                           (g) =>
                             g.output_type === "image" && g.output_blob_hash,
                         )
-                        .map((g, i) => ({
+                        .map((g) => ({
                           value: g.id,
-                          label: `${zh ? "候选图片" : "Candidate"} ${i + 1}`,
+                          label: sourceLabel(g.id),
                         })),
                     ]}
                   />
@@ -734,7 +737,7 @@ function GenerationPanelContent({
                             : "Continue from this image"}
                         </span>
                         <span className="text-[10px] text-faint">
-                          {reference.id.slice(0, 8)}
+                          {sourceLabel(reference.id)}
                         </span>
                       </div>
                       <button
@@ -1050,6 +1053,7 @@ function GenerationPanelContent({
             <CharacterTools
               projectId={projectId}
               generation={characterTools}
+              sourceLabel={sourceLabel(characterTools.id)}
               provider={provider}
               onClose={() => setCharacterTools(null)}
               onJob={rememberJob}
@@ -1115,7 +1119,7 @@ function GenerationPanelContent({
                           <ZoomableImage
                             src={blobUrl(projectId, g.output_blob_hash!)}
                             previewSrc={blobUrl(projectId, g.output_blob_hash!, "display")}
-                            filename={`compare-${g.id}`}
+                            filename={sourceLabel(g.id)}
                             className="aspect-square w-full bg-elevated object-contain"
                           />
                           <p className="text-xs text-muted-foreground">
@@ -1124,9 +1128,9 @@ function GenerationPanelContent({
                                 ? "来自素材库"
                                 : "From library"
                               : g.provider}{" "}
-                            · {g.id.slice(0, 8)}
+                            · {sourceLabel(g.id)}
                             {g.input_refs?.source_generation_id
-                              ? ` · ${zh ? "来源" : "Source"} ${g.input_refs.source_generation_id.slice(0, 8)}`
+                              ? ` · ${zh ? "来源" : "Source"} ${sourceLabel(g.input_refs.source_generation_id)}`
                               : ""}
                           </p>
                           <p className="max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">
@@ -1171,7 +1175,7 @@ function GenerationPanelContent({
                           <MediaVideo
                             src={blobUrl(projectId, g.output_blob_hash, "playback")}
                             poster={blobUrl(projectId, g.output_blob_hash, "thumbnail")}
-                            label={`${tr("gen.video")} ${g.id.slice(0, 8)}`}
+                            label={`${tr("gen.video")} · ${sourceLabel(g.id)}`}
                           />
                         </div>
                       ) : g.output_type === "audio" ? (
@@ -1182,7 +1186,7 @@ function GenerationPanelContent({
                         <ZoomableImage
                           src={blobUrl(projectId, g.output_blob_hash)}
                           previewSrc={blobUrl(projectId, g.output_blob_hash, "thumbnail")}
-                          filename={`${targetType}-${g.id.slice(0, 8)}`}
+                          filename={sourceLabel(g.id)}
                           className="aspect-video w-full bg-elevated object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                         />
                       ))}
@@ -1198,7 +1202,7 @@ function GenerationPanelContent({
                               : "From library"
                             : g.provider}
                       </span>
-                      <span>{g.id.slice(0, 8)}</span>
+                      <span>{sourceLabel(g.id)}</span>
                     </div>
                     {g.earlier_script && (
                       <p className="px-2 pt-2 text-xs text-muted-foreground">
@@ -1275,7 +1279,7 @@ function GenerationPanelContent({
                                 )
                               }
                             />
-                            {zh ? "加入比较" : "Compare"} · {g.id.slice(0, 8)}
+                            {zh ? "加入比较" : "Compare"} · {sourceLabel(g.id)}
                           </label>
                         )}
                         <details className="generation-edit-tools">
@@ -1347,9 +1351,8 @@ function GenerationPanelContent({
                       <p className="px-2 pt-1 text-[10px] text-muted-foreground">
                         {zh
                           ? g.input_refs.character_preset.label
-                          : g.input_refs.character_preset.label_en}{" "}
-                        · {zh ? "来源" : "Source"}{" "}
-                        {g.input_refs.source_generation_id?.slice(0, 8)}
+                          : g.input_refs.character_preset.label_en}
+                        {g.input_refs.source_generation_id && ` · ${zh ? "来源" : "Source"} ${sourceLabel(g.input_refs.source_generation_id)}`}
                       </p>
                     )}
                     <div className="flex items-center justify-between px-2 py-1.5">

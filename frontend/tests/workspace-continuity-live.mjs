@@ -85,11 +85,10 @@ try {
   await page.getByRole("button", { name: "下一页", exact: true }).click();
   assert.equal(await page.locator("main article").count(), 7);
   await page
-    .getByRole("button", { name: /^快速预览 / })
+    .getByRole("link", { name: /^打开 / })
     .first()
     .click();
-  await page.getByRole("dialog").waitFor();
-  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "返回角色与场景" }).click();
   await page.reload();
   await page.locator("main article").first().waitFor();
   assert.equal(await page.locator("main article").count(), 7);

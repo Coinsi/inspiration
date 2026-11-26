@@ -18,12 +18,14 @@ type Preview = {
 export function CharacterTools({
   projectId,
   generation,
+  sourceLabel,
   provider,
   onClose,
   onJob,
 }: {
   projectId: string;
   generation: Generation;
+  sourceLabel: string;
   provider: string;
   onClose: () => void;
   onJob: (id: string) => void;
@@ -90,7 +92,7 @@ export function CharacterTools({
             className="max-h-96 w-full rounded-lg bg-elevated object-contain"
           />
           <p className="text-xs text-muted-foreground">
-            {zh ? "来源素材" : "Source"} {generation.id.slice(0, 8)} ·{" "}
+            {zh ? "来源素材" : "Source"} {sourceLabel} ·{" "}
             {provider}
           </p>
           {imageError && (

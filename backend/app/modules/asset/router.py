@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from app.core.database import get_db
 from app.core.deps import ProjectContext, get_project_context, require_action
 from app.models.enums import AssetType, VersionStatus
-from app.modules.asset import schemas, service
+from app.modules.asset import appearances, schemas, service
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["asset"])
@@ -160,6 +160,11 @@ def rollback_asset(
 
 
 # ── 反查 / 影响分析 ──
+@router.get("/assets/{asset_id}/appearances", response_model=list[schemas.AssetAppearance])
+def asset_appearances(asset_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
+    return appearances.list_appearances(db, ctx.project.id, asset_id)
+
+
 @router.get("/assets/{asset_id}/usages")
 def asset_usages(asset_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context), db: Session = Depends(get_db, scope="function")):
     return service.usages(db, ctx.project.id, asset_id)
