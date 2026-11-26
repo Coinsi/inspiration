@@ -29,12 +29,21 @@ def passages(blocks):
 
 
 def matching_blocks(blocks, quotes):
+    def normalize(text):
+        return "".join(text.split()).replace("：", ":")
+
+    # Some drafts quote "speaker: line" across two editor blocks. Keep the dialogue
+    # block as the source because its checked text also includes the speaker.
+    raw = {block["id"]: normalize(block["text"]) for block in blocks}
+    spoken = {key: normalize(text) for key, text in passages(blocks).items() if key}
     result = set()
     for quote in set(quotes):
-        needle = "".join(quote.split())
+        needle = normalize(quote)
         if len(needle) < 2:
             continue
-        matches = [b["id"] for b in blocks if needle in "".join(b["text"].split())]
+        matches = [key for key, text in raw.items() if needle in text]
+        if not matches:
+            matches = [key for key, text in spoken.items() if needle in text]
         if len(matches) == 1:
             result.add(matches[0])
     return result

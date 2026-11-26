@@ -22,6 +22,34 @@ def block(key, kind, text):
     return {"id": key, "block_type": kind, "text": text}
 
 
+def test_speaker_and_dialogue_share_the_line_as_evidence(studio):
+    client, _, ids = studio
+    root = f"/api/v1/projects/{ids['project']}"
+    script = post_ok(client, root + "/scripts", {"title": "换班"})
+    path = f"{root}/scripts/{script['id']}"
+    blocks = [
+        block("h", "scene_heading", "INT. 值班室 - 夜"),
+        block("a", "action", "阿岚放下账本。"),
+        block("c", "character", "阿岚"),
+        block("d", "dialogue", "该换班了。"),
+        block("c2", "character", "小齐"),
+        block("d2", "dialogue", "该换班了。"),
+    ]
+    assert client.put(path + "/blocks", json={"blocks": blocks}).is_success
+    scenes = post_ok(client, path + "/decompose?strategy=mock")["scenes"]
+    post_ok(client, path + "/apply-scenes", {"scenes": scenes})
+    shots = client.get(f"{root}/scenes/{scenes[0]['scene_id']}/shots").json()
+    assert len(shots) == 3
+    blocks[1]["text"] = "阿岚拿起账本。"
+    assert client.put(path + "/blocks", json={"blocks": blocks}).is_success
+    assert [r["shot_id"] for r in client.get(path + "/affected-shots").json()] == [shots[0]["id"]]
+    blocks[2]["text"] = "阿月"
+    assert client.put(path + "/blocks", json={"blocks": blocks}).is_success
+    review = {r["shot_id"]: r["changes"] for r in client.get(path + "/affected-shots").json()}
+    assert set(review) == {shots[0]["id"], shots[1]["id"]}
+    assert review[shots[1]["id"]][0]["after"] == "阿月：该换班了。"
+
+
 def test_migrates_in_place_and_restores_blocks_on_downgrade(library_migration_schema):
     import json
 
