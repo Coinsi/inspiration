@@ -116,7 +116,7 @@
 .composer-brand-mark {
   display: inline-flex;
   flex: none;
-  color: hsl(var(--fg));
+  color: hsl(var(--muted));
 }
 .composer-parameters {
   position: relative;
@@ -287,36 +287,44 @@
   background: hsl(var(--card));
   color: hsl(var(--fg));
   border: 1px solid hsl(var(--border) / 0.5);
-  border-radius: 24px;
-  box-shadow: 0 18px 64px #0002;
+  border-radius: 18px;
+  box-shadow: 0 14px 42px #0002;
 }
 .composer-model-search {
-  margin: 14px 18px;
+  margin: 12px;
   flex: none;
 }
 
 .composer-model-columns {
   display: grid;
-  grid-template-columns: minmax(200px, 0.85fr) minmax(0, 1.75fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   overflow: auto;
-  padding: 0 14px 14px;
+  padding: 0 12px 10px;
+}
+@media (min-width: 641px) {
+  .composer-model-columns:has(> .composer-model-families) {
+    grid-template-columns: 176px minmax(0, 1fr);
+    column-gap: 12px;
+  }
 }
 .composer-model-families {
   border-right: 1px solid hsl(var(--border) / 0.6);
-  padding-right: 16px;
+  padding-right: 10px;
   overflow-y: auto;
 }
 .composer-model-families button {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 18px 14px;
-  margin-bottom: 6px;
-  border-radius: 16px;
+  padding: 10px;
+  border-radius: 12px;
   border: 1px solid transparent;
+}
+.composer-model-families button + button {
+  margin-top: 4px;
 }
 .composer-model-families button[aria-pressed="true"] {
   background: hsl(var(--elevated) / 0.85);
@@ -334,20 +342,18 @@
   min-width: 0;
 }
 .composer-model-families strong {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .composer-model-families small {
   display: block;
-  margin-top: 6px;
+  margin-top: 2px;
   color: hsl(var(--muted));
   font-size: 12px;
 }
 .composer-model-list {
-  min-height: 180px;
   overflow-y: auto;
-  padding-left: 16px;
 }
 .composer-model-list > button {
   display: flex;
@@ -355,10 +361,12 @@
   gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 16px 14px;
-  min-height: 92px;
-  border-radius: 16px;
-  margin-bottom: 6px;
+  padding: 8px 12px;
+  min-height: 48px;
+  border-radius: 12px;
+}
+.composer-model-list > button + button {
+  margin-top: 4px;
 }
 .composer-model-list > button:hover,
 .composer-model-list > button[aria-selected="true"] {
@@ -372,12 +380,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 42px;
+  width: 32px;
+  height: 32px;
   flex: none;
 }
 .composer-model-list > button[aria-selected="true"] .composer-model-icon {
-  border-radius: 12px;
+  border-radius: 8px;
   background: hsl(var(--card));
 }
 .composer-model-copy {
@@ -388,14 +396,15 @@
   display: block;
   font-size: 14px;
   font-weight: 600;
+  line-height: 21px;
+  margin-bottom: 2px;
   overflow-wrap: anywhere;
 }
 .composer-model-list small {
   display: block;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.5;
   color: hsl(var(--muted));
-  margin-top: 5px;
   overflow-wrap: anywhere;
 }
 .composer-model-origin {
@@ -403,7 +412,8 @@
   color: hsl(var(--muted));
   font-size: 11px;
   line-height: 1.5;
-  margin-top: 5px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
 }
 .composer-model-badges {
   display: flex;
@@ -433,7 +443,9 @@
   flex: none;
 }
 .composer-model-empty {
-  padding: 26px;
+  padding: 14px 16px;
+  min-height: 0;
+  overflow: auto;
   font-size: 13px;
   color: hsl(var(--muted));
 }
@@ -442,7 +454,10 @@
   margin-left: 8px;
 }
 .composer-model-menu footer {
-  padding: 14px 22px;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
   border-top: 1px solid hsl(var(--border) / 0.5);
   color: hsl(var(--muted));
   font-size: 12px;
@@ -453,6 +468,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: 44px;
 }
 .composer-model-menu footer button > svg:last-child {
   margin-left: auto;
@@ -873,15 +889,14 @@
   .workbench-hero > h1 span {
     display: inline;
   }
-  .composer-model-columns {
-    grid-template-columns: 1fr;
-    padding: 0 10px 10px;
+  .composer-model-columns:has(> .composer-model-families) {
+    grid-template-rows: max-content minmax(0, 1fr);
   }
   .composer-model-families {
     display: flex;
     gap: 6px;
     overflow-x: auto;
-    padding: 0 0 10px;
+    padding: 0 0 8px;
     border: 0;
   }
   .composer-model-families button {
@@ -889,7 +904,9 @@
     flex: none;
     padding: 10px;
     gap: 8px;
-    margin: 0;
+  }
+  .composer-model-families button + button {
+    margin-top: 0;
   }
   .composer-model-families small,
   .composer-model-families button > svg {
@@ -898,22 +915,11 @@
   .composer-model-families strong {
     font-size: 13px;
   }
-  .composer-family-icon .model-brand-logo {
-    width: 22px;
-    height: 22px;
-  }
-  .composer-model-list {
-    padding: 0;
-    min-height: 100px;
-    overflow: visible;
-  }
   .composer-model-list > button {
-    padding: 12px 10px;
     flex-wrap: wrap;
-    gap: 9px;
   }
   .composer-model-price {
-    margin-left: 47px;
+    margin-left: 44px;
     order: 3;
   }
 

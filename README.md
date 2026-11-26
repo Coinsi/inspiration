@@ -47,7 +47,7 @@ cd inspiration
 
 ### Windows 本地体验
 
-准备 Python 3.11+、Node.js 20+。首次运行推荐先启动 Docker Desktop，由启动器准备数据库等基础服务。在仓库根目录双击 `启动项目.bat`，或执行下面的命令。
+准备 Python 3.11+、Node.js 20+。首次运行推荐先启动 Docker Desktop，由启动器准备数据库等基础服务。在仓库根目录运行下面的命令。
 
 ```powershell
 python start.py

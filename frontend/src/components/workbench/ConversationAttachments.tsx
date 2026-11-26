@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, FileAudio, Film, FolderOpen, ImageOff, ImagePlus, Loader2, Paperclip, RotateCcw, Upload, X } from "lucide-react";
+import { Check, FileAudio, Film, FolderOpen, ImageOff, ImagePlus, Loader2, Paperclip, Play, RotateCcw, Upload, X } from "lucide-react";
 import { api, blobUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { mediaSize } from "@/lib/library";
@@ -22,12 +22,16 @@ export function AttachmentPreview({ projectId, item }: { projectId: string; item
   const cover = item.thumbnail_hash || item.blob_hash;
   return <div className="attachment-preview-stage">{item.kind === "audio" ? <><FileAudio size={54} /><audio src={url} controls /></> : item.kind === "video" ? <MediaVideo src={url} label={item.title} poster={cover ? blobUrl(projectId, cover, "thumbnail") : undefined} /> : <img src={url} alt={item.title} />}</div>;
 }
-function Thumbnail({ projectId, item }: { projectId: string; item: PreviewItem }) {
+function Thumbnail({ projectId, item, onDimensions }: {
+  projectId: string;
+  item: PreviewItem;
+  onDimensions?: (width: number, height: number) => void;
+}) {
   if (item.kind === "audio") return <FileAudio size={28} />;
   if (item.preview_url?.startsWith("blob:"))
     return item.kind === "video" ? <video src={item.preview_url} muted playsInline preload="metadata" /> : <img src={item.preview_url} alt="" />;
   const cover = item.thumbnail_hash || item.blob_hash;
-  if (cover) return <MediaImage src={blobUrl(projectId, cover, "thumbnail")} alt="" />;
+  if (cover) return <MediaImage src={blobUrl(projectId, cover, "thumbnail")} alt="" onDimensions={onDimensions} />;
   return item.kind === "video" ? <Film size={28} /> : <ImagePlus size={28} />;
 }
 const stateLabel = (item: AttachmentDraft) => item.state === "ready" ? mediaSize(item.size_bytes) : item.state === "paused" ? "重新选择原文件续传" : item.state === "failed" ? "上传失败，可重试" : item.state === "processing" ? "正在准备附件…" : item.state === "preparing" ? "准备上传…" : `上传中 ${Math.round((item.attachment?.uploaded_bytes || 0) / Math.max(1, item.size_bytes) * 100)}%`;
@@ -69,16 +73,11 @@ export function ComposerAttachmentTray({ projectId, uploads, references, setRefe
 
 export type MessageAttachmentItem = ConversationAttachment | ComposerReference;
 
-function messageAttachmentName(item: MessageAttachmentItem, index: number, zh: boolean) {
-  const generic = /^(image|video|audio|attachment|图片|图像|视频|音频|附件)$/i;
-  const names = [item.title, "filename" in item ? item.filename : ""];
-  const name = names.find(value => value?.trim() && !generic.test(value.trim()));
-  if (name) return name.trim();
+function messageAttachmentLabel(item: MessageAttachmentItem, zh: boolean) {
   const kind = item.kind || "image";
-  const label = zh
+  return zh
     ? ({ image: "图片", video: "视频", audio: "音频" }[kind] || "附件")
     : ({ image: "Image", video: "Video", audio: "Audio" }[kind] || "Attachment");
-  return `${label} ${index + 1}`;
 }
 
 export function MessageAttachments({ projectId, attachments = [], references = [], onReuse, reuseDisabled = false }: {
@@ -88,14 +87,24 @@ export function MessageAttachments({ projectId, attachments = [], references = [
   const { lang } = useI18n();
   const zh = lang === "zh";
   const [preview, setPreview] = useState<PreviewItem | null>(null);
+  const [coverRatios, setCoverRatios] = useState<Record<string, number>>({});
   const items: MessageAttachmentItem[] = [...attachments.map(item => ({ ...item, source_type: "attachment" as const, title: item.title || item.filename })), ...references];
   if (!items.length) return null;
+  const multiple = items.length > 1;
   return <>
-    <div className="message-attachments" role="group" aria-label={zh ? "消息附件" : "Message attachments"}>
+    <div className="message-attachments" data-multiple={multiple || undefined} role="group" aria-label={zh ? "消息附件" : "Message attachments"}>
       {items.map((item, i) => {
-        const title = messageAttachmentName(item, i, zh);
+        const label = messageAttachmentLabel(item, zh);
+        const title = multiple ? `${label} ${i + 1}` : label;
+        const cover = item.thumbnail_hash || item.blob_hash;
+        const visual = !!cover && item.kind !== "audio";
+        const savedRatio = "width" in item && item.width && item.width > 0 && item.height && item.height > 0
+          ? item.width / item.height
+          : 16 / 9;
+        const ratio = visual ? coverRatios[cover] || savedRatio : 2;
+        const width = visual ? Math.min(multiple ? 224 : 360, (multiple ? 176 : 264) * ratio) : 132;
         return (
-          <div className="message-attachment-card" key={`${item.id}:${i}`}>
+          <div className="message-attachment-card" key={`${item.id}:${i}`} style={{ width }}>
             <button
               type="button"
               className="message-attachment-preview"
@@ -103,31 +112,39 @@ export function MessageAttachments({ projectId, attachments = [], references = [
               onClick={() => setPreview({ ...item, title })}
               aria-label={`${zh ? "预览" : "Preview"} ${title}`}
             >
-              <span className="message-attachment-visual">
-                {item.thumbnail_hash || item.blob_hash ? <Thumbnail projectId={projectId} item={item} /> : (
+              <span className="message-attachment-visual" style={{ aspectRatio: ratio }}>
+                {visual ? (
+                  <Thumbnail
+                    projectId={projectId}
+                    item={item}
+                    onDimensions={(width, height) => {
+                      if (width <= 0 || height <= 0) return;
+                      const nextRatio = width / height;
+                      setCoverRatios(current => current[cover] === nextRatio ? current : { ...current, [cover]: nextRatio });
+                    }}
+                  />
+                ) : (
                   <span className="message-attachment-fallback">
                     {item.kind === "audio" ? <FileAudio size={24} /> : item.kind === "video" ? <Film size={24} /> : <ImageOff size={24} />}
-                    <span>{zh ? "暂无预览" : "Preview unavailable"}</span>
+                    <span>{item.kind === "audio" && item.blob_hash ? label : zh ? "暂无预览" : "Preview unavailable"}</span>
                   </span>
                 )}
-                {item.kind === "video" && !!item.blob_hash && <Film size={19} className="message-attachment-kind" />}
+                {item.kind === "video" && item.blob_hash && (
+                  <span className="message-attachment-play" aria-hidden="true"><Play size={19} fill="currentColor" /></span>
+                )}
               </span>
             </button>
-            <div className="message-attachment-caption">
-              <span className="message-attachment-title" title={title}>{title}</span>
-              {onReuse && (
-                <button
-                  type="button"
-                  className="message-attachment-reuse"
-                  disabled={reuseDisabled}
-                  aria-label={`${zh ? "再次引用" : "Reuse"} ${title}`}
-                  title={zh ? "再次引用" : "Reuse attachment"}
-                  onClick={() => onReuse(item)}
-                >
-                  <RotateCcw size={15} aria-hidden="true" />
-                </button>
-              )}
-            </div>
+            {onReuse && (
+              <button
+                type="button"
+                className="message-attachment-reuse"
+                disabled={reuseDisabled}
+                aria-label={`${zh ? "再次引用" : "Reuse"} ${title}`}
+                onClick={() => onReuse(item)}
+              >
+                {zh ? "引用" : "Reuse"}
+              </button>
+            )}
           </div>
         );
       })}
@@ -136,14 +153,61 @@ export function MessageAttachments({ projectId, attachments = [], references = [
   </>;
 }
 
+const addMenuWidth = 208;
+
 export function ConversationAddMenu({ disabled, onFiles, onLibrary, onObjects }: { disabled: boolean; onFiles: (files: FileList) => void; onLibrary: () => void; onObjects: () => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const [position, setPosition] = useState({ left: 12, bottom: 70, width: 290 });
-  useLayoutEffect(() => { if (!open) return; const place = () => { const rect = root.current?.getBoundingClientRect(); if (!rect) return; const width = Math.min(290, window.innerWidth - 24); setPosition({ width, left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 10 }); }; place(); window.addEventListener("resize", place); window.addEventListener("scroll", place, true); return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); }; }, [open]);
+  const [position, setPosition] = useState({ left: 12, bottom: 70, width: addMenuWidth });
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = root.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(addMenuWidth, window.innerWidth - 24);
+      setPosition({
+        width,
+        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
+        bottom: window.innerHeight - rect.top + 10,
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
   useEffect(() => { if (!open) return; const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); }; const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); }; document.addEventListener("pointerdown", close); document.addEventListener("keydown", escape); return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", escape); }; }, [open]);
-  return <div className="conversation-add-menu" ref={root}><button type="button" className="conversation-tool" disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><Paperclip size={17} /><span>添加内容</span></button>{open && <div className="conversation-add-options" role="menu" style={{ position: "fixed", ...position }}><button type="button" role="menuitem" onClick={() => { setOpen(false); input.current?.click(); }}><Upload size={16} /><span>从电脑上传<small>图片、视频、音频 · 也可拖入或粘贴</small></span></button><button type="button" role="menuitem" onClick={() => { setOpen(false); onLibrary(); }}><ImagePlus size={16} /><span>已有素材与对话附件</span></button><button type="button" role="menuitem" onClick={() => { setOpen(false); onObjects(); }}><FolderOpen size={16} /><span>项目中的创作对象</span></button></div>}<input ref={input} type="file" accept={attachmentAccept} multiple hidden onChange={event => { if (event.target.files) onFiles(event.target.files); event.target.value = ""; }} /></div>;
+  return (
+    <div className="conversation-add-menu" ref={root}>
+      <button type="button" className="conversation-tool conversation-tool-plain" disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Paperclip size={17} /><span>添加内容</span>
+      </button>
+      {open && (
+        <div className="conversation-add-options" role="menu" style={position}>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); input.current?.click(); }}>
+            <Upload size={16} aria-hidden="true" />
+            <span>上传</span>
+            <small>本地文件</small>
+          </button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onLibrary(); }}>
+            <ImagePlus size={16} aria-hidden="true" />
+            <span>选取</span>
+            <small>素材与对话附件</small>
+          </button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onObjects(); }}>
+            <FolderOpen size={16} aria-hidden="true" />
+            <span>引用</span>
+            <small>剧本、镜头与设定</small>
+          </button>
+        </div>
+      )}
+      <input ref={input} type="file" accept={attachmentAccept} multiple hidden onChange={event => { if (event.target.files) onFiles(event.target.files); event.target.value = ""; }} />
+    </div>
+  );
 }
 
 export function ConversationAttachmentPicker({ projectId, open, onClose, references, pickReference, uploads, mode, capabilities, capabilitiesLoading, capabilitiesError, onRetryCapabilities }: {

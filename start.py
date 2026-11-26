@@ -313,7 +313,7 @@ class Launcher:
     def prepare(self):
         self.node = shutil.which("node")
         if not self.node:
-            raise StartupError("未找到 Node.js。请先安装 Node.js 20+，然后重新双击启动。")
+            raise StartupError("未找到 Node.js。请先安装 Node.js 20+，然后重新运行启动命令。")
         version = self.command([self.node, "--version"], capture=True).stdout.strip()
         if int(version.lstrip("v").split(".")[0]) < 20:
             raise StartupError(f"当前 Node.js 为 {version}，需要 20 或更高版本。")
@@ -1223,7 +1223,7 @@ def main(argv=None) -> int:
         if args.action in ("start", "restart"):
             launcher.summary()
             say(f"网页：{WEB_URL}\n接口文档：{API_URL}/docs")
-            say(f"日志：{launcher.runtime}\n关闭此窗口不会停止服务；更新后请选择“重启项目”。")
+            say(f"日志：{launcher.runtime}\n关闭此窗口后服务会继续运行。更新后可运行 python start.py --action restart。")
         if args.action in ("start", "restart") and not args.no_browser:
             try:
                 webbrowser.open(WEB_URL)

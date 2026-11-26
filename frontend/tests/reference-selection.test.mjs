@@ -193,10 +193,10 @@ test('historical attachment previews and reuse preserve attachment and reference
     })));
   });
   try {
-    await act(async () => tree.root.findByProps({ 'aria-label': '预览 对白音频' }).props.onClick());
+    await act(async () => tree.root.findByProps({ 'aria-label': '预览 音频 1' }).props.onClick());
     assert.equal(tree.root.findByType('audio').props.controls, true);
-    await act(async () => tree.root.findByProps({ 'aria-label': '再次引用 对白音频' }).props.onClick());
-    await act(async () => tree.root.findByProps({ 'aria-label': '再次引用 人物图' }).props.onClick());
+    await act(async () => tree.root.findByProps({ 'aria-label': '再次引用 音频 1' }).props.onClick());
+    await act(async () => tree.root.findByProps({ 'aria-label': '再次引用 图片 2' }).props.onClick());
     assert.equal(reused[0].id, attachment.id);
     assert.equal(reused[0].filename, attachment.filename);
     assert.equal(reused[0].source_type, 'attachment');
@@ -204,7 +204,7 @@ test('historical attachment previews and reuse preserve attachment and reference
   } finally { await act(async () => tree.unmount()); }
 });
 
-test('historical image labels prefer filenames and localize missing names without changing reuse data', async () => {
+test('historical image previews use media labels without exposing filenames or changing reuse data', async () => {
   const attachment={...saved(image),title:'image',filename:'人物服装参考.webp'};
   const unnamed={...image,id:'unnamed',title:'image',blob_hash:null};
   const reused=[];
@@ -215,7 +215,8 @@ test('historical image labels prefer filenames and localize missing names withou
     })));
   });
   try {
-    assert.equal(tree.root.findByProps({'aria-label':'预览 人物服装参考.webp'}).props.disabled,false);
+    assert.equal(tree.root.findByProps({'aria-label':'预览 图片 1'}).props.disabled,false);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /人物服装参考\.webp/);
     assert.equal(tree.root.findByProps({'aria-label':'预览 图片 2'}).props.disabled,true);
     assert.equal(tree.root.findAllByProps({className:'message-attachment-fallback'}).length,1);
     await act(async()=>tree.root.findByProps({'aria-label':'再次引用 图片 2'}).props.onClick());

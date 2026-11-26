@@ -6,7 +6,7 @@
 
 需要 Python 3.11+、Node.js 20+。没有已配置的 PostgreSQL、MinIO 等服务时，需要 Docker Desktop。首次安装依赖和拉取镜像需要联网。
 
-克隆仓库后，在根目录双击 `启动项目.bat`，或运行：
+克隆仓库后，在根目录运行下面的命令。
 
 ```powershell
 python start.py
@@ -20,7 +20,9 @@ python start.py --no-browser --no-pause
 
 启动器沿用 `backend/.env`，只在配置文件不存在时从示例创建；复用已启动服务，不重置已有账号、项目和数据卷。数据库版本不匹配时会提示先停止旧后端，再执行迁移并启动。自定义数据库无法连接时不会自动切换到别的数据库。
 
-服务在后台运行，关闭启动窗口不会停止服务。日志位于根目录 `.runtime/`；修改后端代码后需要重启对应进程。
+服务在后台运行，关闭启动窗口后服务会继续运行。日志位于根目录 `.runtime/`。
+
+从仓库根目录运行 `python start.py --action restart` 重启项目，运行 `python start.py --action stop` 停止项目服务，运行 `python start.py --action status` 查看状态。
 
 ## Docker Compose
 

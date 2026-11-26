@@ -59,8 +59,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.message-attachment-preview').length === 1);
   assert.equal(sends.length, 1); assert.equal(sends[0].content, ''); assert.equal(sends[0].attachments.length, 1);
   assert.equal(await page.locator('.conversation-attachment-card').count(), 0);
-  await page.getByRole('button', { name: '预览 character.webp', exact: true }).click();
-  await page.getByRole('dialog').waitFor(); await page.getByRole('button', { name: '关闭', exact: true }).click();
+  assert.doesNotMatch(await page.getByRole('group', { name: '消息附件' }).innerText(), /character\.webp/);
+  await page.getByRole('button', { name: '预览 图片', exact: true }).click();
+  await page.getByRole('dialog', { name: '图片', exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
   // Clipboard files join the same upload pipeline.
   await page.getByRole('textbox', { name: '对话消息' }).evaluate((el, bytes) => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(bytes)], 'pasted.webp', { type: 'image/webp' })); el.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, clipboardData: data })); }, [...png]);
   await page.getByRole('button', { name: '预览 pasted.webp', exact: true }).waitFor();
@@ -69,7 +71,7 @@ try {
   await page.getByRole('button', { name: '预览 dropped.webp', exact: true }).waitFor();
   await page.getByRole('button', { name: '移除 dropped.webp', exact: true }).click();
   await page.getByRole('button', { name: '添加内容', exact: true }).click();
-  await page.getByRole('menuitem', { name: '已有素材与对话附件', exact: true }).click();
+  await page.getByRole('menuitem', { name: '选取 素材与对话附件', exact: true }).click();
   await page.getByRole('button', { name: '对话附件', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'character.webp', exact: true }).click();
   await page.getByRole('button', { name: '完成', exact: true }).click();
@@ -135,7 +137,7 @@ try {
   await page.getByRole('button', { name: '移除 character.webp', exact: true }).click();
   assert.match(await picture.innerText(), /9:16/);
   await page.getByRole('button', { name: '添加内容', exact: true }).click();
-  await page.getByRole('menuitem', { name: '已有素材与对话附件' }).click();
+  await page.getByRole('menuitem', { name: '选取 素材与对话附件', exact: true }).click();
   await page.getByRole('button', { name: '引用 落日', exact: true }).click();
   await page.getByRole('button', { name: '完成', exact: true }).click();
   await page.getByRole('button', { name: '参考用途' }).click();

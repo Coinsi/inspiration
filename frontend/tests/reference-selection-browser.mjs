@@ -49,12 +49,12 @@ try {
     return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="180"><rect width="300" height="180" fill="#8caaa0"/><circle cx="150" cy="65" r="30" fill="#e4ece8"/><path d="M90 180v-40a60 60 0 01120 0v40" fill="#d2dfd9"/></svg>' });
   });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.getByRole('button', { name: '再次引用 已保存人物图', exact: true }).click();
+  await page.getByRole('button', { name: '再次引用 图片 1', exact: true }).click();
   assert.equal(JSON.parse(await page.getByLabel('再次引用结果').textContent()).filename, 'saved.webp');
-  await page.getByRole('button', { name: '再次引用 历史视频', exact: true }).click();
+  await page.getByRole('button', { name: '再次引用 视频 2', exact: true }).click();
   assert.equal(JSON.parse(await page.getByLabel('再次引用结果').textContent()).source_type, 'generation');
-  await page.getByRole('button', { name: '预览 已保存人物图', exact: true }).click();
-  assert.equal(await page.getByRole('dialog').getByRole('img', { name: '已保存人物图' }).count(), 1);
+  await page.getByRole('button', { name: '预览 图片 1', exact: true }).click();
+  assert.equal(await page.getByRole('dialog', { name: '图片 1', exact: true }).getByRole('img', { name: '图片 1' }).count(), 1);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('button', { name: '加入本地图片', exact: true }).click();
   await page.getByRole('button', { name: '打开选择器', exact: true }).click();

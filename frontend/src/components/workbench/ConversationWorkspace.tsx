@@ -47,6 +47,7 @@ import {
   Check,
   FolderOpen,
   Loader2,
+  PanelBottomClose,
   PanelLeft,
   Clapperboard,
   Type,
@@ -221,6 +222,10 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
   );
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const expandComposerButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (composerCollapsed) expandComposerButton.current?.focus({ preventScroll: true });
+  }, [composerCollapsed]);
   function focusComposer() {
     setComposerCollapsed(false);
     requestAnimationFrame(() => {
@@ -1115,7 +1120,20 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 {m.context.mode === "test" && <span>离线机制测试</span>}
               </div>
               {m.role === "user" ? (
-                <><MessageAttachments projectId={projectId} attachments={m.context.attachments} references={m.context.references} onReuse={busy || !!detail.data?.archived ? undefined : reuseAttachment} />{m.context.cut_selection && <small>{m.context.cut_selection.timeline} · {(m.context.cut_selection.start_ms / 1000).toFixed(2)}–{(m.context.cut_selection.end_ms / 1000).toFixed(2)} 秒 · v{m.context.cut_selection.revision}</small>}<ConversationText content={m.content} user /></>
+                <>
+                  <MessageAttachments
+                    projectId={projectId}
+                    attachments={m.context.attachments}
+                    references={m.context.references}
+                    onReuse={busy || !!detail.data?.archived ? undefined : reuseAttachment}
+                  />
+                  {(m.content || m.context.cut_selection) && (
+                    <div className="conversation-user-content">
+                      {m.context.cut_selection && <small>{m.context.cut_selection.timeline} · {(m.context.cut_selection.start_ms / 1000).toFixed(2)}–{(m.context.cut_selection.end_ms / 1000).toFixed(2)} 秒 · v{m.context.cut_selection.revision}</small>}
+                      {m.content && <ConversationText content={m.content} user />}
+                    </div>
+                  )}
+                </>
               ) : (
                 <ConversationAnswer
                   content={m.execution_kind === "generation" && m.context.outputs?.length &&
@@ -1245,7 +1263,11 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           {submission && <>
             <article className="conversation-message conversation-message-user" aria-label="正在发送的消息">
               <MessageAttachments projectId={projectId} attachments={submission.attachments} references={submission.references} />
-              <ConversationText content={submission.content} user />
+              {submission.content && (
+                <div className="conversation-user-content">
+                  <ConversationText content={submission.content} user />
+                </div>
+              )}
             </article>
             <div className="conversation-submitting" role="status"><Loader2 size={15} className="conversation-spinner" />正在发送{submission.mode === "text" ? "" : submission.mode === "image" ? "图片创作要求" : "视频创作要求"}…</div>
           </>}
@@ -1264,29 +1286,25 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
           onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setFileDrag(false); }}
           onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); event.stopPropagation(); setFileDrag(false); if (!busy && !detail.data?.archived) addLocalFiles(event.dataTransfer.files); }}
           onPaste={event => { if (!event.clipboardData.files.length || busy || detail.data?.archived) return; event.preventDefault(); addLocalFiles(event.clipboardData.files); const text = event.clipboardData.getData("text/plain"); if (text) setDraft(`${draft}${text}`); }}>
-          <button
-            type="button"
-            className="conversation-composer-toggle"
-            aria-label={composerCollapsed ? (zh ? "展开输入框" : "Expand composer") : (zh ? "收起输入框" : "Collapse composer")}
-            aria-expanded={!composerCollapsed}
-            aria-controls={composerBodyId}
-            onClick={() => {
-              if (composerCollapsed) focusComposer();
-              else {
-                setComposerCollapsed(true);
-                setMoreOpen(false);
-                setModelPickerOpen(false);
-              }
-            }}
-          >
-            <span className="conversation-composer-mode">{zh ? modeLabels[mode] : { text: "Chat", image: "Image", video: "Video" }[mode]}</span>
-            {composerCollapsed && <span className="conversation-composer-summary">{composerSummary}</span>}
-            {composerCollapsed && composerContentCount > 0 && <span className="conversation-composer-count"><Paperclip size={13} aria-hidden="true" />{composerContentCount}</span>}
-            <span className="conversation-composer-toggle-label">
-              {composerCollapsed ? (zh ? "展开输入框" : "Expand") : (zh ? "收起输入框" : "Collapse")}
-              {composerCollapsed ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
-            </span>
-          </button>
+          {composerCollapsed && (
+            <button
+              ref={expandComposerButton}
+              type="button"
+              className="conversation-composer-toggle"
+              aria-label={zh ? "展开输入框" : "Expand composer"}
+              aria-expanded={false}
+              aria-controls={composerBodyId}
+              onClick={focusComposer}
+            >
+              <span className="conversation-composer-mode">{zh ? modeLabels[mode] : { text: "Chat", image: "Image", video: "Video" }[mode]}</span>
+              <span className="conversation-composer-summary">{composerSummary}</span>
+              {composerContentCount > 0 && <span className="conversation-composer-count"><Paperclip size={13} aria-hidden="true" />{composerContentCount}</span>}
+              <span className="conversation-composer-toggle-label">
+                {zh ? "展开输入框" : "Expand"}
+                <ChevronUp size={15} aria-hidden="true" />
+              </span>
+            </button>
+          )}
           <div id={composerBodyId} className="conversation-compose-body" hidden={composerCollapsed}>
           <ComposerAttachmentTray projectId={projectId} uploads={attachments} references={media.refs} setReferences={media.setRefs} disabled={busy || !!detail.data?.archived} frameRoles={mode === "video" ? (media.capabilities?.features || []).filter(feature => feature === "first_frame" || feature === "last_frame") : []} />
           {((mode === "text" && targets.length > 0) || skills.length > 0) && (
@@ -1388,6 +1406,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               <SelectField
                 label="本轮创作方式"
                 className="composer-control composer-mode-select"
+                menuWidth={152}
                 value={mode}
                 disabled={busy}
                 onChange={(value) => setMode(value as CreationMode)}
@@ -1421,7 +1440,7 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
                 />
               )}
               <button
-                className="conversation-tool"
+                className="conversation-tool conversation-tool-plain"
                 type="button"
                 disabled={busy}
                 onClick={() => { setSkillOpen(true); setMoreOpen(false); }}
@@ -1437,18 +1456,43 @@ export function ConversationWorkspace({ projectId }: { projectId: string }) {
               {latest?.execution_kind === "production" && ["queued", "running"].includes(latest.context.production?.status || "") &&
                 <button type="button" className="conversation-tool" aria-label="停止后续步骤" title="停止后续步骤；已提交的生成仍可能完成" disabled={control.isPending}
                   onClick={() => control.mutate({message: latest, action: "cancel"})}><Square size={17} /></button>}
-              {!draft.trim() && mode === "text" && (attachments.items.length > 0 || media.refs.length > 0) ? <button type="button" className="conversation-send" aria-label="发送附件" disabled={!ready} onClick={() => void send.mutateAsync("").catch(() => undefined)}>{send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}</button> : <ComposerPrimitive.Send
-                className="conversation-send"
-                type="button"
-                aria-label="发送消息"
-                disabled={!ready}
-              >
-                {send.isPending ? (
-                  <Loader2 size={19} className="conversation-spinner" />
+              <div className="conversation-submit-controls">
+                <button
+                  type="button"
+                  className="conversation-tool conversation-tool-plain"
+                  title={zh ? "收起输入框" : "Collapse composer"}
+                  aria-label={zh ? "收起输入框" : "Collapse composer"}
+                  aria-expanded={true}
+                  aria-controls={composerBodyId}
+                  onClick={() => {
+                    setComposerCollapsed(true);
+                    setMoreOpen(false);
+                    setModelPickerOpen(false);
+                  }}
+                >
+                  <PanelBottomClose size={18} aria-hidden="true" />
+                </button>
+                {!draft.trim() && mode === "text" && (attachments.items.length > 0 || media.refs.length > 0) ? (
+                  <button
+                    type="button"
+                    className="conversation-send"
+                    aria-label="发送附件"
+                    disabled={!ready}
+                    onClick={() => void send.mutateAsync("").catch(() => undefined)}
+                  >
+                    {send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}
+                  </button>
                 ) : (
-                  <ArrowUp size={19} />
+                  <ComposerPrimitive.Send
+                    className="conversation-send"
+                    type="button"
+                    aria-label="发送消息"
+                    disabled={!ready}
+                  >
+                    {send.isPending ? <Loader2 size={19} className="conversation-spinner" /> : <ArrowUp size={19} />}
+                  </ComposerPrimitive.Send>
                 )}
-              </ComposerPrimitive.Send>}
+              </div>
             </div>
           </div>
           {ongoing && !send.isPending && <p className="conversation-compose-context">可继续讨论；本次生成仍按原要求进行。</p>}

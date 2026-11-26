@@ -96,11 +96,11 @@ try{
  await page.getByRole('button',{name:'撤销',exact:true}).click();
  assert.equal(await tray.count(),0);
  assert.equal(await composer.inputValue(),'这段草稿先保留。');
- await page.getByRole('button',{name:'再次引用 角色参考.webp',exact:true}).click();
+ await page.getByRole('button',{name:'再次引用 图片',exact:true}).click();
  await tray.getByRole('button',{name:'预览 角色参考.webp',exact:true}).waitFor();
  await page.getByRole('button',{name:'撤销',exact:true}).click();
  assert.equal(await tray.count(),0);
- await page.getByRole('button',{name:'再次引用 角色参考.webp',exact:true}).click();
+ await page.getByRole('button',{name:'再次引用 图片',exact:true}).click();
  await answer.getByRole('button',{name:'讨论这张',exact:true}).click();
  assert.equal(await tray.locator('.conversation-attachment-card').count(),2);
  await answer.locator('.conversation-result-more > summary').click();
@@ -144,7 +144,7 @@ try{
   assert.equal(await tray.locator('.conversation-attachment-card').count(),2);
   assert.match(await page.getByRole('button',{name:'本轮创作方式',exact:true}).innerText(),/图片/);
   await page.getByRole('button',{name:'收起输入框',exact:true}).click();
-  await page.getByRole('button',{name:'再次引用 角色参考.webp',exact:true}).click();
+  await page.getByRole('button',{name:'再次引用 图片',exact:true}).click();
   await composer.waitFor({state:'visible'});
   assert.equal(await composer.inputValue(),longDraft,'reusing a historical attachment reopens the retained draft');
   assert.equal(await tray.locator('.conversation-attachment-card').count(),2,'existing references stay deduplicated');

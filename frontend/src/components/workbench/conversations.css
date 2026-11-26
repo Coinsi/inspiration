@@ -787,6 +787,18 @@
   border-radius: 18px 18px 5px 18px;
   background: hsl(var(--surface) / 0.65);
 }
+.conversation-message-user:has(> .message-attachments) {
+  padding: 0;
+  background: transparent;
+}
+.message-attachments + .conversation-user-content {
+  width: fit-content;
+  max-width: 100%;
+  margin: 6px 0 0 auto;
+  padding: 8px 14px;
+  border-radius: inherit;
+  background: hsl(var(--surface) / 0.65);
+}
 .conversation-message-label {
   display: flex;
   gap: 12px;

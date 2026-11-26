@@ -90,7 +90,8 @@ def check_termination_access(processes):
         handle = kernel.OpenProcess(1, False, p["ProcessId"])
         if not handle:
             raise RuntimeError(
-                f"无法停止项目进程 PID {p['ProcessId']}（Windows 权限不足或进程已变化）。请用原启动账号或右键以管理员身份运行“重启项目.bat”。"
+                f"无法停止项目进程 PID {p['ProcessId']}（Windows 权限不足或进程已变化）。"
+                "请用原启动账号重新运行命令。若旧服务由管理员启动，请在管理员终端运行。"
             )
         kernel.CloseHandle(handle)
 
@@ -118,7 +119,8 @@ def manage(root: Path, action: str, emit=print):
     unknown = [p for p in listeners if p["OwningProcess"] not in owned]
     if unknown:
         raise RuntimeError(
-            "存在无法确认归属的端口占用，未停止任何服务。请用原启动账号运行；若旧服务由管理员启动，请右键“重启项目.bat”以管理员身份运行。不会按端口强杀其他程序。"
+            "存在无法确认归属的端口占用，未停止任何服务。请用原启动账号重新运行命令。"
+            "若旧服务由管理员启动，请在管理员终端运行。"
         )
     check_termination_access(owned.values())
     # Reverse discovery order terminates descendants before their launchers.

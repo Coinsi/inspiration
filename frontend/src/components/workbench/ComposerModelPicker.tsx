@@ -98,6 +98,7 @@ export function ComposerModelPicker({
       .includes(search.trim().toLowerCase()),
   );
   const groups = [...new Set(visible.map(family))];
+  const hasMultipleFamilies = new Set(models.map(family)).size > 1;
   const preferredGroup = group || brand;
   const active = groups.includes(preferredGroup) ? preferredGroup : groups[0];
   const close = () => {
@@ -114,12 +115,13 @@ export function ComposerModelPicker({
       const top = viewport?.offsetTop ?? 0;
       const right = left + (viewport?.width ?? window.innerWidth);
       const bottom = top + (viewport?.height ?? window.innerHeight);
-      const width = Math.min(880, right - left - 24);
+      const width = Math.min(hasMultipleFamilies ? 580 : 480, right - left - 24);
+      const maxHeight = 440;
       const anchorTop = Math.min(rect.top, bottom);
       const anchorBottom = Math.max(rect.bottom, top);
       const above = anchorTop - top - 22;
       const below = bottom - anchorBottom - 22;
-      const up = above >= 360 || above > below;
+      const up = above >= maxHeight || above > below;
       let available = up ? above : below;
       let vertical: CSSProperties = up
         ? { bottom: window.innerHeight - anchorTop + 10 }
@@ -132,7 +134,7 @@ export function ComposerModelPicker({
       setPosition({
         position: "fixed",
         width,
-        maxHeight: Math.min(520, available),
+        maxHeight: Math.min(maxHeight, available),
         left: Math.max(left + 12, Math.min(rect.left, right - width - 12)),
         ...vertical,
       });
@@ -148,7 +150,7 @@ export function ComposerModelPicker({
       viewport?.removeEventListener("resize", positionPanel);
       viewport?.removeEventListener("scroll", positionPanel);
     };
-  }, [open]);
+  }, [open, hasMultipleFamilies]);
   useEffect(() => {
     if (!open) {
       setSearch("");
@@ -189,7 +191,7 @@ export function ComposerModelPicker({
         onClick={() => onOpenChange(!open)}
       >
         <span className="composer-brand-mark">
-          {selected ? <ModelBrandIcon brand={brand} size={22} /> : <Cpu size={18} aria-hidden="true" />}
+          {selected ? <ModelBrandIcon brand={brand} size={18} /> : <Cpu size={18} aria-hidden="true" />}
         </span>
         <span id={id + "-value"}>
           {loading
@@ -297,37 +299,39 @@ export function ComposerModelPicker({
               </p>
             ) : (
               <div className="composer-model-columns">
-                <nav className="composer-model-families" aria-label="模型系列">
-                  {groups.map((name) => {
-                    const items = visible.filter((m) => family(m) === name);
-                    return (
-                      <button
-                        key={name}
-                        type="button"
-                        data-model-group
-                        aria-pressed={name === active}
-                        onClick={() => setGroup(name)}
-                        onFocus={() => setGroup(name)}
-                      >
-                        <span className="composer-family-icon">
-                          <ModelBrandIcon brand={name} size={30} />
-                        </span>
-                        <span>
-                          <strong>{name}</strong>
-                          <small>
-                            {items.length} 个模型 ·{" "}
-                            {name === "开发测试"
-                              ? "本地验证"
-                              : items.some((m) => m.config.scope === "personal")
-                                ? "我的服务 / 项目服务"
-                                : "项目服务"}
-                          </small>
-                        </span>
-                        <ChevronRight size={16} />
-                      </button>
-                    );
-                  })}
-                </nav>
+                {hasMultipleFamilies && (
+                  <nav className="composer-model-families" aria-label="模型系列">
+                    {groups.map((name) => {
+                      const items = visible.filter((m) => family(m) === name);
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          data-model-group
+                          aria-pressed={name === active}
+                          onClick={() => setGroup(name)}
+                          onFocus={() => setGroup(name)}
+                        >
+                          <span className="composer-family-icon">
+                            <ModelBrandIcon brand={name} size={22} />
+                          </span>
+                          <span>
+                            <strong>{name}</strong>
+                            <small>
+                              {items.length} 个模型 ·{" "}
+                              {name === "开发测试"
+                                ? "本地验证"
+                                : items.some((m) => m.config.scope === "personal")
+                                  ? "我的服务 / 项目服务"
+                                  : "项目服务"}
+                            </small>
+                          </span>
+                          <ChevronRight size={16} />
+                        </button>
+                      );
+                    })}
+                  </nav>
+                )}
                 <div
                   className="composer-model-list"
                   role="listbox"
@@ -349,7 +353,7 @@ export function ComposerModelPicker({
                         }}
                       >
                         <span className="composer-model-icon">
-                          <ModelBrandIcon brand={family(model)} size={26} />
+                          <ModelBrandIcon brand={family(model)} size={22} />
                         </span>
                         <span className="composer-model-copy">
                           <strong>
