@@ -3,8 +3,8 @@
 import uuid
 from collections import Counter, defaultdict, deque
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, defer
 
 from app.adapters.contracts import SCRIPT_BLOCK_TYPES, decomposition_registry, parser_registry
 from app.core import audit
@@ -15,7 +15,7 @@ from app.models.enums import AssetType
 from app.models.identity import Project
 from app.models.narrative import Chapter, Novel, Script, Scene
 from app.models.shot import Shot
-from app.modules.narrative import schemas
+from app.modules.narrative import schemas, screenplay
 from app.modules.shot import breakdown
 from app.platform import coding
 from app.storage import cas
@@ -187,14 +187,25 @@ def create_script(db: Session, ctx: ProjectContext, title: str) -> Script:
     return s
 
 
-def list_scripts(db: Session, project_id: uuid.UUID) -> list[Script]:
-    return list(
-        db.scalars(
-            select(Script)
-            .where(Script.project_id == project_id, Script.deleted_at.is_(None))
-            .order_by(Script.created_at.desc())
-        )
-    )
+def list_scripts(db: Session, project_id: uuid.UUID) -> list[schemas.ScriptOut]:
+    counts = (select(Scene.script_id.label("id"),
+                     func.sum(func.jsonb_array_length(Scene.script_blocks)).label("blocks"),
+                     func.count().filter(Scene.script_anchor != "preamble").label("headings"))
+              .where(Scene.project_id == project_id, Scene.deleted_at.is_(None),
+                     Scene.script_position.is_not(None))
+              .group_by(Scene.script_id).subquery())
+    query = (select(Script, counts.c.blocks, counts.c.headings)
+             .outerjoin(counts, counts.c.id == Script.id)
+             .where(Script.project_id == project_id, Script.deleted_at.is_(None))
+             .order_by(Script.created_at.desc()))
+    result = []
+    for script, blocks, headings in db.execute(query):
+        item = schemas.ScriptOut.model_validate(script)
+        legacy = script.legacy_blocks or []
+        item.block_count = len(legacy) if legacy else (blocks or 0)
+        item.scene_count = sum(b.get("block_type") == "scene_heading" for b in legacy) if legacy else (headings or 0)
+        result.append(item)
+    return result
 
 
 def list_scenes(db: Session, project_id: uuid.UUID, script_id: uuid.UUID) -> list[Scene]:
@@ -206,6 +217,7 @@ def list_scenes(db: Session, project_id: uuid.UUID, script_id: uuid.UUID) -> lis
                 Scene.script_id == script_id,
                 Scene.project_id == project_id,
                 Scene.deleted_at.is_(None),
+                or_(Scene.script_anchor.is_(None), Scene.script_position.is_not(None)),
             )
             .order_by(Scene.ordinal)
         )
@@ -234,11 +246,15 @@ def list_all_scenes(
             Novel.id,
             Novel.title,
             func.coalesce(cnt.c.cnt, 0),
+            Script.title,
         )
+        .select_from(Scene).join(Script, Script.id == Scene.script_id)
+        .options(defer(Scene.script_blocks), defer(Scene.legacy_body))
         .outerjoin(Chapter, Scene.adapted_from_chapter_id == Chapter.id)
         .outerjoin(Novel, Chapter.novel_id == Novel.id)
         .outerjoin(cnt, cnt.c.sid == Scene.id)
-        .where(Scene.project_id == project_id, Scene.deleted_at.is_(None))
+        .where(Scene.project_id == project_id, Scene.deleted_at.is_(None),
+               or_(Scene.script_anchor.is_(None), Scene.script_position.is_not(None), cnt.c.cnt > 0))
     )
     if chapter_id is not None:
         stmt = stmt.where(Scene.adapted_from_chapter_id == chapter_id)
@@ -246,8 +262,8 @@ def list_all_scenes(
         stmt = stmt.where(Chapter.novel_id == novel_id)
 
     out: list[schemas.SceneListItem] = []
-    for sc, ch_id, ch_ord, ch_title, nv_id, nv_title, shot_count in db.execute(
-        stmt.order_by(Scene.code)
+    for sc, ch_id, ch_ord, ch_title, nv_id, nv_title, shot_count, script_title in db.execute(
+        stmt.order_by(Scene.script_id, Scene.script_position.asc().nulls_last(), Scene.ordinal, Scene.id)
     ):
         out.append(
             schemas.SceneListItem(
@@ -257,6 +273,9 @@ def list_all_scenes(
                 title=sc.title,
                 summary=sc.summary,
                 shot_count=shot_count,
+                script_id=sc.script_id,
+                script_title=script_title,
+                removed_from_script=sc.removed_from_script,
                 chapter_id=ch_id,
                 chapter_ordinal=ch_ord,
                 chapter_title=ch_title,
@@ -314,7 +333,7 @@ def delete_script(db: Session, ctx: ProjectContext, script_id: uuid.UUID) -> Non
 _BLOCK_TYPES = set(SCRIPT_BLOCK_TYPES)
 
 
-def _normalize_blocks(blocks) -> list[dict]:
+def _normalize_blocks(blocks, previous=()) -> list[dict]:
     """把 ScriptBlock / DTO / dict 统一规整为可入库的 dict,并补稳定 id。
 
     丢弃未知 block_type 与空文本块;text 去除首尾空白。
@@ -334,7 +353,23 @@ def _normalize_blocks(blocks) -> list[dict]:
         text = (text or "").strip()
         if not text:
             continue
-        out.append({"id": bid or uuid.uuid4().hex, "block_type": btype, "text": text})
+        out.append({"id": bid, "block_type": btype, "text": text})
+    if any(not b["id"] for b in out):
+        from difflib import SequenceMatcher
+        old = [(b["block_type"], b["text"]) for b in previous]
+        new = [(b["block_type"], b["text"]) for b in out]
+        taken = {b["id"] for b in out if b["id"]}
+        for a, b, size in SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks():
+            for offset in range(size):
+                target = out[b + offset]
+                old_id = previous[a + offset].get("id")
+                if not target["id"] and old_id and old_id not in taken:
+                    target["id"] = old_id
+                    taken.add(old_id)
+        for block in out:
+            if not block["id"]:
+                block["id"] = uuid.uuid4().hex
+    screenplay.assert_unique_ids(out)
     return out
 
 
@@ -363,18 +398,29 @@ def generate_script_from_chapter(
     from app.modules.setting.service import settings_context  # 局部导入避免循环依赖
 
     context = settings_context(db, ctx.project.id, ch.novel_id, ch.ordinal, subject_text=ch.content or "")
-    blocks = _normalize_blocks(strat.adapt_chapter_to_script(ch.content, context))
+    adapted = strat.adapt_chapter_to_script(ch.content, context)
+    blocks = _normalize_blocks(adapted)
+    source_headings = [
+        b for b in adapted if (b.get("block_type") if isinstance(b, dict) else b.block_type) == "scene_heading"
+        and (b.get("text", "") if isinstance(b, dict) else b.text).strip()
+    ]
+    headings = [b for b in blocks if b["block_type"] == "scene_heading"]
+    elements = {}
+    for block, source in zip(headings, source_headings):
+        if not isinstance(source, dict) and source.scene_elements is not None:
+            elements["heading/" + block["id"]] = source.scene_elements
     title = (data.title or ch.title or "未命名剧本").strip() or "未命名剧本"
+    db.scalar(select(Project.id).where(Project.id == ctx.project.id).with_for_update())
     script = Script(
         project_id=ctx.project.id,
         code=coding.next_code(db, ctx.project, "script"),
         title=title,
-        content_blocks=blocks,
         source_chapter_id=ch.id,
         created_by=ctx.user.id,
     )
     db.add(script)
     db.flush()
+    screenplay.write(db, script, blocks, elements)
     audit.record(
         db,
         action="script.generate",
@@ -390,7 +436,7 @@ def generate_script_from_chapter(
 def update_script_blocks(
     db: Session, ctx: ProjectContext, script_id: uuid.UUID, blocks, expected_revision=None
 ) -> Script:
-    """整体保存剧本正文(P1:整篇替换;版本快照随 P3 接入)。"""
+    """Accept a whole-document edit and persist its changed scenes in one transaction."""
     script = _get_script(db, ctx.project.id, script_id)
     script = db.scalar(
         select(Script)
@@ -402,7 +448,8 @@ def update_script_blocks(
         raise Locked("剧本已锁定，请先解锁")
     if expected_revision is not None and script.content_revision != expected_revision:
         raise Conflict("剧本已被其他页面或助手修改。当前草稿已保留，请核对新版本后再保存。")
-    script.content_blocks = _normalize_blocks(blocks)
+    normalized = _normalize_blocks(blocks, script.content_blocks)
+    screenplay.write(db, script, normalized)
     audit.record(
         db,
         action="script.update_blocks",
@@ -410,7 +457,7 @@ def update_script_blocks(
         project_id=ctx.project.id,
         target_type="script",
         target_id=script.id,
-        detail={"blocks": len(script.content_blocks)},
+        detail={"blocks": len(normalized)},
     )
     db.flush()
     return script
@@ -424,13 +471,15 @@ def script_stats(db: Session, project_id: uuid.UUID, script_id: uuid.UUID) -> di
     scenes = db.scalar(
         select(func.count())
         .select_from(Scene)
-        .where(Scene.script_id == script.id, Scene.deleted_at.is_(None))
+        .where(Scene.script_id == script.id, Scene.deleted_at.is_(None),
+               or_(Scene.script_anchor.is_(None), Scene.script_position.is_not(None)))
     )
     shots = db.scalar(
         select(func.count())
         .select_from(Shot)
         .join(Scene, Shot.scene_id == Scene.id)
-        .where(Scene.script_id == script.id, Scene.deleted_at.is_(None), Shot.deleted_at.is_(None))
+        .where(Scene.script_id == script.id, Scene.deleted_at.is_(None), Shot.deleted_at.is_(None),
+               or_(Scene.script_anchor.is_(None), Scene.script_position.is_not(None)))
     )
     asset_rows = db.execute(
         select(Asset.type, func.count())
@@ -453,31 +502,13 @@ def _group_blocks_into_scenes(blocks: list[dict]) -> list[tuple[str | None, str]
     场景正文把角色/对白/动作等块渲染成可供下游(拆镜头/抽实体)阅读的文本。
     scene_heading 之前的零散块(若有)归入一个无标题的前导场景。
     """
-    scenes: list[tuple[str | None, str]] = []
-    cur_title: str | None = None
-    cur_lines: list[str] = []
+    from app.models.narrative import render_scene_body
 
-    def flush():
-        if cur_title is not None or cur_lines:
-            scenes.append((cur_title, "\n".join(cur_lines).strip()))
-
-    for b in blocks or []:
-        btype = b.get("block_type")
-        txt = (b.get("text") or "").strip()
-        if not txt:
-            continue
-        if btype == "scene_heading":
-            flush()
-            cur_title = txt
-            cur_lines = []
-        elif btype == "character":
-            cur_lines.append(f"{txt}:")
-        elif btype == "parenthetical":
-            cur_lines.append(f"({txt.strip('()')})")
-        else:  # action / dialogue / transition
-            cur_lines.append(txt)
-    flush()
-    return scenes
+    return [
+        (group[0]["text"] if group[0]["block_type"] == "scene_heading" else None,
+         render_scene_body(group))
+        for group in screenplay.sections(blocks)
+    ]
 
 
 def _script_to_plain_text(blocks: list[dict]) -> str:
@@ -514,9 +545,9 @@ def _break_down_scenes(
             # Publish the previous outcome and the next scene before its model call.
             checkpoint(result)
         try:
-            drafts = breakdown.suggest(
-                db, strategy, project_id, scene.body or scene.summary or scene.title, chapter_id
-            )
+            text = scene.body or scene.summary or scene.title
+            record = db.get(Scene, scene.scene_id) if scene.scene_id else None
+            drafts = breakdown.suggest(db, strategy, project_id, text, chapter_id, scene=record)
             if not drafts:
                 raise ProviderError("模型没有返回镜头，请重试此场")
             scene.shots = [schemas.ShotBrief(**draft.model_dump()) for draft in drafts]
@@ -540,15 +571,21 @@ def decompose_script(
     script = _get_script(db, project_id, script_id)
     strategy = _strategy(db, project_id, strategy_name)
     chapter = db.get(Chapter, script.source_chapter_id) if script.source_chapter_id else None
-    scenes = [
-        schemas.SceneSuggestionOut(
-            title=title or f"场景 {i}",
+    from app.modules.narrative.tool_tasks import fingerprint
+
+    records = {sc.script_anchor: sc for sc in script.screenplay}
+    scenes = []
+    for position, group in enumerate(screenplay.sections(script.content_blocks or []), 1):
+        record = records.get(screenplay.anchor(group))
+        body = screenplay.render_scene_body(group)
+        scenes.append(schemas.SceneSuggestionOut(
+            scene_id=record.id if record else None,
+            source_revision=fingerprint(group) if record else None,
+            title=screenplay.title(group, position),
             body=body,
             summary=body[:30].replace("\n", " "),
             source_chapter_ordinal=chapter.ordinal if chapter else None,
-        )
-        for i, (title, body) in enumerate(_group_blocks_into_scenes(script.content_blocks or []), 1)
-    ]
+        ))
     return _break_down_scenes(db, project_id, strategy, script.source_chapter_id, scenes, previous, checkpoint)
 
 
@@ -659,9 +696,10 @@ def apply_scenes(
     base_ord = last_ordinal
     occupied = {scene.ordinal for scene in previous}
     keyed = {old.source_key: old for old in previous if old.source_key}
+    by_id = {row.id: row for row in previous}
     legacy = defaultdict(deque)
     for old in previous:
-        if not old.source_key and old.adapted_from_chapter_id == chapter_id:
+        if (not old.source_key or old.script_position is not None) and old.adapted_from_chapter_id == chapter_id:
             text = (old.body or "").strip() or (old.summary or "").strip()
             legacy[((old.title or "").strip(), text)].append(old)
     occurrences = Counter()
@@ -671,7 +709,19 @@ def apply_scenes(
         identity = (sc.title.strip(), sc.body.strip() or sc.summary.strip())
         key = fingerprint([str(chapter_id or ""), *identity, occurrences[identity]])
         occurrences[identity] += 1
-        scene = keyed.get(key)
+        if sc.scene_id:
+            scene = by_id.get(sc.scene_id)
+            if (not scene or scene.script_position is None or
+                scene.adapted_from_chapter_id != chapter_id or
+                sc.source_revision != fingerprint(scene.script_blocks)):
+                raise Conflict("这份分镜建议对应的场次已修改，请查看最新剧本")
+        else:
+            scene = keyed.get(key)
+            if scene and scene.script_anchor and scene.script_position is None:
+                raise Conflict("这场戏已移出剧本，请核对后重新拆镜")
+            if scene and scene.script_anchor and identity != ((scene.title or "").strip(),
+                        (scene.body or "").strip() or (scene.summary or "").strip()):
+                raise Conflict("这份分镜建议对应的场次已修改，请查看最新剧本")
         if scene is None and legacy.get(identity):
             scene = legacy[identity].popleft()
         if scene is not None:
@@ -708,6 +758,7 @@ def apply_scenes(
         if sc.shots and not kept:
             breakdown.create_drafts(db, ctx, scene, sc.shots)
             added = len(sc.shots)
+            active_counts[scene.id] = added
         applied.append(
             schemas.AppliedSceneOut(
                 **schemas.SceneOut.model_validate(scene).model_dump(),

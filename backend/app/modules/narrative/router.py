@@ -172,14 +172,7 @@ def list_scripts(
     ctx: ProjectContext = Depends(get_project_context),
     db: Session = Depends(get_db, scope="function"),
 ):
-    out = []
-    for s in service.list_scripts(db, ctx.project.id):
-        o = schemas.ScriptOut.model_validate(s)
-        blocks = s.content_blocks or []
-        o.block_count = len(blocks)
-        o.scene_count = sum(1 for b in blocks if b.get("block_type") == "scene_heading")
-        out.append(o)
-    return out
+    return service.list_scripts(db, ctx.project.id)
 
 
 # ── 剧本正文(typed blocks):小说→剧本、读取、编辑保存、导出 ──
@@ -254,6 +247,39 @@ def update_script_blocks(
     return service.update_script_blocks(db, ctx, script_id, data.blocks, data.expected_revision)
 
 
+@router.get("/scripts/{script_id}/affected-shots")
+def affected_shots(script_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context),
+                   db: Session = Depends(get_db, scope="function")):
+    from . import script_sources
+    service.get_script(db, ctx.project.id, script_id)
+    return script_sources.affected(db, ctx.project.id, script_id)
+
+
+@router.post("/scripts/{script_id}/affected-shots/{shot_id}/confirm", status_code=204)
+def confirm_shot_source(script_id: uuid.UUID, shot_id: uuid.UUID, data: schemas.ConfirmScriptSource,
+                        ctx: ProjectContext = Depends(require_action("shot.edit")),
+                        db: Session = Depends(get_db, scope="function")):
+    from . import script_sources
+    script_sources.confirm(db, ctx, script_id, shot_id, data.revision)
+
+
+@router.post("/scripts/{script_id}/affected-shots/{shot_id}/preview", response_model=schemas.ShotPromptRevision)
+def preview_shot_prompts(script_id: uuid.UUID, shot_id: uuid.UUID, data: schemas.ConfirmScriptSource,
+                         strategy: str | None = Query(None),
+                         ctx: ProjectContext = Depends(require_action("shot.edit")),
+                         db: Session = Depends(get_db, scope="function")):
+    from . import script_sources
+    return script_sources.propose_prompts(db, ctx, script_id, shot_id, data.revision, strategy)
+
+
+@router.post("/scripts/{script_id}/affected-shots/{shot_id}/adopt", status_code=204)
+def adopt_shot_prompts(script_id: uuid.UUID, shot_id: uuid.UUID, data: schemas.ShotPromptRevision,
+                       ctx: ProjectContext = Depends(require_action("shot.edit")),
+                       db: Session = Depends(get_db, scope="function")):
+    from . import script_sources
+    script_sources.adopt_prompts(db, ctx, script_id, shot_id, data)
+
+
 @router.get("/scripts/{script_id}/stats")
 def script_stats(
     script_id: uuid.UUID,
@@ -301,6 +327,29 @@ def list_all_scenes(
     db: Session = Depends(get_db, scope="function"),
 ):
     return service.list_all_scenes(db, ctx.project.id, novel_id, chapter_id)
+
+
+@router.get("/scenes/{scene_id}/elements", response_model=list[schemas.SceneElementOut])
+def scene_elements(scene_id: uuid.UUID, ctx: ProjectContext = Depends(get_project_context),
+                   db: Session = Depends(get_db, scope="function")):
+    from app.modules.narrative.scene_elements import roster
+    from app.modules.shot.service import _scene
+    return roster(db, _scene(db, ctx.project.id, scene_id).id)
+
+
+@router.patch("/scenes/{scene_id}/elements/{element_id}", response_model=schemas.SceneElementOut)
+def edit_scene_element(scene_id: uuid.UUID, element_id: uuid.UUID, data: schemas.SceneElementEdit,
+                       ctx: ProjectContext = Depends(ASSET_EDIT), db: Session = Depends(get_db, scope="function")):
+    from app.modules.narrative.scene_elements import update_look
+    return update_look(db, ctx, scene_id, element_id, data)
+
+
+@router.post("/scenes/{scene_id}/elements/{element_id}/asset", response_model=schemas.SceneElementOut)
+def adopt_scene_element(scene_id: uuid.UUID, element_id: uuid.UUID, data: schemas.SceneElementEdit | None = None,
+                        ctx: ProjectContext = Depends(ASSET_EDIT),
+                        db: Session = Depends(get_db, scope="function")):
+    from app.modules.narrative.scene_elements import adopt
+    return adopt(db, ctx, scene_id, element_id, data.direction if data else None)
 
 
 # ── AI 拆解 ──

@@ -1,7 +1,7 @@
 """asset 业务逻辑:CRUD + 版本 + 参考图 + 回收站 + 影响分析。"""
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.orm import Session
 
@@ -105,6 +105,7 @@ def list_assets(
     db: Session, project_id: uuid.UUID, *, type_: AssetType | None = None,
     status: VersionStatus | None = None, q: str | None = None, tag: str | None = None,
     deleted: bool = False, chapter_id: uuid.UUID | None = None,
+    novel_id: uuid.UUID | None = None, script_id: uuid.UUID | None = None, scene_id: uuid.UUID | None = None,
 ) -> list[Asset]:
     stmt = select(Asset).where(Asset.project_id == project_id)
     stmt = stmt.where(Asset.deleted_at.is_not(None)) if deleted else stmt.where(Asset.deleted_at.is_(None))
@@ -116,15 +117,24 @@ def list_assets(
         stmt = stmt.where(Asset.name.ilike(f"%{q}%"))
     if tag:
         stmt = stmt.where(Asset.tags.any(tag))
-    if chapter_id is not None:
-        # 章节维度:被「该章场次下的镜头」引用过的资产(场次→镜头→引用)
-        from app.models.narrative import Scene
+    if any([chapter_id, novel_id, script_id, scene_id]):
+        from app.models.narrative import Chapter, Scene, SceneElement
         from app.models.shot import ShotAssetRef
-
-        sub = active_asset_shot_refs(ShotAssetRef.asset_id).where(
-            Scene.adapted_from_chapter_id == chapter_id
-        )
-        stmt = stmt.where(Asset.id.in_(sub))
+        scope = select(Scene.id).where(Scene.project_id == project_id, Scene.deleted_at.is_(None))
+        if not scene_id:
+            scope = scope.where(or_(Scene.script_anchor.is_(None), Scene.script_position.is_not(None)))
+        if novel_id:
+            scope = scope.join(Chapter, Chapter.id == Scene.adapted_from_chapter_id).where(Chapter.novel_id == novel_id)
+        if chapter_id:
+            scope = scope.where(Scene.adapted_from_chapter_id == chapter_id)
+        if script_id:
+            scope = scope.where(Scene.script_id == script_id)
+        if scene_id:
+            scope = scope.where(Scene.id == scene_id)
+        scope = scope.correlate(None)
+        shots = active_asset_shot_refs(ShotAssetRef.asset_id).where(Scene.id.in_(scope))
+        elements = select(SceneElement.asset_id).where(SceneElement.active.is_(True), SceneElement.scene_id.in_(scope))
+        stmt = stmt.where(Asset.id.in_(shots.union(elements)))
     return list(db.scalars(stmt.order_by(Asset.created_at.desc())))
 
 

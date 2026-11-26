@@ -27,6 +27,7 @@ import {
 import AssetGraph from "@/components/AssetGraph";
 import { AssetPreview } from "@/components/AssetPreview";
 import { MaterialTabs } from "@/components/MaterialTabs";
+import { SceneMaterials, storyScope } from "@/components/SceneMaterials";
 import { MediaImage } from "@/components/MediaImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +57,8 @@ function AssetsContent({ projectId }: { projectId: string }) {
     navigate = useNavigate(),
     location = useLocation();
   const [params, setParams] = useSearchParams();
+  const scope = storyScope(params);
+  const scopeKey = scope.toString();
   const toast = useToast(),
     { t, lang } = useI18n();
   const zh = lang === "zh";
@@ -88,9 +91,9 @@ function AssetsContent({ projectId }: { projectId: string }) {
   }, [q]);
 
   const list = useQuery({
-    queryKey: ["assets", projectId, filter, query],
+    queryKey: ["assets", projectId, filter, query, scopeKey],
     queryFn: () => {
-      const search = new URLSearchParams();
+      const search = new URLSearchParams(scopeKey);
       if (filter) search.set("type", filter);
       if (query) search.set("q", query);
       return api.get<Asset[]>(`${base}/assets?${search}`);
@@ -119,7 +122,7 @@ function AssetsContent({ projectId }: { projectId: string }) {
     if (ready && page !== pageIndex) setPage(pageIndex);
   }, [ready, pageIndex, page, setPage]);
   useWorkspaceScroll(
-    `assets.${projectId}.${view}.${pageIndex}.${filter}.${query}.${tag}.${sortKey}.${sortDir}`,
+    `assets.${projectId}.${view}.${pageIndex}.${filter}.${query}.${tag}.${sortKey}.${sortDir}.${scopeKey}`,
     ready,
   );
 
@@ -250,6 +253,15 @@ function AssetsContent({ projectId }: { projectId: string }) {
       <div className="materials-navigation !mb-3">
         <MaterialTabs projectId={projectId} />
       </div>
+      <SceneMaterials projectId={projectId} scope={scope} canEdit={canEdit} onChange={nextScope => {
+        const next = new URLSearchParams(params);
+        for (const field of scope.keys()) next.delete(field);
+        nextScope.forEach((value, key) => next.set(key, value));
+        next.delete("preview");
+        setParams(next);
+        exitSelection();
+        setPage(0);
+      }} />
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchField
@@ -461,7 +473,7 @@ function AssetsContent({ projectId }: { projectId: string }) {
         <div className="studio-empty">
           <ImageOff size={28} />
           <p>
-            {q || tag || filter
+            {q || tag || filter || scopeKey
               ? zh
                 ? "没有符合筛选的素材"
                 : "No matching assets"

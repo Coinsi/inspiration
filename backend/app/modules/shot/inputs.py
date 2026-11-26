@@ -94,6 +94,8 @@ def look_image(meta, look):
 
 
 def resolved(db, shot):
+    from app.modules.narrative.scene_elements import roster
+    elements = {str(e.id): e for e in roster(db, shot.scene_id)}
     rows = db.execute(
         select(ShotAssetRef, Asset)
         .join(Asset, Asset.id == ShotAssetRef.asset_id)
@@ -117,6 +119,9 @@ def resolved(db, shot):
             }
             version_id = asset.current_version_id
         usage = ref.usage or {}
+        local = elements.get(usage.get("scene_element_id")) if ref.ref_mode != "pinned" else None
+        if local and local.asset_id != asset.id:
+            local = None
         aspects = usage.get("aspects") or list(ASPECTS)
         meta = data.get("metadata") or {}
         look = usage.get("look", "")
@@ -125,6 +130,8 @@ def resolved(db, shot):
         if look:
             chosen = look_image(meta, look)
             hashes = [chosen] if chosen and chosen in hashes else []
+        if local and local.reference_hash:
+            hashes = [local.reference_hash]
         # A broad description may belong to another period or include off-camera details.
         use_description = not look and not (usage.get("aspects") and traits)
         parts = [data["name"]]
@@ -132,6 +139,8 @@ def resolved(db, shot):
             parts.extend([data.get("summary"), *data.get("visual_parts", [])])
         if look:
             parts.append(f"造型：{look}")
+        if local:
+            parts.append(local.direction or local.prompt)
         parts.extend(
             f"{ASPECTS[a]}：{traits[a]}" for a in aspects if a in ASPECTS and traits.get(a)
         )
@@ -145,6 +154,7 @@ def resolved(db, shot):
                 "look": look,
                 "aspects": usage.get("aspects") or [],
                 "evidence": usage.get("evidence", ""),
+                **({"scene_element_id": str(local.id)} if local else {}),
                 "uses_description": use_description,
                 "parts": list(dict.fromkeys(p for p in parts if p)),
                 "hashes": hashes,

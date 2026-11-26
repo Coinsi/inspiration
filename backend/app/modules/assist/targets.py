@@ -157,8 +157,11 @@ class ScriptAdapter(TargetAdapter):
         state = {"title": new_title, "blocks": new_blocks}
         if dry_run:
             return {"state": state}
+        from app.modules.narrative.service import update_script_blocks
+
+        update_script_blocks(db, ctx, s.id, new_blocks, s.content_revision)
         s.title = new_title
-        s.content_blocks = new_blocks
+        state["blocks"] = list(s.content_blocks)
         v = VersioningService(db).commit(
             project_id=ctx.project.id, entity_type=self.entity_type, entity_id=s.id,
             content=state, created_by=ctx.user.id, label="AI 助手修改",
@@ -188,6 +191,10 @@ class _FieldAdapter(TargetAdapter):
     def _snapshot(self, o) -> dict:
         return {f: getattr(o, f, None) for f in self.fields}
 
+    def _save_fields(self, db, ctx, obj, values):
+        for field, value in values.items():
+            setattr(obj, field, value)
+
     def apply(self, db, ctx: ProjectContext, target_id, ops, *, dry_run=False) -> dict:
         o = self._get(db, ctx.project.id, target_id)
         if str(getattr(o,"status","")) in ("locked", "VersionStatus.locked"):
@@ -202,8 +209,7 @@ class _FieldAdapter(TargetAdapter):
             new_vals[field] = op.get("value")
         if dry_run:
             return {"state": {"fields": new_vals}}
-        for f, v in new_vals.items():
-            setattr(o, f, v)
+        self._save_fields(db, ctx, o, new_vals)
         ver = VersioningService(db).commit(
             project_id=ctx.project.id, entity_type=self.entity_type, entity_id=o.id,
             content=self._snapshot(o), created_by=ctx.user.id, label="AI 助手修改",
@@ -229,6 +235,15 @@ class SceneAdapter(_FieldAdapter):
     fields = ("title", "summary", "body")
     object_desc = "一个场次(Scene),含 title(标题)、summary(梗概)、body(正文)。"
     ops_help = _field_help(fields)
+
+    def _save_fields(self, db, ctx, obj, values):
+        if obj.removed_from_script:
+            raise OpError("这场戏已移出剧本，请先恢复场次再编辑")
+        if obj.script_position is None:
+            return super()._save_fields(db, ctx, obj, values)
+        from app.modules.narrative.screenplay import edit_scene
+
+        edit_scene(db, ctx, obj, values)
 
 
 @register

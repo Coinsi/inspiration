@@ -138,6 +138,8 @@ def create_shot(db: Session, ctx: ProjectContext, scene_id: uuid.UUID, data: sch
     )
     db.add(shot)
     db.flush()
+    from app.modules.narrative import script_sources
+    script_sources.attach(db, shot, scene)
     audit.record(db, action="shot.create", user_id=ctx.user.id, project_id=ctx.project.id,
                  target_type="shot", target_id=shot.id, detail={"scene_id": str(scene_id)})
     db.flush()
@@ -187,7 +189,7 @@ def breakdown_scene(
                     else:
                         instruction = f"本场背景：{text[:1800]}。只细化已有的一镜，恰好返回一个镜头。镜头标题：{shot.title}。镜头内容：{shot.description}"
                         drafts = breakdown.suggest(
-                            db, strategy, ctx.project.id, instruction, scene.adapted_from_chapter_id
+                            db, strategy, ctx.project.id, instruction, scene.adapted_from_chapter_id, scene=scene
                         )
                         if len(drafts) != 1 or not drafts[0].still_prompt.strip():
                             raise Conflict("模型未返回该镜头的定格画面，请重试此镜")
@@ -214,7 +216,7 @@ def breakdown_scene(
                 failed += 1
     else:
         drafts = breakdown.suggest(
-            db, strategy, ctx.project.id, text, scene.adapted_from_chapter_id
+            db, strategy, ctx.project.id, text, scene.adapted_from_chapter_id, scene=scene
         )
         if not drafts:
             raise Conflict("模型没有返回可用的镜头，请重试")
@@ -467,7 +469,7 @@ def compose_prompt(db: Session, project_id: uuid.UUID, shot_id: uuid.UUID, media
 
     parts: list[str] = []
     scene = db.get(Scene, s.scene_id)
-    if scene and scene.summary:
+    if scene and scene.script_anchor is None and scene.summary:
         parts.append(scene.summary)
 
     from app.modules.shot.inputs import resolved

@@ -268,7 +268,8 @@ def test_partial_scene_retry_preserves_other_shots_and_order(studio, monkeypatch
     assert [(item["id"], item["status"]) for item in attention["items"]] == [(task["id"], "partial")]
     post_ok(client, jobs + "/" + task["id"] + "/apply", {})
     original = {s["title"]: s["id"] for s in scenes()}
-    assert list(original) == ["街口", "路灯"]
+    assert list(original) == ["街口", "街边", "路灯"]
+    assert not client.get(root + f"/scenes/{original['街边']}/shots").json()
     retry_url = jobs + "/" + task["id"] + "/retry-scenes"
     queued = client.post(retry_url).json()
     assert [s["breakdown_status"] for s in queued["result"]["output"]["scenes"]] == ["succeeded", "pending", "succeeded"]

@@ -419,7 +419,20 @@ def list_generations(
     db: Session = Depends(get_db, scope="function"),
 ):
     items = service.list_generations(db, ctx.project.id, target_type, target_id)
-    return [schemas.GenerationOut.model_validate(g) for g in items]
+    return _generation_outputs(db, items, target_type, target_id)
+
+
+def _generation_outputs(db, items, target_type, target_id):
+    from app.modules.narrative.script_sources import generation_source
+
+    current = None
+    if target_type == "shot" and any((g.input_refs or {}).get("script_source_revision") for g in items):
+        current = generation_source(db, target_id, current=True)
+    outputs = [schemas.GenerationOut.model_validate(g) for g in items]
+    for output in outputs:
+        saved = (output.input_refs or {}).get("script_source_revision")
+        output.earlier_script = bool(saved and current and saved != current)
+    return outputs
 
 
 @router.get("/generations/{gen_id}", response_model=schemas.GenerationOut)
@@ -432,7 +445,7 @@ def get_generation(
 
     g = jobs.source(db, ctx.project.id, gen_id)
     jobs.validate_target(db, ctx.project.id, g.target_type, g.target_id)
-    return schemas.GenerationOut.model_validate(g)
+    return _generation_outputs(db, [g], g.target_type, g.target_id)[0]
 
 
 @router.patch("/generations/{gen_id}", response_model=schemas.GenerationOut)

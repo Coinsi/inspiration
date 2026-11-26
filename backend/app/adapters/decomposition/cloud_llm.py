@@ -50,6 +50,12 @@ def _shot_subjects(raw):
     return subjects
 
 
+def _quotes(raw):
+    if not isinstance(raw, list):
+        return []
+    return [v.strip() for v in raw if isinstance(v, str) and 0 < len(v.strip()) <= 1000][:16]
+
+
 def _num(v) -> float | None:
     try:
         return float(v) if v not in (None, "") else None
@@ -134,6 +140,8 @@ class CloudLLMDecomposer(DecompositionStrategy):
             "含 name(可确定的本名)、type(character/location/prop/costume/vehicle/style)、"
             "aspects(本镜使用 face/wardrobe/layout/light/appearance 中的哪些)、look(有依据的时期造型，否则留空)、"
             "evidence(从剧本或原章逐字摘录支持其入镜的短句)。仅被台词提及的人物不计入；过肩镜头可以只引用衣着。"
+            "source_quotes 逐字摘录本镜拍到的本场动作或对白。若本镜确实承接上场结尾的具体状态，"
+            "用 continuity_quotes 逐字摘录对应的上场动作，其余镜头留空数组。"
             f"shot_size(景别,必须从这些值里选一个:{'/'.join(_SHOT_SIZES)})、"
             f"camera_angle(机位角度,必须从:{'/'.join(_CAMERA_ANGLES)})、"
             f"camera_move(运镜,必须从:{'/'.join(_CAMERA_MOVES)})、"
@@ -143,7 +151,7 @@ class CloudLLMDecomposer(DecompositionStrategy):
             "duration_sec(预计时长秒,数字)、dialogue(该镜头的对白或旁白,没有就空字符串)。"
             '输出格式:{"shots":[{"title":"","description":"","shot_size":"","camera_angle":"",'
             '"camera_move":"","transition":"","aspect_ratio":"","pacing":"","duration_sec":3,"dialogue":"",'
-            '"still_prompt":"","motion_prompt":"","subjects":[]}]}',
+            '"still_prompt":"","motion_prompt":"","subjects":[],"source_quotes":[],"continuity_quotes":[]}]}',
             scene_text,
         )
 
@@ -169,6 +177,8 @@ class CloudLLMDecomposer(DecompositionStrategy):
                     still_prompt=str(it.get("still_prompt") or ""),
                     motion_prompt=str(it.get("motion_prompt") or ""),
                     subjects=_shot_subjects(it.get("subjects")),
+                    source_quotes=_quotes(it.get("source_quotes")),
+                    continuity_quotes=_quotes(it.get("continuity_quotes")),
                 )
             )
         return res
@@ -285,6 +295,9 @@ class CloudLLMDecomposer(DecompositionStrategy):
             "character=说话角色名(单独成块,大写);dialogue=该角色的对白;"
             "parenthetical=括号表演提示(如『(冷笑)』);transition=转场(如『CUT TO:』)。"
             "对白要在对应的 character 块之后。尽量还原戏剧冲突与对白,不要逐句照抄小说旁白。"
+            "在每个 scene_heading 的 elements 数组列出本场实际出现的人物、地点、道具等。"
+            "每项 type 为 character/location/prop/costume/vehicle，name 为称谓，evidence 逐字引用本场动作、"
+            "场景头或角色行，summary 根据原著和本场写出可直接用于设计的画面描述。仅被说到的人不算出场。"
             '输出格式:{"blocks":[{"type":"scene_heading","text":""},{"type":"action","text":""},'
             '{"type":"character","text":""},{"type":"dialogue","text":""}]}',
             chapter_text,
@@ -300,7 +313,16 @@ class CloudLLMDecomposer(DecompositionStrategy):
             text = str(it.get("text", "") or "").strip()
             if not text:
                 continue
-            res.append(ScriptBlock(block_type=t, text=text))
+            elements = None
+            if t == "scene_heading" and isinstance(it.get("elements"), list):
+                elements = []
+                for item in it["elements"]:
+                    try:
+                        elements.append(EntityDraft.model_validate(item))
+                    except ValidationError:
+                        elements = None  # Complete this scene during preparation.
+                        break
+            res.append(ScriptBlock(block_type=t, text=text, scene_elements=elements))
         if not res:
             raise ProviderError("模型没有返回有效的剧本内容，请重试该章")
         return res

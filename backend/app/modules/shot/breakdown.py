@@ -9,6 +9,7 @@ from app.core.errors import ProviderError
 from app.models.narrative import Chapter
 from app.models.shot import Shot, ShotAssetRef
 from app.modules.asset.story_sources import AssetNames, scope_for
+from app.modules.narrative import script_sources
 
 
 def source_excerpt(content, scene, limit=1600):
@@ -37,8 +38,25 @@ def source_excerpt(content, scene, limit=1600):
     return "\n".join(paragraphs[max(0, best - 1) : best + 2])[:limit]
 
 
-def suggest(db, strategy, project_id, text, chapter_id=None):
-    context = text
+def scene_context(db, scene, text, strategy):
+    if not scene or not scene.script_position:
+        return text
+    from app.modules.narrative import scene_elements
+    elements = scene_elements.prepare(db, scene, strategy)
+    if strategy.name != "cloud_llm":
+        return text
+    previous = script_sources.previous_scene(db, scene)
+    if previous:
+        ending = (previous.body or "")[-700:]
+        text = f"上场结尾（仅供接戏）\n{previous.title}\n{ending}\n\n本场剧本\n{text}"
+    if elements:
+        descriptions = "\n".join(f"{e.name}（{e.kind}） {e.direction or e.prompt}" for e in elements)
+        text += f"\n本场已记录的素材（只引用本镜实际入画的项）\n{descriptions}"
+    return text
+
+
+def suggest(db, strategy, project_id, text, chapter_id=None, *, scene=None):
+    context = scene_context(db, scene, text, strategy)
     excerpt = ""
     if strategy.name == "cloud_llm" and chapter_id:
         from app.modules.setting.service import settings_context
@@ -50,7 +68,7 @@ def suggest(db, strategy, project_id, text, chapter_id=None):
                 db, project_id, chapter.novel_id, chapter.ordinal, max_chars=1000, subject_text=text
             )
             context = (
-                f"本场剧本\n{text}\n对应原文章节 {chapter.ordinal}\n{excerpt}\n已知设定\n{facts}"
+                f"本场剧本\n{context}\n对应原文章节 {chapter.ordinal}\n{excerpt}\n已知设定\n{facts}"
             )
     drafts = strategy.suggest_storyboard_shots(context)
     if strategy.name == "cloud_llm":
@@ -65,7 +83,18 @@ def suggest(db, strategy, project_id, text, chapter_id=None):
 
 
 def save_draft(db, shot, suggestion, names):
-    fields = suggestion.model_dump(exclude={"title", "description", "subjects"}, exclude_none=True)
+    from app.models.narrative import Scene
+    from app.models.asset import Asset
+    from app.modules.asset.story_sources import normalized
+    from app.modules.narrative.scene_elements import roster, visible_lines
+
+    scene = db.get(Scene, shot.scene_id)
+    script_sources.attach(db, shot, scene, suggestion)
+    members = roster(db, scene.id) if scene.script_position is not None else []
+    stage = ["".join(line.split()) for line in visible_lines(scene)] if members else []
+    fields = suggestion.model_dump(
+        exclude={"title", "description", "subjects", "source_quotes", "continuity_quotes"}, exclude_none=True
+    )
     board = {
         **{k: v for k, v in fields.items() if v != ""},
         **{k: v for k, v in (shot.storyboard or {}).items() if v != ""},
@@ -74,6 +103,16 @@ def save_draft(db, shot, suggestion, names):
     linked = set(db.scalars(select(ShotAssetRef.asset_id).where(ShotAssetRef.shot_id == shot.id)))
     for subject in suggestion.subjects:
         asset = names.visible_subject(subject.type, subject.name, subject.evidence)
+        element = next((e for e in members if e.kind == subject.type and
+                        (e.name_key == normalized(subject.name) or (asset and e.asset_id == asset.id))), None)
+        if scene.script_position is not None:
+            quote = "".join(subject.evidence.split())
+            grounded = quote and any(quote in line for line in stage)
+            asset = db.get(Asset, element.asset_id) if element and element.asset_id and grounded else None
+            if not grounded:
+                subject.evidence = ""
+            if asset and asset.deleted_at:
+                asset = None
         if not asset:
             pending.append(subject.model_dump())
             continue
@@ -85,7 +124,8 @@ def save_draft(db, shot, suggestion, names):
                 shot_id=shot.id,
                 asset_id=asset.id,
                 role=subject.type,
-                usage=subject.model_dump(exclude={"name", "type"}),
+                usage={**subject.model_dump(exclude={"name", "type"}),
+                       **({"scene_element_id": str(element.id)} if element else {})},
                 ordinal=len(linked) - 1,
             )
         )

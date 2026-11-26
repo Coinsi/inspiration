@@ -55,6 +55,9 @@ class SceneListItem(BaseModel):
     title: str | None
     summary: str | None
     shot_count: int = 0
+    script_id: uuid.UUID | None = None
+    script_title: str | None = None
+    removed_from_script: bool = False
     chapter_id: uuid.UUID | None = None
     chapter_ordinal: int | None = None
     chapter_title: str | None = None
@@ -122,6 +125,25 @@ class SceneOut(BaseModel):
     title: str | None
     summary: str | None
     adapted_from_chapter_id: uuid.UUID | None
+    removed_from_script: bool = False
+
+
+class SceneElementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    kind: str
+    name: str
+    asset_id: uuid.UUID | None
+    evidence: str
+    prompt: str
+    direction: str
+    reference_hash: str | None
+
+
+class SceneElementEdit(BaseModel):
+    asset_id: uuid.UUID | None = None
+    reference_hash: str | None = Field(default=None, max_length=128)
+    direction: str | None = Field(default=None, max_length=6000)
 
 
 class AppliedSceneOut(SceneOut):
@@ -135,6 +157,8 @@ class ShotBrief(StoryboardShotSuggestion):
 
 
 class SceneSuggestionOut(BaseModel):
+    scene_id: uuid.UUID | None = None
+    source_revision: str | None = None
     breakdown_status: Literal["pending", "running", "succeeded", "failed"] | None = None
     error: str | None = None
     title: str
@@ -152,6 +176,16 @@ class DecomposeOut(BaseModel):
 class ApplyScenesIn(BaseModel):
     chapter_id: uuid.UUID | None = None
     scenes: list[SceneSuggestionOut]
+
+
+class ConfirmScriptSource(BaseModel):
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class ShotPromptRevision(ConfirmScriptSource):
+    shot_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    still_prompt: str = Field(min_length=1, max_length=12000)
+    motion_prompt: str = Field(min_length=1, max_length=12000)
 
 
 class EntityDraftOut(BaseModel):

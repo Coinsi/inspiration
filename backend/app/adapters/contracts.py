@@ -220,6 +220,8 @@ class StoryboardShotSuggestion(BaseModel):
     still_prompt: str = ""
     motion_prompt: str = ""
     subjects: list[ShotSubject] = Field(default_factory=list)
+    source_quotes: list[str] = Field(default_factory=list)
+    continuity_quotes: list[str] = Field(default_factory=list)
 
 
 class EntityDraft(BaseModel):
@@ -269,6 +271,7 @@ class ScriptBlock(BaseModel):
         "scene_heading", "action", "character", "dialogue", "parenthetical", "transition"
     ]
     text: str = ""
+    scene_elements: list[EntityDraft] | None = None
 
 
 class DecompositionStrategy(ABC):

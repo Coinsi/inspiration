@@ -567,6 +567,7 @@ function StoryboardContent() {
           <div className="storyboard-sequence-header">
             <div className="storyboard-scene-heading">
               <h2>{scene ? scene.title || (lang === "zh" ? "未命名场景" : "Untitled scene") : tr("sb.selectScene")}</h2>
+              {scene?.removed_from_script && <p className="text-sm text-muted-foreground">{lang === "zh" ? "已从剧本移除，原有镜头保存在这里。" : "Removed from the script. Its shots are kept here."}</p>}
               {scene && shots && !shotsError && (
                 <p>
                   {lang === "zh"

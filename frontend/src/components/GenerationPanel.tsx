@@ -1200,6 +1200,11 @@ function GenerationPanelContent({
                       </span>
                       <span>{g.id.slice(0, 8)}</span>
                     </div>
+                    {g.earlier_script && (
+                      <p className="px-2 pt-2 text-xs text-muted-foreground">
+                        {zh ? "基于较早的剧本内容生成" : "Made from an earlier script revision"}
+                      </p>
+                    )}
                     {g.input_refs?.library_origin && (
                       <Link
                         className="studio-link block truncate px-2 pt-2 text-xs"

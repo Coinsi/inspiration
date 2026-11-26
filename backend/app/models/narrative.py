@@ -2,9 +2,9 @@
 
 import uuid
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
     Base,
@@ -73,10 +73,24 @@ class Script(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     project_id: Mapped[uuid.UUID] = ProjectScopedMixin.project_fk()
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     cover_blob_hash: Mapped[str | None] = mapped_column(String(64), ForeignKey("blob.hash"))
-    # 剧本正文:有序的 typed blocks(scene_heading/action/character/dialogue/parenthetical/transition)
-    content_blocks: Mapped[list] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="[]"
+    legacy_blocks: Mapped[list] = mapped_column(
+        "content_blocks", JSONB, nullable=False, default=list, server_default="[]"
     )
+    screenplay: Mapped[list["Scene"]] = relationship(
+        primaryjoin="and_(Script.id == Scene.script_id, Scene.script_position.is_not(None), Scene.deleted_at.is_(None))",
+        order_by="Scene.script_position", viewonly=True,
+    )
+
+    @property
+    def content_blocks(self):
+        if self.legacy_blocks:
+            return self.legacy_blocks
+        return [block for scene in self.screenplay for block in scene.script_blocks]
+
+    @content_blocks.setter
+    def content_blocks(self, blocks):
+        # Older imports can still construct a Script from a complete document.
+        self.legacy_blocks = blocks
     # 由哪个章节改编而来(溯源,可空)
     source_chapter_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chapter.id")
@@ -97,7 +111,25 @@ class Scene(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str | None] = mapped_column(String(255))
     summary: Mapped[str | None] = mapped_column(Text)
-    body: Mapped[str] = mapped_column(Text, default="")
+    legacy_body: Mapped[str] = mapped_column("body", Text, default="")
+    script_anchor: Mapped[str | None] = mapped_column(Text)
+    script_position: Mapped[int | None] = mapped_column(Integer)
+    script_blocks: Mapped[list | None] = mapped_column(JSONB(none_as_null=True))
+    elements_revision: Mapped[str | None] = mapped_column(String(64))
+
+    @property
+    def removed_from_script(self):
+        return self.script_anchor is not None and self.script_position is None
+
+    @property
+    def body(self):
+        if self.script_blocks is None:
+            return self.legacy_body
+        return render_scene_body(self.script_blocks)
+
+    @body.setter
+    def body(self, value):
+        self.legacy_body = value
     source_key: Mapped[str | None] = mapped_column(String(64), index=True)
     visual_brief: Mapped[str] = mapped_column(Text, default="", server_default="")
     adapted_from_chapter_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -107,7 +139,44 @@ class Scene(Base, CodedMixin, TimestampMixin, SoftDeleteMixin):
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
-    __table_args__ = (Index("ix_scene_script_ordinal", "script_id", "ordinal"),)
+    __table_args__ = (
+        Index("ix_scene_script_ordinal", "script_id", "ordinal"),
+        Index("uq_scene_script_anchor", "script_id", "script_anchor", unique=True),
+    )
+
+
+def render_scene_body(blocks):
+    lines = []
+    for block in blocks:
+        text = block["text"]
+        kind = block["block_type"]
+        if kind == "scene_heading":
+            continue
+        if kind == "character":
+            text = f"{text}:"
+        elif kind == "parenthetical":
+            text = f"({text.strip('()')})"
+        lines.append(text)
+    return "\n".join(lines)
+
+
+class SceneElement(Base, TimestampMixin):
+    """One on-screen use of a person, location or prop; the project asset is reusable."""
+    __tablename__ = "scene_element"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    scene_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("scene.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(255))
+    name_key: Mapped[str] = mapped_column(Text)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("asset.id"), index=True)
+    manual_binding: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    direction: Mapped[str] = mapped_column(Text, default="")
+    reference_hash: Mapped[str | None] = mapped_column(String(128), ForeignKey("blob.hash"))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    __table_args__ = (UniqueConstraint("scene_id", "kind", "name_key", name="uq_scene_element"),)
 
 
 class ScriptGenerationTask(Base, TimestampMixin):

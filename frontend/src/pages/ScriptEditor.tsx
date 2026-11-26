@@ -4,6 +4,7 @@ import { useCreativeToolTask } from "@/lib/useCreativeToolTask";
 import { refreshAppliedScenes, sceneAdoptionMessage } from "@/lib/scene-adoption";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { ScriptNameDialog } from "@/components/ScriptNameDialog";
+import { ScriptSourceReview } from "@/components/ScriptSourceReview";
 import { SearchField } from "@/components/ui/search-field";
 // 剧本编辑器:分块(typed blocks)编辑 + AI 侧栏改稿 + 派生场次/资产 + 导出 Fountain。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -222,6 +223,8 @@ function ScriptEditorWorkspace() {
       setRecovery(null);
       qc.setQueryData(["script", scriptId], saved);
       void qc.invalidateQueries({ queryKey: ["scripts", projectId] });
+      void qc.invalidateQueries({ queryKey: ["script-source-review", projectId, scriptId] });
+      void refreshAppliedScenes(qc, projectId!, scriptId!);
       toast.push(tr("se.savedToast"), "success");
     },
     onError: (e) => {
@@ -373,7 +376,7 @@ function ScriptEditorWorkspace() {
     setBlocks((bs) => bs.filter((b) => b.key !== key));
   const insertAfter = (key: number | null, block_type = "action") =>
     setBlocks((bs) => {
-      const node: EditBlock = { key: nextKey++, block_type, text: "" };
+      const node: EditBlock = { key: nextKey++, id: crypto.randomUUID(), block_type, text: "" };
       if (key === null) return [...bs, node];
       const i = bs.findIndex((b) => b.key === key);
       return [...bs.slice(0, i + 1), node, ...bs.slice(i + 1)];
@@ -514,6 +517,7 @@ function ScriptEditorWorkspace() {
           </div>
         </div>
         <div className="writing-header-actions">
+          <ScriptSourceReview projectId={projectId!} scriptId={scriptId!} />
           <Button
             size="sm"
             variant="ghost"
@@ -946,9 +950,10 @@ function ScriptEditorWorkspace() {
               targetId={scriptId!}
               className="min-h-0 flex-1"
               onCollapse={() => setAssistOpen(false)}
-              onApplied={() =>
-                void qc.invalidateQueries({ queryKey: ["script", scriptId] })
-              }
+              onApplied={() => {
+                void qc.invalidateQueries({ queryKey: ["script", scriptId] });
+                void refreshAppliedScenes(qc, projectId!, scriptId!);
+              }}
             />
           </aside>
         )}

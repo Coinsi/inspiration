@@ -177,6 +177,7 @@ class CharacterToolIn(BaseModel):
 
 class GenerationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    earlier_script: bool = False
     id: uuid.UUID
     job_id: uuid.UUID
     target_type: str

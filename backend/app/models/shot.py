@@ -54,6 +54,19 @@ class ShotAssetRef(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("shot_id", "asset_id", "role", name="uq_shot_asset_ref"),)
 
 
+class ShotScriptSource(Base):
+    """The passage used for a shot, its accepted text and the current screenplay text."""
+    __tablename__ = "shot_script_source"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    shot_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("shot.id", ondelete="CASCADE"))
+    scene_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("scene.id", ondelete="CASCADE"), index=True)
+    block_id: Mapped[str] = mapped_column(Text)  # Empty for a historical, scene-level source.
+    accepted_text: Mapped[str | None] = mapped_column(Text)
+    current_text: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (UniqueConstraint("shot_id", "scene_id", "block_id", name="uq_shot_script_source"),)
+
+
 class ShotBatch(Base, TimestampMixin):
     __tablename__ = "shot_batch"
     id: Mapped[uuid.UUID] = uuid_pk()

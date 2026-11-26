@@ -151,9 +151,12 @@ def test_retry_saves_a_long_storyboard_streamed_one_character_at_a_time(studio, 
         return b"data: " + json.dumps(data, ensure_ascii=False).encode() + b"\n\n"
 
     def reply(_method, _path, body):
-        scene = json.loads(body)["messages"][-1]["content"]
+        messages = json.loads(body)["messages"]
+        if "资产管理助手" in messages[0]["content"]:
+            return 200, "text/event-stream", frame('{"entities":[]}', "stop") + b"data: [DONE]\n\n"
+        scene = messages[-1]["content"]
         calls.append(scene)
-        if scene == "街灯亮起":
+        if scene.startswith("街灯亮起"):
             data = frame(json.dumps({"shots": shots[:1]}, ensure_ascii=False), "stop")
         elif calls.count(scene) == 1:
             data = frame('{"shots":[', "length")
@@ -186,7 +189,9 @@ def test_retry_saves_a_long_storyboard_streamed_one_character_at_a_time(studio, 
         assert [s["motion_prompt"] for s in retried["shots"]] == [s["motion_prompt"] for s in shots]
         assert result["progress"]["completed"] == 2 and result["progress"]["failed"] == 0
         assert client.get(detail_url).json()["summary"]["status"] == "succeeded"
-        assert calls == ["街灯亮起", "推开木门", "推开木门"]
+        assert len(calls) == 3 and calls[0].startswith("街灯亮起")
+        assert calls[1] == calls[2]
+        assert "上场结尾（仅供接戏）\n街道\n街灯亮起\n\n本场剧本\n推开木门" in calls[1]
 
 
 def test_stale_preview_and_foreign_target(studio, monkeypatch):
@@ -295,7 +300,8 @@ def test_reopen_applied_suggestions_and_explicitly_refill_a_cleared_scene(studio
     current = {s["id"] for s in client.get(shots).json()}
     assert len(current) == len(originals) and current.isdisjoint(originals)
     assert {s["id"] for s in client.get(shots + "/removed").json()} == originals
-    assert applied["scenes"][0]["scene_created"] and not refilled["scenes"][0]["scene_created"]
+    # Saving the script already created the scene. Both adoptions reuse its identity.
+    assert not applied["scenes"][0]["scene_created"] and not refilled["scenes"][0]["scene_created"]
     assert refilled["scenes"][0]["shots_added"] == len(current)
     assert post_ok(client, apply, {"fill_empty_scenes": True})["scenes"][0]["shots_added"] == 0
     with sessions() as db:

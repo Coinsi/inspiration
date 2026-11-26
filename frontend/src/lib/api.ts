@@ -428,6 +428,9 @@ export interface SceneListItem {
   title: string | null;
   summary: string | null;
   shot_count: number;
+  script_id?: string | null;
+  script_title?: string | null;
+  removed_from_script?: boolean;
   chapter_id: string | null;
   chapter_ordinal: number | null;
   chapter_title: string | null;
@@ -514,6 +517,7 @@ export interface GenJob {
   } | null;
 }
 export interface Generation {
+  earlier_script?: boolean;
   thumbnail_hash?: string | null;
   input_refs?: {
     engineering_change_id?: string;

@@ -27,6 +27,9 @@ export function sceneAdoptionMessage(scenes: AppliedScene[], failed: number, lan
 export function refreshAppliedScenes(cache: QueryClient, projectId: string, scriptId: string) {
   const keys = [
     ["script-stats", scriptId],
+    ["script-source-review", projectId, scriptId],
+    ["scene-elements", projectId],
+    ["gens", "shot"],
     ...["scenes-all", "scene-shots", "all-shots", "board", "material-shot-context", "assets", "asset-usages"]
       .map(key => [key, projectId]),
   ];

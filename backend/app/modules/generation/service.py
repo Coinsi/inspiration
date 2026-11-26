@@ -707,6 +707,9 @@ def submit(
             inputs, refs, not (gen_in.prompt_override or shot.prompt_override)
         )
         job.input_snapshot["scene_id"] = str(shot.scene_id)
+        from app.modules.narrative.script_sources import generation_source
+        if source_revision := generation_source(db, shot.id):
+            job.input_snapshot["script_source_revision"] = source_revision
         if not (gen_in.prompt_override or shot.prompt_override) and (shot.storyboard or {}).get(
             "inherit_scene", True
         ):

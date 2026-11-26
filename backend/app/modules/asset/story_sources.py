@@ -12,7 +12,7 @@ from app.core.errors import Conflict
 from app.models.asset import Asset, AssetStorySource
 from app.models.evidence import StoryIdentity
 from app.models.identity import AuditLog, Project
-from app.models.narrative import Chapter, Scene, Script
+from app.models.narrative import Chapter, Scene, SceneElement, Script
 from app.models.shot import Shot, ShotAssetRef
 from app.modules.asset import schemas, service
 
@@ -24,7 +24,7 @@ def normalized(name):
 def ambiguous_character(kind, name):
     return kind == "character" and bool(
         re.fullmatch(
-            r"(?:一[名个位])?(?:他|她|他们|她们|男人|女人|男子|女子|青年|少年|老人|孩子|路人|陌生人|守卫|士兵|司机|店员|he|she|man|woman|stranger|guard)",
+            r"(?:一[名个位])?(?:陌生的?|年轻的?)?(?:他|她|他们|她们|男人|女人|男子|女子|青年|少年|老人|孩子|路人|陌生人|守卫|士兵|司机|店员|he|she|man|woman|stranger|guard)",
             normalized(name),
         )
     )
@@ -132,6 +132,21 @@ def attach_pending(db, asset, scope, source_name=None):
         aliases.add(source_name)
     from sqlalchemy import or_
 
+    catalogs = {}
+    rows = db.execute(select(SceneElement, Scene).join(Scene, Scene.id == SceneElement.scene_id).where(
+        Scene.project_id == asset.project_id, Scene.deleted_at.is_(None), SceneElement.active.is_(True),
+        SceneElement.asset_id.is_(None), SceneElement.manual_binding.is_(False), SceneElement.kind == asset.type,
+        SceneElement.name_key.in_([normalized(n) for n in aliases if n]),
+    ).with_for_update(of=SceneElement))
+    for member, source_scene in rows:
+        member_scope = scope_for(db, source_scene.script_id, source_scene.adapted_from_chapter_id)
+        if scope and member_scope != scope:
+            continue
+        if member_scope not in catalogs:
+            catalogs[member_scope] = AssetNames(db, asset.project_id, member_scope)
+        if catalogs[member_scope].visible_subject(member.kind, member.name, member.evidence) == asset:
+            member.asset_id = asset.id
+    db.flush()
     stmt = (
         select(Shot, Scene)
         .join(Scene, Scene.id == Shot.scene_id)
@@ -151,7 +166,6 @@ def attach_pending(db, asset, scope, source_name=None):
         )
         .with_for_update(of=Shot)
     )
-    catalogs = {}
     for shot, scene in db.execute(stmt):
         if str(asset.id) in shot.storyboard.get("suppressed_asset_ids", []):
             continue
@@ -171,15 +185,22 @@ def attach_pending(db, asset, scope, source_name=None):
             ):
                 remaining.append(subject)
                 continue
+            member = None
+            if scene.script_position is not None:
+                member = db.scalar(select(SceneElement).where(SceneElement.scene_id == scene.id,
+                    SceneElement.active.is_(True), SceneElement.asset_id == asset.id,
+                    SceneElement.kind == subject["type"], SceneElement.name_key == normalized(subject["name"])))
+                if not member:
+                    remaining.append(subject)
+                    continue
             if not any(r.asset_id == asset.id for r in refs):
                 ref = ShotAssetRef(
                     shot_id=shot.id,
                     asset_id=asset.id,
                     role=asset.type,
                     ordinal=len(refs),
-                    usage={
-                        k: v for k, v in subject.items() if k in {"evidence", "look", "aspects"}
-                    },
+                    usage={**{k: v for k, v in subject.items() if k in {"evidence", "look", "aspects"}},
+                           **({"scene_element_id": str(member.id)} if member else {})},
                 )
                 db.add(ref)
                 refs.append(ref)

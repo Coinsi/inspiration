@@ -920,6 +920,7 @@ def execute(db, job_id):
                         ),
                         "operation": operation,
                         **({"shot_dependencies": snap["shot_dependencies"]} if "shot_dependencies" in snap else {}),
+                        **({"script_source_revision": snap["script_source_revision"]} if snap.get("script_source_revision") else {}),
                         **({"scene_visual_source": snap["scene_visual_source"]} if snap.get("scene_visual_source") else {}),
                         **(
                             {

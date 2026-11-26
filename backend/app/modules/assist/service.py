@@ -182,6 +182,9 @@ def apply_message(
     require(ctx.role, adapter.edit_action)
     from app.modules.narrative.tool_tasks import fingerprint
     obj, _ = adapter.read(db, ctx.project.id, chat.target_id)
+    if chat.target_type == "scene" and obj.script_position is not None:
+        from app.models.narrative import Script
+        db.refresh(db.get(Script, obj.script_id), with_for_update=True)
     db.refresh(obj, with_for_update=True)
     _, current = adapter.read(db, ctx.project.id, chat.target_id)
     if proposal.get("base_revision") != fingerprint(current):

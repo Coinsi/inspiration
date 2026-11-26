@@ -43,8 +43,12 @@ def list_assets(
     q: str | None = None,
     tag: str | None = None,
     chapter_id: uuid.UUID | None = None,
+    novel_id: uuid.UUID | None = None,
+    script_id: uuid.UUID | None = None,
+    scene_id: uuid.UUID | None = None,
 ):
-    items = service.list_assets(db, ctx.project.id, type_=type, status=status, q=q, tag=tag, chapter_id=chapter_id)
+    items = service.list_assets(db, ctx.project.id, type_=type, status=status, q=q, tag=tag,
+                               chapter_id=chapter_id, novel_id=novel_id, script_id=script_id, scene_id=scene_id)
     counts = service.asset_counts(db, [a.id for a in items])
     zero = (0, 0, 0)
     return [
