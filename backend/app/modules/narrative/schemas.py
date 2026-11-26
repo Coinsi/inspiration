@@ -195,6 +195,9 @@ class EntityDraftOut(BaseModel):
     evidence: str = ""
     asset_id: uuid.UUID | None = None
     separate: bool = False
+    scene_id: uuid.UUID | None = None
+    element_id: uuid.UUID | None = None
+    scene_title: str | None = None
 
 
 class ExtractEntitiesIn(BaseModel):

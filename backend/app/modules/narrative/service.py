@@ -790,6 +790,9 @@ def extract_entities(
         if script.source_chapter_id:
             chapter = _get_chapter(db, project_id, script.source_chapter_id, allow_archived=True)
             text = f"仅抽取本剧本涉及的资产。原章用于核实身份和外观。\n【剧本】\n{text}\n【原章】\n{chapter.content}"
+        if script.screenplay:
+            from app.modules.narrative.scene_elements import extract_for_script
+            return extract_for_script(db, script, _strategy(db, project_id, strategy_name), text)
     if text is None and data.chapter_id:
         text = _get_chapter(db, project_id, data.chapter_id).content
     if not text:
@@ -816,19 +819,32 @@ def apply_entities(db: Session, ctx: ProjectContext, data: schemas.ApplyEntities
                     kind = AssetType(e.type)
                 except ValueError as exc:
                     raise Conflict("未识别的资产类型") from exc
+                member = None
+                if e.scene_id or e.element_id:
+                    from app.models.narrative import SceneElement
+                    scene = db.scalar(select(Scene).where(
+                        Scene.id == e.scene_id, Scene.project_id == ctx.project.id, Scene.script_id == data.script_id,
+                        Scene.script_position.is_not(None), Scene.deleted_at.is_(None)).with_for_update())
+                    member = db.get(SceneElement, e.element_id) if e.element_id else None
+                    if (not scene or not member or not member.active or member.scene_id != scene.id
+                            or member.kind != e.type or member.name != e.name or member.evidence != e.evidence):
+                        raise Conflict("这项场次素材已更新，请重新查看")
                 a = resolve(
                     db,
                     ctx,
                     kind,
                     e.name,
                     e.summary,
-                    source_type="script" if data.script_id else "chapter",
-                    source_id=data.script_id or data.chapter_id,
+                    source_type="scene" if member else ("script" if data.script_id else "chapter"),
+                    source_id=member.scene_id if member else data.script_id or data.chapter_id,
                     scope=scope,
                     chosen=e.asset_id,
                     separate=e.separate,
                     evidence=e.evidence,
                 )
+                if member and member.asset_id != a.id:
+                    from app.modules.narrative.scene_elements import update_look
+                    update_look(db, ctx, member.scene_id, member.id, schemas.SceneElementEdit(asset_id=a.id))
         except AppError as exc:
             if first_issue is None:
                 first_issue = exc

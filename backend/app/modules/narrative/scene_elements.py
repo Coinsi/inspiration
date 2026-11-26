@@ -61,7 +61,7 @@ def visible_lines(scene):
     ]
 
 
-def sync(db, scene, suggestions=None, names=None):
+def sync(db, scene, suggestions=None, names=None, *, partial=False):
     from app.modules.narrative.tool_tasks import fingerprint
 
     rows = {
@@ -103,11 +103,83 @@ def sync(db, scene, suggestions=None, names=None):
         seen.add(key)
     for key, row in rows.items():
         if key not in seen and (
-            suggestions is not None or not any(row.evidence in line for line in lines)
+            (suggestions is not None and not partial)
+            or not any(row.evidence in line for line in lines)
         ):
             row.active = False
-    scene.elements_revision = fingerprint(scene.script_blocks) if suggestions is not None else None
+    if not partial:
+        scene.elements_revision = (
+            fingerprint(scene.script_blocks) if suggestions is not None else None
+        )
     db.flush()
+
+
+def extract_for_script(db, script, strategy, text):
+    """Show grounded scene uses in the script's Extract Assets tool, too."""
+    from collections import defaultdict
+
+    from app.modules.narrative.schemas import EntityDraftOut
+    from app.modules.narrative.screenplay import locked_scenes
+    from app.modules.narrative.tool_tasks import fingerprint
+
+    scenes = list(script.screenplay)
+    unresolved = []
+    if any(row.elements_revision != fingerprint(row.script_blocks) for row in scenes):
+        revision = script.content_revision
+        drafts = strategy.extract_entities(text)
+        db.refresh(script, with_for_update=True)
+        locked_scenes(db, script)
+        db.expire(script, ["screenplay"])
+        if script.content_revision != revision:
+            raise Conflict("剧本已修改，请按照现稿重新提取")
+        scenes = list(script.screenplay)
+        lines = {s.id: visible_lines(s) for s in scenes}
+        matched = defaultdict(list)
+        for draft in drafts:
+            quote = draft.evidence.strip()
+            owners = [
+                sid
+                for sid, stage in lines.items()
+                if quote and any(quote in line for line in stage)
+            ]
+            if len(owners) == 1:
+                matched[owners[0]].append(draft)
+            else:
+                unresolved.append(EntityDraftOut(**draft.model_dump()))
+        if matched:
+            names = AssetNames(
+                db, script.project_id, scope_for(db, script.id, script.source_chapter_id)
+            )
+            for s in scenes:
+                if s.id in matched:
+                    db.refresh(s, with_for_update=True)
+                    sync(db, s, matched[s.id], names, partial=True)
+    result = []
+    rows = db.execute(
+        select(SceneElement, Scene)
+        .join(Scene, Scene.id == SceneElement.scene_id)
+        .where(
+            Scene.script_id == script.id,
+            Scene.script_position.is_not(None),
+            Scene.deleted_at.is_(None),
+            SceneElement.active.is_(True),
+        )
+        .order_by(Scene.script_position, SceneElement.kind, SceneElement.name)
+    )
+    for member, scene in rows:
+        result.append(
+            EntityDraftOut(
+                type=member.kind,
+                name=member.name,
+                summary=member.direction or member.prompt,
+                evidence=member.evidence,
+                scene_id=scene.id,
+                element_id=member.id,
+                scene_title=f"{scene.script_position} · {scene.title}",
+                asset_id=member.asset_id,
+            )
+        )
+    return [*result, *unresolved]
 
 
 def prepare(db, scene, strategy):

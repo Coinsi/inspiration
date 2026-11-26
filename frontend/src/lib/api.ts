@@ -335,6 +335,7 @@ export interface EntityDraft {
   name: string;
   summary: string;
   evidence?: string;
+  scene_title?: string | null;
 }
 
 // ── 设定(故事圣经)──

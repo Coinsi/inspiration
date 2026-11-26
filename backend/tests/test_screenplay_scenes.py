@@ -117,6 +117,12 @@ def test_same_location_changes_only_the_shots_using_the_action(studio, monkeypat
             ]
 
     monkeypatch.setattr(service, "_strategy", lambda *_: Strategy())
+    extracted = post_ok(client, root + "/extract-entities", {"script_id": script_id})
+    scoped_bag = next(item for item in extracted if item["name"] == "米袋")
+    assert scoped_bag["scene_id"] == first and scoped_bag["element_id"]
+    picked = {"entities": [scoped_bag], "script_id": script_id}
+    assert [a["id"] for a in post_ok(client, root + "/apply-entities", picked)] == [prop["id"]]
+    assert [a["id"] for a in post_ok(client, root + "/apply-entities", picked)] == [prop["id"]]
     proposal = post_ok(client, path + "/decompose")
     post_ok(client, path + "/apply-scenes", {"scenes": proposal["scenes"]})
 

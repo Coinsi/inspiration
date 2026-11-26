@@ -360,6 +360,7 @@ function ScriptEditorWorkspace() {
       setMatching(null);
       setDrafts(null);
       toast.push(tr("se.entitiesApplied"), "success");
+      void qc.invalidateQueries({ queryKey: ["scene-elements", projectId] });
       void qc.invalidateQueries({ queryKey: ["assets", projectId] });
       void qc.invalidateQueries({ queryKey: ["script-stats", scriptId] });
     },
@@ -1153,6 +1154,7 @@ function ScriptEditorWorkspace() {
                 <Badge variant="primary">{tr(`asset.${d.type}`)}</Badge>
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {d.name}
+                  {d.scene_title && <small className="block truncate text-muted-foreground" title={d.scene_title}>{d.scene_title}</small>}
                 </span>
                 <span className="max-w-[48%] text-xs text-muted-foreground">
                   <span className="block line-clamp-2">{d.summary}</span>
