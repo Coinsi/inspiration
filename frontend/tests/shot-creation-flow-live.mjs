@@ -109,7 +109,7 @@ try {
   await page.getByRole("tab", { name: "参考素材", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const card = dialog.getByRole("button", {
-    name: `参考资产 ${asset.name} ${asset.code}`,
+    name: `参考素材 ${asset.name}`,
     exact: true,
   });
   await page.route("**/asset-refs", async (route) => {
@@ -230,12 +230,12 @@ try {
   });
   await dialog.getByRole("button", { name: "完成选择" }).click();
   await page
-    .getByText(`${shots[1].code} · ${shots[1].title}`, { exact: false })
+    .getByText(`${shots[1].scene_title} · 第 ${shots[1].ordinal} 镜 · ${shots[1].title}`, { exact: false })
     .first()
     .waitFor();
   assert.equal((await call("get", root + "/agent/runs")).length, 0);
   check(
-    "Same-name shots distinguished by searchable code; picking a scope never starts an Agent",
+    "Same-name shots show their scene and position, support lookup by code and do not start an Agent",
   );
   await page.goto(base + root + "/prompts");
   await page.getByRole("button", { name: "新建提示词", exact: true }).click();

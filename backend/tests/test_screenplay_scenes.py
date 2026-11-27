@@ -10,6 +10,7 @@ from app.adapters.contracts import EntityDraft, ShotSubject, StoryboardShotSugge
 from app.adapters.decomposition.mock import MockDecomposer
 from app.models.generation import GenerationJob
 from app.models.narrative import Scene, Script
+from app.models.shot import ShotAssetRef
 from app.modules.narrative import service
 from tests.test_library_migrations import (  # noqa: F401
     library_migration_schema,
@@ -176,8 +177,22 @@ def test_same_location_changes_only_the_shots_using_the_action(studio, monkeypat
     assert [s["scene_id"] for s in appearances] == [first, second]
     assert [s["members"][0]["direction_excerpt"] for s in appearances] == [label, ""]
     assert [s["shots"][0]["id"] for s in appearances] == [carrying["id"], later["id"]]
-    ref = client.get(root + f"/shots/{carrying['id']}/asset-refs").json()
+    shot_path = root + f"/shots/{carrying['id']}"
+    ref_path = shot_path + "/asset-refs"
+    ref = client.get(ref_path).json()
     assert [item["asset_id"] for item in ref] == [prop["id"]]
+    # Round-tripping an existing reference and matching an alias must preserve its scene and chosen look.
+    linked = {"asset_id": prop["id"], "role": "prop", "usage": {**ref[0]["usage"], "look": "夜戏造型"}}
+    assert client.put(ref_path, json={"refs": [linked]}).is_success
+    subject = {"name": "粗麻口袋", "type": "prop", "look": "提议造型", "evidence": "秦禹放下米袋。"}
+    assert client.patch(shot_path, json={"storyboard": {"unresolved_subjects": [subject]}}).is_success
+    confirmed = client.put(ref_path, json={"refs": [{**linked, "resolves_subject": subject["name"]}]})
+    assert confirmed.is_success, confirmed.text
+    assert confirmed.json()[0]["id"] == ref[0]["id"]
+    assert confirmed.json()[0]["usage"]["look"] == "夜戏造型"
+    assert not client.get(shot_path).json()["storyboard"]["unresolved_subjects"]
+    with sessions() as db:
+        assert db.get(ShotAssetRef, uuid.UUID(ref[0]["id"])).usage["scene_element_id"] == bag["id"]
     assert not client.get(root + f"/shots/{window['id']}/asset-refs").json()
     post_ok(client, root + f"/shots/{carrying['id']}/generate", {"provider": "mock"})
     media_path = root + f"/generations?target_type=shot&target_id={carrying['id']}"

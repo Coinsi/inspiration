@@ -7,6 +7,7 @@ import { TimelineAddMedia } from "./TimelineAddMedia";
 import { TimelineWorks } from "./WorkEditing";
 import { StudioSelect } from "@/components/ui/studio-select";
 import { ObjectPicker } from "@/components/ObjectPicker";
+import { shotChoices, shotName } from "@/lib/shotLabels";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   edit,
@@ -588,13 +589,7 @@ function TimelineDraft({
         !shots.some((s) => s.selected_generation_id)
       }
       selected={[]}
-      items={shots
-        .filter((s) => s.selected_generation_id)
-        .map((s) => ({
-          id: s.id,
-          name: s.title || s.description || s.code,
-          context: s.code,
-        }))}
+      items={shotChoices(shots.filter((s) => s.selected_generation_id), zh)}
       onSelect={(id) => {
         const shot = shots.find((s) => s.id === id);
         if (shot?.selected_generation_id) addShot.mutate(shot);
@@ -1271,11 +1266,7 @@ function TimelineDraft({
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm">
-                  {shots.find((s) => s.id === c.shot_id)?.title ||
-                    shots.find((s) => s.id === c.shot_id)?.code ||
-                    c.shot_id?.slice(0, 8) ||
-                    c.note ||
-                    "独立素材片段"}
+                  {clipTitle(c, shots.find((s) => s.id === c.shot_id), zh)}
                 </span>
                 <Button
                   size="sm"
@@ -1890,6 +1881,14 @@ function TimelineDraft({
   );
 }
 
+function clipTitle(clip: Clip, shot: Shot | undefined, zh: boolean) {
+  if (shot?.title) return shot.title;
+  if (clip.note) return clip.note;
+  if (shot) return shotName(shot, zh);
+  if (clip.shot_id) return zh ? "来源镜头暂不可用" : "Source shot unavailable";
+  return zh ? "独立素材片段" : "Standalone clip";
+}
+
 function useClipMedia(projectId: string, clip: Clip, shot?: Shot) {
   const id = clip.generation_id || shot?.selected_generation_id;
   const query = useQuery({
@@ -1940,7 +1939,7 @@ function ClipThumbnail({
       <div className="p-1.5">
         <p className="truncate text-xs">
           {String(index + 1).padStart(2, "0")}{" "}
-          {shot?.title || clip.note || shot?.code || ""}
+          {clipTitle(clip, shot, zh)}
         </p>
         <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">
           {(clip.duration_ms / 1000).toFixed(1)} s

@@ -1,4 +1,5 @@
 import { StudioSelect } from "@/components/ui/studio-select";
+import { SelectField } from "@/components/ui/select-field";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layers, Plus, Trash2 } from "lucide-react";
@@ -11,6 +12,7 @@ import {
 } from "@/lib/timeline-edit";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
+import { shotChoices } from "@/lib/shotLabels";
 
 export function TimelineVisuals({
   projectId,
@@ -183,24 +185,22 @@ export function TimelineVisuals({
         </p>
       </header>
       <div className="timeline-visual-add">
-        <StudioSelect
-          aria-label={zh ? "叠加素材镜头" : "Overlay shot"}
+        <SelectField
+          label={zh ? "叠加素材镜头" : "Overlay shot"}
+          placeholder={zh ? "选择素材所在镜头" : "Choose a source shot"}
+          searchPlaceholder={zh ? "搜索镜头或场景" : "Search shots or scenes"}
+          searchable
           value={shot}
-          onValueChange={(selectedValue) => {
+          onChange={(selectedValue) => {
             setShot(selectedValue);
             setGeneration("");
           }}
-        >
-          <option value="">
-            {zh ? "选择素材所在镜头" : "Choose a source shot"}
-          </option>
-          <option value="__timeline">本次剪辑的素材</option>
-          {shots.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.title || s.code}
-            </option>
-          ))}
-        </StudioSelect>
+          options={[
+            ...(shot ? [{ value: "", label: zh ? "取消选择" : "Clear selection" }] : []),
+            { value: "__timeline", label: zh ? "本次剪辑的素材" : "Materials in this edit" },
+            ...shotChoices(shots, zh),
+          ]}
+        />
         <StudioSelect
           aria-label={zh ? "叠加素材版本" : "Overlay version"}
           value={generation}

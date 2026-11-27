@@ -6,6 +6,7 @@ import { Link, useLocation } from "react-router-dom";
 import { assetPath, invalidateAssetLists } from "@/components/AssetActions";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select-field";
+import { assetChoices } from "@/lib/assetChoices";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -343,10 +344,7 @@ function SceneLookEditor({ projectId, sceneId, member, canEdit, appearance, onCl
               value={assetId}
               options={[
                 { value: "", label: zh ? "尚未关联" : "Unlinked" },
-                ...(assets.data || []).map((a) => ({
-                  value: a.id,
-                  label: a.name,
-                })),
+                ...assetChoices(assets.data ?? [], zh),
               ]}
               onChange={(v) => {
                 setAssetId(v);

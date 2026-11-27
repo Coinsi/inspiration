@@ -1,4 +1,6 @@
 import { StudioSelect } from "@/components/ui/studio-select";
+import { SelectField } from "@/components/ui/select-field";
+import { shotChoices } from "@/lib/shotLabels";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -199,23 +201,23 @@ export function CanvasLibraryPanel({
       <div className="canvas-library-controls">
         <label>
           所属镜头
-          <StudioSelect
-            aria-label="片段所属镜头"
+          <SelectField
+            label="片段所属镜头"
             value={shot}
             disabled={busy || running}
-            onValueChange={(selectedValue) => {
+            searchable
+            placeholder="选择镜头"
+            searchPlaceholder="搜索镜头或场景"
+            options={[
+              ...(shot ? [{ value: "", label: "取消选择" }] : []),
+              ...shotChoices(shots),
+            ]}
+            onChange={(selectedValue) => {
               setShot(selectedValue);
               setJob("");
               setResult(null);
             }}
-          >
-            <option value="">选择镜头</option>
-            {shots.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.title || s.code}
-              </option>
-            ))}
-          </StudioSelect>
+          />
         </label>
         {chosen.data?.media_type !== "image" && (
           <>

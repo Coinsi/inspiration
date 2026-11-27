@@ -381,7 +381,14 @@ def set_asset_refs(db: Session, ctx: ProjectContext, shot_id: uuid.UUID, refs) -
         if key not in retained:
             ref.ref_mode = r.ref_mode
             ref.pinned_version_id = r.pinned_version_id if r.ref_mode == "pinned" else None
-            ref.usage = resolved_usage.get(key) or (r.usage.model_dump() if r.usage else ref.usage or {})
+            # The editor only sends public fields. Scene provenance belongs to the stored reference.
+            usage = dict(ref.usage or {})
+            if r.usage is not None:
+                usage.update(r.usage.model_dump(exclude_unset=True))
+            for field, value in resolved_usage.get(key, {}).items():
+                if not usage.get(field):
+                    usage[field] = value
+            ref.usage = usage
     db.flush()
     return list_asset_refs(db, ctx.project.id, s.id)
 

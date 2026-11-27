@@ -17,6 +17,7 @@ import {
   type NovelDetail,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { shotName, shotChoice } from "@/lib/shotLabels";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { cn } from "@/lib/utils";
 export function WorkbenchGallery({
@@ -212,8 +213,8 @@ export function WorkbenchGallery({
                       </div>
                       <div className="p-3.5">
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <span className="font-code text-[10px] text-faint">
-                            {shot.code}
+                          <span className="min-w-0 truncate text-xs text-faint">
+                            {shotChoice(shot, zh).description}
                           </span>
                           <Badge
                             variant={
@@ -231,7 +232,7 @@ export function WorkbenchGallery({
                           className="line-clamp-1 text-sm font-medium hover:text-primary"
                           to={`${base}/shots?shot=${shot.id}`}
                         >
-                          {shot.title || shot.code}
+                          {shotName(shot, zh)}
                         </Link>
                         <p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">
                           {shot.description ||
@@ -269,9 +270,9 @@ export function WorkbenchGallery({
                         <h3 className="truncate text-sm font-medium group-hover:text-primary">
                           {asset.name}
                         </h3>
-                        <p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">
-                          {asset.summary || asset.code}
-                        </p>
+                        {asset.summary && (
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{asset.summary}</p>
+                        )}
                       </div>
                     </Link>
                   ))}

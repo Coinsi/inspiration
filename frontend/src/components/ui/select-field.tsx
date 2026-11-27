@@ -16,7 +16,9 @@ import "./select-field.css";
 type Choice = {
   value: string;
   label: string;
+  selectedLabel?: string;
   description?: string;
+  keywords?: string;
   icon?: ReactNode;
   disabled?: boolean;
 };
@@ -32,6 +34,8 @@ export function SelectField({
   title,
   menuWidth = 240,
   searchable = false,
+  placeholder = "请选择",
+  searchPlaceholder,
 }: {
   label?: string;
   title?: string;
@@ -42,6 +46,8 @@ export function SelectField({
   className?: string;
   menuWidth?: number;
   searchable?: boolean;
+  placeholder?: string;
+  searchPlaceholder?: string;
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -66,7 +72,8 @@ export function SelectField({
     .filter(
       ({ option }) =>
         !searchable ||
-        (option.label + " " + option.value).toLowerCase().includes(term),
+        [option.label, option.description, option.keywords, option.value]
+          .join(" ").toLowerCase().includes(term),
     );
   const enabled = visible
     .filter(({ option }) => !option.disabled)
@@ -87,7 +94,7 @@ export function SelectField({
       ?.querySelectorAll("button, input, textarea, select")
       .forEach((node) => node.remove());
     setFieldLabel(
-      label || wrapper?.textContent?.trim() || chosen?.label || "请选择",
+      label || wrapper?.textContent?.trim() || chosen?.label || placeholder,
     );
     const selected = options.findIndex((o) => o.value === value && !o.disabled);
     setActive(
@@ -121,9 +128,12 @@ export function SelectField({
     const place = () => {
       const rect = trigger.current?.getBoundingClientRect();
       if (!rect) return;
+      const dialog = trigger.current?.closest('[role="dialog"], dialog')?.getBoundingClientRect();
+      const leftEdge = Math.max(12, (dialog?.left ?? 0) + 8);
+      const rightEdge = Math.min(window.innerWidth - 12, (dialog?.right ?? window.innerWidth) - 8);
       const width = Math.min(
         Math.max(menuWidth, rect.width),
-        window.innerWidth - 24,
+        rightEdge - leftEdge,
       );
       const below = window.innerHeight - rect.bottom - 16;
       const above = rect.top - 16;
@@ -136,7 +146,7 @@ export function SelectField({
       const upward = below < desired && above > below;
       const maxHeight = Math.max(48, Math.min(320, upward ? above : below));
       setPosition({
-        left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
+        left: Math.max(leftEdge, Math.min(rect.left, rightEdge - width)),
         top: upward ? "auto" : rect.bottom + 6,
         bottom: upward ? window.innerHeight - rect.top + 6 : "auto",
         width,
@@ -273,7 +283,7 @@ export function SelectField({
         }}
       >
         {chosen?.icon}
-        <span>{chosen?.label || "请选择"}</span>
+        <span>{chosen?.selectedLabel || chosen?.label || placeholder}</span>
         <ChevronDown size={14} className="studio-select-chevron" />
       </button>
       {open &&
@@ -298,8 +308,8 @@ export function SelectField({
                   aria-activedescendant={
                     active >= 0 ? `${id}-${active}` : undefined
                   }
-                  aria-label={`搜索${fieldLabel}`}
-                  placeholder={`搜索${fieldLabel}`}
+                  aria-label={searchPlaceholder || `搜索${fieldLabel}`}
+                  placeholder={searchPlaceholder || `搜索${fieldLabel}`}
                   autoComplete="off"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}

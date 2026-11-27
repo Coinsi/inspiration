@@ -45,6 +45,7 @@ import {
   type Shot,
 } from "@/lib/api";
 import { useI18n, type Lang } from "@/lib/i18n";
+import { shotName } from "@/lib/shotLabels";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { useElapsedSeconds } from "@/lib/useElapsedSeconds";
 import { cn } from "@/lib/utils";
@@ -383,10 +384,10 @@ function StoryboardContent() {
 
   const selecting = !!scene && selection?.sceneId === scene.id;
   const selectedShots = selecting ? (shots ?? []).filter(s => selection.ids.includes(s.id)) : [];
-  const sceneName = scene?.title || scene?.code || "";
+  const sceneName = scene?.title || (scene ? (lang === "zh" ? `第 ${scene.ordinal} 场` : `Scene ${scene.ordinal}`) : "");
   const selectBox = (s: Shot) => selecting && (
     <label className="storyboard-select-shot">
-      <input type="checkbox" aria-label={`${lang === "zh" ? "选择镜头" : "Select shot"} ${s.title || s.code}`}
+      <input type="checkbox" aria-label={`${lang === "zh" ? "选择镜头" : "Select shot"} ${shotName(s, lang === "zh")}`}
         checked={selection.ids.includes(s.id)} disabled={removal.busy}
         onChange={e => {
           const checked = e.currentTarget.checked;
@@ -665,8 +666,8 @@ function StoryboardContent() {
                     <div className="storyboard-frame-number">{selectBox(s)}{String(i + 1).padStart(2, "0")}</div>
                   </div>
                   <div className="storyboard-gallery-title">
-                    <h3><button onClick={() => setPreview(s)} aria-label={`${lang === "zh" ? "快速预览" : "Quick preview"} ${s.title || s.code}`}>
-                      {s.title || (lang === "zh" ? "未命名镜头" : "Untitled shot")}
+                    <h3><button onClick={() => setPreview(s)} aria-label={`${lang === "zh" ? "快速预览" : "Quick preview"} ${shotName(s, lang === "zh")}`}>
+                      {shotName(s, lang === "zh")}
                     </button></h3>
                     {shotMenu(s)}
                   </div>
@@ -958,7 +959,7 @@ function StoryboardFrame({ projectId, shot }: { projectId: string; shot: Shot })
     <Link
       to={shotLink(projectId, shot.id, "gen")}
       className="storyboard-empty-frame"
-      aria-label={`${lang === "zh" ? "制作画面" : "Produce"} · ${shot.title || shot.code}`}
+      aria-label={`${lang === "zh" ? "制作画面" : "Produce"} · ${shotName(shot, lang === "zh")}`}
     >
       <Film size={23} strokeWidth={1.4} aria-hidden="true" />
       <span>{lang === "zh" ? "尚未选定画面" : "No selected output"}</span>

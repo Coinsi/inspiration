@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { api, type Shot } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { shotName } from "@/lib/shotLabels";
 import { useConfirm } from "@/components/ui/confirm";
 import {
   ActionMenu,
@@ -85,7 +86,7 @@ export function ShotActions({
   const zh = useI18n().lang === "zh";
   return (
     <ActionMenu
-      label={`${zh ? "更多镜头操作" : "More shot actions"} · ${shot.title || shot.code}`}
+      label={`${zh ? "更多镜头操作" : "More shot actions"} · ${shotName(shot, zh)}`}
     >
       <ActionMenuItem asChild>
         <Link to={shotLink(projectId, shot.id, "overview", source)}>
@@ -176,7 +177,7 @@ export function useRemoveShots(
     if (!shots.length || removal.isPending) return;
     const names = shots
       .slice(0, 3)
-      .map((s) => s.title || s.code)
+      .map((s) => shotName(s, zh))
       .join(zh ? "、" : ", ");
     const count = shots.length;
     const ok = await confirm({

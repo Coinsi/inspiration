@@ -16,7 +16,7 @@ export function ObjectPicker({
   title = "选择创作对象",
   closeOnSelect = false,
 }: {
-  items: { id: string; name: string; context: string }[];
+  items: { value: string; label: string; description: string; keywords?: string }[];
   selected: string[];
   onSelect: (id: string) => void;
   disabled?: boolean;
@@ -31,7 +31,7 @@ export function ObjectPicker({
     [query, setQuery] = useState("");
   const [limit, setLimit] = useState(40);
   const matches = items.filter((i) =>
-    `${i.name} ${i.context}`.toLowerCase().includes(query.trim().toLowerCase()),
+    [i.label, i.description, i.keywords].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
   );
   return (
     <>
@@ -54,7 +54,7 @@ export function ObjectPicker({
           autoFocus
           data-autofocus
           label="搜索创作对象"
-          placeholder="搜索名称、镜头编号或章节"
+          placeholder="搜索名称、场景或章节"
           value={query}
           onValueChange={(value) => {
             setQuery(value);
@@ -75,29 +75,29 @@ export function ObjectPicker({
           ) : (
             matches.slice(0, limit).map((i) => (
               <button
-                key={i.id}
-                disabled={disabled || selected.includes(i.id)}
-                aria-label={`选择对象 ${i.context} ${i.name}`}
+                key={i.value}
+                disabled={disabled || selected.includes(i.value)}
+                aria-label={`选择对象 ${i.description} ${i.label}`}
                 onClick={() => {
-                  onSelect(i.id);
+                  onSelect(i.value);
                   if (closeOnSelect) setOpen(false);
                 }}
                 className="w-full text-left flex items-center justify-between gap-3 p-4 border rounded-lg hover:bg-elevated disabled:opacity-60"
               >
                 {renderPreview && (
                   <span className="w-16 h-12 shrink-0 rounded-lg overflow-hidden bg-elevated">
-                    {renderPreview(i.id)}
+                    {renderPreview(i.value)}
                   </span>
                 )}
                 <span className="min-w-0 flex-1">
                   <strong className="block text-sm font-medium truncate">
-                    {i.name}
+                    {i.label}
                   </strong>
                   <small className="block text-xs text-muted-foreground mt-1">
-                    {i.context}
+                    {i.description}
                   </small>
                 </span>
-                {selected.includes(i.id) ? (
+                {selected.includes(i.value) ? (
                   <Check size={16} />
                 ) : (
                   <Plus size={16} />

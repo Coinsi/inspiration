@@ -1,8 +1,9 @@
 import { StudioSelect } from "@/components/ui/studio-select";
+import { SelectField } from "@/components/ui/select-field";
 import { SearchField } from "@/components/ui/search-field";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { X, Check, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { X, Check, Plus, MapPin, UserRound, Shapes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCanEditShots } from "@/components/ShotActions";
 import { MediaImage } from "@/components/MediaImage";
@@ -15,8 +16,13 @@ import {
   type ShotAssetRef,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { assetChoices } from "@/lib/assetChoices";
 
-type NamedReference = ShotAssetRef & { asset_name?: string | null; asset_removed?: boolean };
+type NamedReference = ShotAssetRef & {
+  asset_name?: string | null;
+  asset_removed?: boolean;
+};
+type Subject = { name: string; type: string; evidence?: string };
 
 export default function ShotAssetRefs({
   projectId,
@@ -37,7 +43,6 @@ export default function ShotAssetRefs({
     queryKey: ["shot-reference-subjects", projectId, shotId],
     queryFn: () => api.get<Shot>(base + "/shots/" + shotId),
   });
-  type Subject = { name: string; type: string; evidence: string };
   const pending = Array.isArray(shot.data?.storyboard?.unresolved_subjects)
     ? (shot.data.storyboard.unresolved_subjects as Subject[])
     : [];
@@ -50,6 +55,11 @@ export default function ShotAssetRefs({
     queryKey: ["assets-pick", projectId],
     queryFn: () => api.get<Asset[]>(`${base}/assets`),
   });
+  const choices = useMemo(() => assetChoices(assets.data ?? []), [assets.data]);
+  const byId = useMemo(
+    () => new Map(choices.map((choice) => [choice.value, choice])),
+    [choices],
+  );
   const save = useMutation({
     mutationFn: (next: (ShotAssetRef & { resolves_subject?: string })[]) =>
       api.put(`${base}/shots/${shotId}/asset-refs`, {
@@ -75,49 +85,170 @@ export default function ShotAssetRefs({
     },
   });
   const disabled =
-    !canEdit || save.isPending ||
+    !canEdit ||
+    save.isPending ||
     refs.isFetching ||
     refs.isError ||
     assets.isPending ||
     assets.isError;
+  function confirmSubject(subject: Subject, id: string) {
+    if (disabled || shot.isFetching || shot.isError) return;
+    const current = refs.data ?? [];
+    const existing = current.find(
+      (r) => r.asset_id === id && r.role === subject.type,
+    );
+    if (existing) {
+      save.mutate(
+        current.map((r) =>
+          r === existing ? { ...r, resolves_subject: subject.name } : r,
+        ),
+      );
+    } else {
+      save.mutate([
+        ...current,
+        {
+          id: "",
+          asset_id: id,
+          role: subject.type,
+          ref_mode: "floating",
+          pinned_version_id: null,
+          ordinal: current.length,
+          resolves_subject: subject.name,
+        },
+      ]);
+    }
+  }
   function addAsset(a: Asset) {
     const current = refs.data ?? [];
-    if (disabled || current.some(r => r.asset_id === a.id)) return;
-    save.mutate([...current, {
-      id: "", asset_id: a.id, role: a.type, ref_mode: "floating",
-      pinned_version_id: null, ordinal: current.length,
-    }]);
+    if (disabled || current.some((r) => r.asset_id === a.id)) return;
+    save.mutate([
+      ...current,
+      {
+        id: "",
+        asset_id: a.id,
+        role: a.type,
+        ref_mode: "floating",
+        pinned_version_id: null,
+        ordinal: current.length,
+      },
+    ]);
   }
-  const filtered = (assets.data ?? []).filter(
-    (a) =>
-      (!type || a.type === type) &&
-      `${a.name} ${a.code} ${a.summary ?? ""}`
+  const filtered = choices.filter(
+    ({ asset, label, description, keywords }) =>
+      (!type || asset.type === type) &&
+      `${label} ${description} ${keywords}`
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
   return (
     <div>
-      <div className="reference-selected" aria-label="已选角色与场景">
-        {refs.data?.map(ref => {
-          const asset = assets.data?.find(a => a.id === ref.asset_id);
-          const name = asset?.name || ref.asset_name || (assets.isLoading ? "读取参考…" : "不可用的参考资产");
-          const shared = refs.data?.some(r => r.asset_id === ref.asset_id && r.id !== ref.id);
-          const label = shared ? `${name} · ${tr(`asset.${ref.role}`)}` : name;
-          return <span key={ref.id} className="reference-chip">
-            <span>{label}{ref.asset_removed && <small className="ml-1 text-muted-foreground">已移入回收站</small>}</span>
-            {canEdit && <button type="button" disabled={disabled} aria-label={`移除引用 ${label}`}
-              title={`移除引用 ${label}`} onClick={() => save.mutate((refs.data ?? []).filter(r => r.id !== ref.id))}>
-              <X size={14} aria-hidden />
-            </button>}
-          </span>;
+      {!!refs.data?.length && (
+        <h3 className="mb-2 text-sm font-semibold">
+          已引用 · {refs.data.length}
+        </h3>
+      )}
+      <div
+        className="reference-selected empty:hidden"
+        aria-label="已选角色与场景"
+      >
+        {refs.data?.map((ref) => {
+          const name =
+            byId.get(ref.asset_id)?.selectedLabel ||
+            ref.asset_name ||
+            (assets.isLoading ? "读取参考…" : "不可用的参考素材");
+          const shared = refs.data?.some(
+            (r) => r.asset_id === ref.asset_id && r.id !== ref.id,
+          );
+          const roleKey = `asset.${ref.role}`;
+          const roleLabel = tr(roleKey);
+          const label = shared
+            ? `${name} · ${roleLabel === roleKey ? `用途 ${ref.ordinal + 1}` : roleLabel}`
+            : name;
+          return (
+            <span key={ref.id} className="reference-chip">
+              <span>
+                {label}
+                {ref.asset_removed && (
+                  <small className="ml-1 text-muted-foreground">
+                    已移入回收站
+                  </small>
+                )}
+              </span>
+              {canEdit && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={`移除引用 ${label}`}
+                  title={`移除引用 ${label}`}
+                  onClick={() =>
+                    save.mutate(
+                      (refs.data ?? []).filter((r) => r.id !== ref.id),
+                    )
+                  }
+                >
+                  <X size={14} aria-hidden />
+                </button>
+              )}
+            </span>
+          );
         })}
       </div>
+      {pending.length > 0 && (
+        <section aria-label="待确认的引用" className="mb-4">
+          <h3 className="mb-1 text-sm font-semibold">
+            待确认的引用 · {pending.length}
+          </h3>
+          <ul className="divide-y">
+            {pending.map((subject, index) => {
+              const kind = tr(`asset.${subject.type}`);
+              const options = choices.filter(
+                ({ asset }) => asset.type === subject.type,
+              );
+              return (
+                <li
+                  key={`${subject.type}-${subject.name}-${index}`}
+                  className="grid gap-2 py-3 sm:grid-cols-[minmax(0,26rem)_max-content] sm:items-center sm:gap-5"
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium">{subject.name}</span>
+                    {subject.evidence && (
+                      <p className="mt-1 break-words text-sm text-muted-foreground">
+                        {subject.evidence}
+                      </p>
+                    )}
+                  </div>
+                  {canEdit &&
+                    (assets.isSuccess && options.length === 0 ? (
+                      <span className="shrink-0 text-sm text-muted-foreground">
+                        项目中暂无可选的{kind}
+                      </span>
+                    ) : (
+                      <SelectField
+                        className="justify-self-start"
+                        label={`为${subject.name}选择${kind}`}
+                        placeholder={`选择${kind}`}
+                        searchPlaceholder={`搜索${kind}名称或描述`}
+                        value=""
+                        searchable
+                        menuWidth={320}
+                        options={options}
+                        disabled={disabled || shot.isFetching || shot.isError}
+                        onChange={(id) => confirmSubject(subject, id)}
+                      />
+                    ))}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       {!!refs.data?.length && (
         <details className="mb-3 rounded-lg border p-3 text-sm">
           <summary>镜头里用到了哪些设定</summary>
           {refs.data.map((ref) => {
-            const asset = assets.data?.find((a) => a.id === ref.asset_id);
-            if (!asset) return null;
+            const choice = byId.get(ref.asset_id);
+            if (!choice) return null;
+            const { asset, selectedLabel } = choice;
             const usage = ref.usage ?? { aspects: [], look: "", evidence: "" };
             const change = (updates: Partial<ShotAssetRef>) =>
               save.mutate(
@@ -140,7 +271,7 @@ export default function ShotAssetRefs({
                 disabled={disabled}
                 className="my-3 space-y-2"
               >
-                <legend className="font-medium">{asset.name}</legend>
+                <legend className="font-medium">{selectedLabel}</legend>
                 <div className="flex flex-wrap gap-3">
                   {aspects.map((k) => (
                     <label key={k}>
@@ -207,49 +338,12 @@ export default function ShotAssetRefs({
           })}
         </details>
       )}
-      {pending.map((subject, i) => (
-        <label key={i} className="my-2 block rounded-md border p-2 text-sm">
-          待确认 · {subject.name}
-          <span className="block text-muted-foreground">
-            {subject.evidence}
-          </span>
-          <StudioSelect
-            value=""
-            disabled={disabled}
-            aria-label={"为" + subject.name + "选择资产"}
-            onValueChange={(id) => {
-              const current = refs.data || [];
-              const existing = current.find((r) => r.asset_id === id);
-              const ref = existing || {
-                id: "",
-                asset_id: id,
-                role: subject.type,
-                ref_mode: "floating",
-                pinned_version_id: null,
-                ordinal: current.length,
-              };
-              save.mutate([
-                ...current.filter((r) => r !== existing),
-                { ...ref, resolves_subject: subject.name },
-              ]);
-            }}
-          >
-            <option value="">选择对应的资产</option>
-            {assets.data
-              ?.filter((a) => a.type === subject.type)
-              .map((a) => (
-                <option value={a.id} key={a.id}>
-                  {a.name} · {a.code}
-                </option>
-              ))}
-          </StudioSelect>
-        </label>
-      ))}
+      <h3 className="mt-4 text-sm font-semibold">项目素材</h3>
       <div className="reference-tools">
         <SearchField
           className="flex-1"
           label="搜索参考资产"
-          placeholder="搜索角色、场景或编号…"
+          placeholder="搜索名称、描述或标签…"
           value={query}
           onValueChange={(value) => setQuery(value)}
         />
@@ -268,14 +362,15 @@ export default function ShotAssetRefs({
           )}
         </StudioSelect>
       </div>
-      {(refs.error || assets.error || save.error) && (
+      {(refs.error || assets.error || shot.error || save.error) && (
         <p role="alert" className="text-sm text-danger mb-3">
-          {(refs.error || assets.error || save.error)?.message}
+          {(refs.error || assets.error || shot.error || save.error)?.message}
           <Button
             variant="ghost"
             onClick={() => {
               void refs.refetch();
               void assets.refetch();
+              void shot.refetch();
               save.reset();
             }}
           >
@@ -286,38 +381,69 @@ export default function ShotAssetRefs({
       {assets.isPending || refs.isPending ? (
         <p role="status">正在读取素材…</p>
       ) : (
-        <div className="reference-catalog">
-          {filtered.map((a) => {
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          {filtered.map(({ asset: a, label, selectedLabel, description }) => {
             const selected = refs.data?.some((r) => r.asset_id === a.id);
+            const Icon =
+              a.type === "character"
+                ? UserRound
+                : a.type === "location"
+                  ? MapPin
+                  : Shapes;
             return (
-              <button
+              <Button
+                type="button"
+                variant="outline"
                 key={a.id}
-                className="reference-card"
-                aria-label={`参考资产 ${a.name} ${a.code}`}
+                className="h-auto min-w-0 justify-start gap-3 rounded-lg px-3 py-2.5 text-left aria-pressed:bg-elevated aria-pressed:disabled:opacity-100"
+                aria-label={`参考素材 ${selectedLabel}`}
                 aria-pressed={!!selected}
                 disabled={disabled || !!selected}
                 onClick={() => addAsset(a)}
               >
-                <div>
-                  <MediaImage
-                    src={
-                      a.representative_blob_hash
-                        ? blobUrl(projectId, a.representative_blob_hash)
-                        : null
-                    }
-                    alt={a.name}
-                  />
+                <div
+                  aria-hidden="true"
+                  className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-md bg-elevated text-muted-foreground"
+                >
+                  {a.representative_blob_hash ? (
+                    <MediaImage
+                      src={blobUrl(
+                        projectId,
+                        a.representative_blob_hash,
+                        "thumbnail",
+                      )}
+                      alt=""
+                      deferUntilVisible
+                    />
+                  ) : (
+                    <Icon size={20} strokeWidth={1.5} />
+                  )}
                 </div>
-                <strong>
-                  {a.name}
-                </strong>
-                <small>
-                  {tr(`asset.${a.type}`)} · {a.code}
-                </small>
-                <span className="reference-card-choice">
-                  {selected ? <><Check size={14} />已引用</> : canEdit ? <><Plus size={14} />添加引用</> : null}
+                <span className="min-w-0 flex-1">
+                  <strong className="block break-words text-sm font-medium">
+                    {label}
+                  </strong>
+                  <span className="mt-0.5 line-clamp-2 break-words text-xs font-normal text-muted-foreground">
+                    {[tr(`asset.${a.type}`), description]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
                 </span>
-              </button>
+                {selected ? (
+                  <span className="flex shrink-0 items-center gap-1 text-xs">
+                    <Check size={14} />
+                    已引用
+                  </span>
+                ) : (
+                  canEdit && (
+                    <Plus
+                      aria-hidden
+                      size={16}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                  )
+                )}
+              </Button>
             );
           })}
         </div>
@@ -329,10 +455,11 @@ export default function ShotAssetRefs({
             : "项目还没有角色或场景，可先到资产库创建。"}
         </p>
       )}
-      <p role="status" className="mt-3 text-xs text-muted-foreground">
-        {save.isPending
-          ? "正在保存参考…"
-          : `已引用 ${refs.data?.length ?? 0} 项`}
+      <p
+        role="status"
+        className="mt-3 text-xs text-muted-foreground empty:hidden"
+      >
+        {save.isPending ? "正在保存参考…" : save.isSuccess ? "已保存引用" : ""}
       </p>
     </div>
   );

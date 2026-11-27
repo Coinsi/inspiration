@@ -1,4 +1,6 @@
 import { StudioSelect } from "@/components/ui/studio-select";
+import { SelectField } from "@/components/ui/select-field";
+import { shotChoices } from "@/lib/shotLabels";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -23,7 +25,7 @@ import {
 } from "lucide-react";
 import "./director.css";
 import { navigateTabs } from "@/lib/tab-navigation";
-import { api, apiUpload, getToken } from "@/lib/api";
+import { api, apiUpload, getToken, type Shot } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
@@ -163,8 +165,7 @@ function Workspace({ projectId }: { projectId: string }) {
   });
   const shots = useQuery({
     queryKey: ["shots", projectId],
-    queryFn: () =>
-      api.get<{ id: string; title: string; code: string }[]>(root + "/shots"),
+    queryFn: () => api.get<Shot[]>(root + "/shots"),
   });
   const history = useQuery({
     queryKey: ["director-history", stage?.id, historyOffset],
@@ -1044,22 +1045,20 @@ function Workspace({ projectId }: { projectId: string }) {
                     >
                       导出运镜视频
                     </Button>
-                    <StudioSelect
-                      aria-label="参考回填镜头"
+                    <SelectField
+                      label="参考回填镜头"
+                      placeholder="选择回填镜头"
+                      searchPlaceholder="搜索镜头或场景"
+                      searchable
                       className={`${input} max-w-60`}
                       value={target}
                       disabled={busy}
-                      onValueChange={(selectedValue) =>
-                        setTarget(selectedValue)
-                      }
-                    >
-                      <option value="">选择回填镜头</option>
-                      {shots.data?.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.code} · {s.title || "未命名镜头"}
-                        </option>
-                      ))}
-                    </StudioSelect>
+                      onChange={setTarget}
+                      options={[
+                        ...(target ? [{ value: "", label: "取消选择" }] : []),
+                        ...shotChoices(shots.data ?? []),
+                      ]}
+                    />
                     <Button
                       disabled={busy || !target || dirty}
                       onClick={() =>

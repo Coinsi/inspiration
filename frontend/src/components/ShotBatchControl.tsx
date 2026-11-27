@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { SelectField } from "@/components/ui/select-field";
 import { api, type ProviderConfig, type Shot } from "@/lib/api";
+import { shotName } from "@/lib/shotLabels";
 
 type Item = {
   id: string;
@@ -238,7 +239,7 @@ export function ShotBatchControl({
                       setRequestKey(crypto.randomUUID());
                     }}
                   />
-                  {s.title || s.code}
+                  {shotName(s)}
                   {s.selected_generation_id && <small>已采用画面</small>}
                 </label>
               ))}

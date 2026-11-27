@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ImageOff } from "lucide-react";
 import { api, blobUrl, type Generation, type Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { shotName } from "@/lib/shotLabels";
 
 /** Show the selected output only. An unselected result is not an approved frame. */
 export function ShotMedia({
@@ -30,7 +31,7 @@ export function ShotMedia({
     return (
       <MediaImage
         src={blobUrl(projectId, hash, thumbnail ? "thumbnail" : "display")}
-        alt={shot.title ?? shot.code}
+        alt={shotName(shot, lang === "zh")}
         className={
           thumbnail ? "[&_span]:sr-only [&_svg]:h-4 [&_svg]:w-4" : undefined
         }
@@ -42,7 +43,7 @@ export function ShotMedia({
       <MediaVideo
         src={blobUrl(projectId, hash, "playback")}
         poster={blobUrl(projectId, hash, "thumbnail")}
-        label={shot.title ?? shot.code}
+        label={shotName(shot, lang === "zh")}
       />
     );
   }

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Undo2 } from "lucide-react";
 import { api, type SceneListItem, type Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { shotName } from "@/lib/shotLabels";
 import { refreshShotLists } from "@/components/ShotActions";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -51,7 +52,7 @@ export function RemovedShotsDialog({
   return (
     <Modal
       open
-      title={`${zh ? "已移除镜头" : "Removed shots"} · ${scene.title || scene.code}`}
+      title={`${zh ? "已移除镜头" : "Removed shots"} · ${scene.title || (zh ? `第 ${scene.ordinal} 场` : `Scene ${scene.ordinal}`)}`}
       onClose={onClose}
       width={620}
     >
@@ -126,7 +127,7 @@ export function RemovedShotsDialog({
                   {canEdit && (
                     <input
                       type="checkbox"
-                      aria-label={`${zh ? "选择" : "Select"} ${shot.title || shot.code}`}
+                      aria-label={`${zh ? "选择" : "Select"} ${shotName(shot, zh)}`}
                       checked={selectedIds.includes(shot.id)}
                       disabled={restore.isPending}
                       onChange={(e) =>
@@ -140,10 +141,10 @@ export function RemovedShotsDialog({
                   )}
                   <span className="min-w-0">
                     <strong className="block break-words font-medium">
-                      {shot.title || shot.code}
+                      {shotName(shot, zh)}
                     </strong>
                     <small className="text-muted-foreground">
-                      {shot.code} ·{" "}
+                      {zh ? "移除于 " : "Removed "}
                       {new Date(shot.deleted_at).toLocaleDateString(
                         zh ? "zh-CN" : "en-US",
                       )}
@@ -155,7 +156,7 @@ export function RemovedShotsDialog({
                     variant="ghost"
                     size="sm"
                     disabled={restore.isPending}
-                    aria-label={`${zh ? "恢复镜头" : "Restore shot"} ${shot.title || shot.code}`}
+                    aria-label={`${zh ? "恢复镜头" : "Restore shot"} ${shotName(shot, zh)}`}
                     onClick={() => restore.mutate([shot.id])}
                   >
                     {zh ? "恢复" : "Restore"}

@@ -39,6 +39,8 @@ import { Modal } from "./ui/modal";
 import { CanvasMentionInput, type MentionOption } from "./CanvasMentionInput";
 import GenerationPanel from "./GenerationPanel";
 import { CanvasMediaImport } from "./CanvasMediaImport";
+import { assetChoices } from "@/lib/assetChoices";
+import { shotChoices } from "@/lib/shotLabels";
 
 export const CanvasActions = createContext<{
   providerLabel: (name: string) => string;
@@ -531,15 +533,8 @@ export function CanvasMaterialPicker({
     [target, setTarget] = useState(""),
     [filter, setFilter] = useState("all");
   const versions = useCanvasVersions(projectId, type, target || null);
-  const objects =
-    type === "asset"
-      ? assets.map((a) => ({ id: a.id, label: a.name, code: a.code }))
-      : shots.map((s) => ({
-          id: s.id,
-          label: s.title || s.code,
-          code: s.code,
-        }));
-  const current = objects.find((o) => o.id === target);
+  const objects = type === "asset" ? assetChoices(assets) : shotChoices(shots);
+  const current = objects.find((o) => o.value === target);
   return (
     <Modal
       open
@@ -582,24 +577,24 @@ export function CanvasMaterialPicker({
           <SearchField
             className="w-full"
             label="搜索素材对象"
-            placeholder="搜索名称或编号"
+            placeholder="搜索名称、场景或描述"
             value={query}
             onValueChange={(value) => setQuery(value)}
           />
           <div className="canvas-object-list">
             {objects
               .filter((o) =>
-                (o.label + o.code).toLowerCase().includes(query.toLowerCase()),
+                [o.label, o.description, o.keywords].join(" ").toLowerCase().includes(query.trim().toLowerCase()),
               )
               .map((o) => (
                 <button
-                  key={o.id}
+                  key={o.value}
                   disabled={importBusy}
-                  aria-pressed={o.id === target}
-                  onClick={() => setTarget(o.id)}
+                  aria-pressed={o.value === target}
+                  onClick={() => setTarget(o.value)}
                 >
                   <span>{o.label}</span>
-                  <small>{o.code}</small>
+                  {o.description && <small>{o.description}</small>}
                 </button>
               ))}
             {!loading && !loadError && !objects.length && (
@@ -616,7 +611,7 @@ export function CanvasMaterialPicker({
               projectId={projectId}
               targetType={type}
               targetId={target}
-              label={current.label}
+              label={current.selectedLabel}
               onBusy={setImportBusy}
               onPick={onPick}
             />
@@ -665,7 +660,7 @@ export function CanvasMaterialPicker({
                         projectId={projectId}
                         hash={g.output_blob_hash}
                         kind={g.output_type}
-                        label={current?.label || "作品"}
+                        label={current?.selectedLabel || "作品"}
                       />
                     </div>
                     <div className="p-3">
@@ -677,7 +672,7 @@ export function CanvasMaterialPicker({
                         size="sm"
                         variant="outline"
                         disabled={importBusy}
-                        onClick={() => onPick(g, current?.label || "素材")}
+                        onClick={() => onPick(g, current?.selectedLabel || "素材")}
                       >
                         放入画布
                       </Button>

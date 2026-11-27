@@ -161,7 +161,7 @@ try {
     [asset.id],
   );
   const companionCard = button(
-    `参考资产 ${companion.name} ${companion.code}`,
+    `参考素材 ${companion.name}`,
     dialog,
   );
   await companionCard.click();

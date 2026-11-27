@@ -2,9 +2,11 @@ import { StudioSelect } from "@/components/ui/studio-select";
 import { ShotMedia } from "@/components/ShotMedia";
 import { MediaImage } from "@/components/MediaImage";
 import { ObjectPicker } from "@/components/ObjectPicker";
+import { assetChoices } from "@/lib/assetChoices";
+import { shotChoices } from "@/lib/shotLabels";
 import SkillPicker from "@/components/SkillPicker";
 import type { SkillUse } from "@/lib/skills";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Link,
@@ -31,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 
 type Target = { target_type: string; target_id: string };
+type SelectableTarget = "asset" | "shot" | "script";
 type Step = {
   id: string;
   tool: string;
@@ -132,7 +135,7 @@ export function AgentWorkspace({
   const [engine, setEngine] = useState("cloud_llm"),
     [maxTurns, setMaxTurns] = useState(12),
     [scope, setScope] = useState<Target[]>([]),
-    [scopeType, setScopeType] = useState("shot");
+    [scopeType, setScopeType] = useState<SelectableTarget>("shot");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [offset, setOffset] = useState(0);
@@ -169,30 +172,18 @@ export function AgentWorkspace({
     queryKey: ["agent-scripts", projectId],
     queryFn: () => api.get<{ id: string; title: string }[]>(`${root}/scripts`),
   });
-  const objects =
-    scopeType === "asset"
-      ? assets.data?.map((a) => ({ id: a.id, name: a.name, context: a.code }))
-      : scopeType === "script"
-        ? scripts.data?.map((s) => ({
-            id: s.id,
-            name: s.title,
-            context: "剧本",
-          }))
-        : shots.data?.map((s) => ({
-            id: s.id,
-            name: s.title || s.code,
-            context: [s.code, s.scene_title, s.novel_title, s.chapter_title]
-              .filter(Boolean)
-              .join(" · "),
-          }));
+  const options = useMemo(() => ({
+    asset: assetChoices(assets.data ?? []),
+    shot: shotChoices(shots.data ?? []),
+    script: (scripts.data ?? []).map((s) => ({
+      value: s.id, label: s.title, selectedLabel: s.title, description: "剧本",
+    })),
+  }), [assets.data, shots.data, scripts.data]);
   function objectName(t: Target) {
-    return t.target_type === "asset"
-      ? assets.data?.find((a) => a.id === t.target_id)?.name
-      : t.target_type === "script"
-        ? scripts.data?.find((s) => s.id === t.target_id)?.title
-        : shots.data
-            ?.filter((s) => s.id === t.target_id)
-            .map((s) => `${s.code} · ${s.title || "镜头"}`)[0];
+    const type = t.target_type;
+    if (type === "asset" || type === "shot" || type === "script") {
+      return options[type].find((o) => o.value === t.target_id)?.selectedLabel;
+    }
   }
   async function perform(fn: () => Promise<void>) {
     if (busy) return;
@@ -396,7 +387,7 @@ export function AgentWorkspace({
                     className={`${input} !w-auto`}
                     value={scopeType}
                     onValueChange={(selectedValue) => {
-                      setScopeType(selectedValue);
+                      setScopeType(selectedValue as SelectableTarget);
                     }}
                   >
                     <option value="shot">镜头</option>
@@ -438,7 +429,7 @@ export function AgentWorkspace({
                       void assets.refetch();
                       void scripts.refetch();
                     }}
-                    items={objects ?? []}
+                    items={options[scopeType]}
                     selected={scope
                       .filter((t) => t.target_type === scopeType)
                       .map((t) => t.target_id)}

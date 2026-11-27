@@ -1,4 +1,7 @@
 import { StudioSelect } from "@/components/ui/studio-select";
+import { SelectField } from "@/components/ui/select-field";
+import { assetChoices } from "@/lib/assetChoices";
+import { shotName, shotChoices } from "@/lib/shotLabels";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -170,11 +173,21 @@ export function CanvasInspector({
                   )}
                   <label className="block text-xs space-y-2">
                     <span>引用项目对象</span>
-                    <StudioSelect
+                    <SelectField
+                      label="引用项目对象"
                       className={field}
                       value={selected.data.target_id ?? ""}
                       disabled={busy}
-                      onValueChange={(selectedValue) => {
+                      searchable
+                      placeholder="选择项目对象"
+                      searchPlaceholder="搜索名称或描述"
+                      options={[
+                        ...(selected.data.target_id ? [{ value: "", label: "解除关联" }] : []),
+                        ...(selected.data.kind === "asset" || (selected.data.kind === "generate" && selected.data.target_type === "asset")
+                          ? assetChoices(assets.data ?? [])
+                          : shotChoices(shots.data ?? [])),
+                      ]}
+                      onChange={(selectedValue) => {
                         const id = selectedValue;
                         const item =
                           assets.data?.find((a) => a.id === id) ||
@@ -187,27 +200,12 @@ export function CanvasInspector({
                                 label:
                                   "name" in item
                                     ? item.name
-                                    : item.title || item.code,
+                                    : shotName(item),
                               }
                             : {}),
                         });
                       }}
-                    >
-                      <option value="">请选择…</option>
-                      {selected.data.kind === "asset" ||
-                      (selected.data.kind === "generate" &&
-                        selected.data.target_type === "asset")
-                        ? assets.data?.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.code} · {a.name}
-                            </option>
-                          ))
-                        : shots.data?.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.code} · {s.title}
-                            </option>
-                          ))}
-                    </StudioSelect>
+                    />
                   </label>
                   {(assets.error || shots.error) && (
                     <p role="alert" className="text-xs text-danger">

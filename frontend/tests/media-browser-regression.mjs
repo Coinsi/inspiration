@@ -211,6 +211,81 @@ async function scenario(name, run, { role = "admin", catalog = assets, allowCrea
   }
 }
 try {
+  await scenario("shot reference matching uses names and evidence and preserves saved references on retry", async ({ page }) => {
+    const project = "/projects/p";
+    const path = project + "/shots/s1";
+    const source = { type: "location", name: "部队营区", evidence: "待规划区左侧的部队营区内" };
+    const prop = { type: "prop", name: "旱烟", evidence: "老炮拿起旱烟。" };
+    const pinned = {
+      id: "old-location", asset_id: "west", role: "location", ref_mode: "pinned",
+      pinned_version_id: "v1", usage: { aspects: ["layout"], look: "", evidence: "" }, ordinal: 0,
+    };
+    const actor = { id: "old-actor", asset_id: "actor", role: "character", ref_mode: "floating", ordinal: 1 };
+    let refs = [pinned, actor];
+    let pending = [source, prop];
+    let rejectNext = true;
+    const attempts = [];
+    await page.route("**/api/v1" + path, (route) => route.fulfill({
+      json: { ...shots[0], storyboard: { unresolved_subjects: pending } },
+    }));
+    await page.route("**/api/v1" + path + "/asset-refs", (route) => {
+      if (route.request().method() === "GET") return route.fulfill({ json: refs });
+      const requested = route.request().postDataJSON().refs;
+      attempts.push(requested);
+      if (rejectNext) {
+        rejectNext = false;
+        return route.fulfill({ status: 409, json: { error: { message: "引用保存失败，请重试" } } });
+      }
+      refs = requested.map((r, i) => ({ ...r, id: refs[i].id, ordinal: i }));
+      pending = [prop];
+      return route.fulfill({ json: refs });
+    });
+    await page.goto(base + project + "/shots?shot=s1&tab=refs");
+    const dialog = page.getByRole("dialog");
+    const choose = dialog.getByRole("button", { name: "为部队营区选择场景" });
+    const search = dialog.getByRole("combobox", { name: "搜索场景名称或描述" });
+    await choose.click();
+    const menu = dialog.getByRole("listbox");
+    assert.deepEqual(await menu.getByRole("option").allTextContents(), ["营房西坡驻地", "营房沿河驻地"]);
+    assert.equal(await menu.locator('[aria-selected="true"]').count(), 0);
+    await search.fill("LOC-0012");
+    assert.equal(await menu.getByRole("option").count(), 1);
+    await search.fill("沿河");
+    await menu.getByRole("option", { name: /沿河驻地/ }).waitFor();
+    await page.screenshot({ path: out + "/shot-references-desktop.png" });
+    await search.press("Escape");
+    assert.equal(attempts.length, 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await choose.click();
+    await search.fill("西坡");
+    await page.screenshot({ path: out + "/shot-references-mobile.png" });
+    const bounds = await menu.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390);
+    await search.press("Enter");
+    await dialog.getByRole("alert").waitFor();
+    await choose.click();
+    await dialog.getByRole("option", { name: /营房.*西坡驻地/ }).click();
+    await choose.waitFor({ state: "detached" });
+    assert.equal(attempts.length, 2);
+    assert.deepEqual(attempts[0], attempts[1]);
+    assert.deepEqual(attempts[1].map((r) => r.asset_id), ["west", "actor"]);
+    assert.equal(attempts[1][0].resolves_subject, source.name);
+    assert.equal(attempts[1][0].pinned_version_id, "v1");
+    assert.deepEqual(attempts[1][0].usage, pinned.usage);
+    assert.equal(await dialog.getByRole("alert").count(), 0);
+    await dialog.getByRole("button", { name: "完成", exact: true }).click();
+    await page.getByRole("tab", { name: "参考素材", exact: true }).click();
+    await dialog.getByRole("button", { name: "移除引用 营房 · 西坡驻地" }).waitFor();
+    await dialog.getByText("项目中暂无可选的道具").waitFor();
+    assert.equal(await choose.count(), 0);
+    assert.doesNotMatch(await dialog.innerText(), /LOC-00|CH-00/);
+    assert.doesNotMatch((await dialog.locator("[aria-label]").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")))).join(" "), /LOC-00|CH-00/);
+  }, { catalog: [
+    { ...asset("west", "营房"), type: "location", code: "LOC-0012", summary: "西坡驻地", current_version_id: "v1" },
+    { ...asset("east", "营房"), type: "location", code: "LOC-0013", summary: "沿河驻地" },
+    { ...asset("actor", "老炮"), code: "CH-0012" },
+  ] });
+
   await scenario(
     "asset sorting, profile navigation, scoped page selection and empty search",
     async ({ page, writes }) => {

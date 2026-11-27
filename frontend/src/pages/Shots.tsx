@@ -531,7 +531,7 @@ function ShotsWorkspace() {
                             </button>
                             <div className="flex justify-end border-t px-1">
                               <ShotActions projectId={projectId!} shot={s} source="status" canEdit={canEdit}
-                                onRename={() => setRenaming(s)} onRemove={() => void removal.remove([s], s.scene_title || s.scene_code || "")} />
+                                onRename={() => setRenaming(s)} onRemove={() => void removal.remove([s], s.scene_title || "")} />
                             </div>
                           </div>
                         ))}

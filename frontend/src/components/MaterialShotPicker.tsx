@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useShotContext } from "@/lib/useShotContext";
+import { shotName } from "@/lib/shotLabels";
 import { Check, ChevronRight, Film } from "lucide-react";
 import { type Shot } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -37,7 +38,6 @@ export function MaterialShotPicker({
   const sceneName = (s: Shot) =>
     s.scene_title ||
     context.data?.scenes[s.scene_id]?.scene.title ||
-    s.scene_code ||
     (zh ? "未命名场景" : "Untitled scene");
   const scriptName = (s: Shot) =>
     context.data?.scenes[s.scene_id]?.script.title ||
@@ -53,8 +53,6 @@ export function MaterialShotPicker({
     (s.novel_title
       ? `${zh ? "故事" : "Story"} · ${s.novel_title}`
       : scriptName(s));
-  const shotName = (s: Shot) =>
-    s.title || (zh ? `镜头 ${s.ordinal}` : `Shot ${s.ordinal}`);
   const matches = shots.filter(
     (s) =>
       (!scriptId ||
@@ -62,7 +60,7 @@ export function MaterialShotPicker({
           ? !context.data?.scenes[s.scene_id]
           : context.data?.scenes[s.scene_id]?.script.id === scriptId)) &&
       [
-        shotName(s),
+        shotName(s, zh),
         s.description,
         s.code,
         sceneName(s),
@@ -90,7 +88,7 @@ export function MaterialShotPicker({
         <span>
           <strong>
             {saved
-              ? shotName(saved)
+              ? shotName(saved, zh)
               : zh
                 ? "选择用在哪个镜头"
                 : "Choose a shot"}
@@ -192,7 +190,7 @@ export function MaterialShotPicker({
                     key={s.id}
                     className="material-shot-option"
                     aria-pressed={candidate === s.id}
-                    aria-label={`${sourceName(s)} / ${sceneName(s)} / ${shotName(s)} · ${s.code}`}
+                    aria-label={`${sourceName(s)} / ${sceneName(s)} / ${zh ? `第 ${s.ordinal} 镜` : `Shot ${s.ordinal}`} · ${shotName(s, zh)}`}
                     onClick={() => setCandidate(s.id)}
                   >
                     <span className="material-shot-thumb">
@@ -209,7 +207,7 @@ export function MaterialShotPicker({
                       <small>
                         {sourceName(s)} / {sceneName(s)}
                       </small>
-                      <strong>{shotName(s)}</strong>
+                      <strong>{shotName(s, zh)}</strong>
                       <span>
                         {s.description ||
                           (zh
@@ -264,8 +262,8 @@ export function MaterialShotPicker({
                   </p>
                 )}
                 <div className="material-shot-inspect-title">
-                  <h3>{shotName(chosen)}</h3>
-                  <span>{chosen.code}</span>
+                  <h3>{shotName(chosen, zh)}</h3>
+                  {chosen.title && <span>{zh ? `第 ${chosen.ordinal} 镜` : `Shot ${chosen.ordinal}`}</span>}
                 </div>
                 <dl>
                   <div>

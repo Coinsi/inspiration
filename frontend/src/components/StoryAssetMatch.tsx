@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { assetChoices } from "@/lib/assetChoices";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -84,18 +85,17 @@ export function StoryAssetMatch({
           <p className="text-sm text-muted-foreground">未找到匹配的资产。</p>
         )}
         {search.error && <p role="alert">{search.error.message}</p>}
-        {candidates.map((a) => (
+        {assetChoices(candidates).map(({ asset, label }) => (
           <button
             type="button"
-            key={a.id}
+            key={asset.id}
             disabled={busy}
             className="block w-full rounded-lg border px-3 py-2 text-left hover:bg-muted"
-            onClick={() => choose(a.id)}
+            onClick={() => choose(asset.id)}
           >
-            <strong>{a.name}</strong>
-            <small className="ml-2 text-muted-foreground">{a.code}</small>
-            {a.summary && (
-              <p className="text-sm text-muted-foreground">{a.summary}</p>
+            <strong>{label}</strong>
+            {asset.summary && (
+              <p className="text-sm text-muted-foreground">{asset.summary}</p>
             )}
           </button>
         ))}
